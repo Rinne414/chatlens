@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { readJson, escapeHtml, fileUrl, isImagePath, isVideoPath } = require("./report_utils");
+const { readLlmError, readLlmUnused } = require("./llm_status");
 
 const parseArgs = (argv) => {
   if (argv.length !== 4) {
@@ -25,11 +26,17 @@ const loadGroupAnalyses = (runDir) => {
     .readdirSync(groupsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
-      const analysisPath = path.join(groupsDir, entry.name, "analysis.json");
+      const groupDir = path.join(groupsDir, entry.name);
+      const analysisPath = path.join(groupDir, "analysis.json");
       if (!fs.existsSync(analysisPath)) {
         return null;
       }
-      return { groupId: entry.name, analysis: readJson(analysisPath) };
+      return {
+        groupId: entry.name,
+        analysis: readJson(analysisPath),
+        llmError: readLlmError(groupDir),
+        llmUnused: readLlmUnused(groupDir) !== null,
+      };
     })
     .filter((item) => item !== null);
 };
@@ -78,7 +85,16 @@ const llmBasisNote = (llm, total) => {
     : null;
 };
 
-const buildGroupView = (groupId, analysis, manifest) => {
+const llmChipLabel = (group) =>
+  group.llm !== null ? "LLM" : group.llmError ? "LLM 失败" : group.llmUnused ? "本地" : "无法判断";
+
+const llmChipClass = (group) =>
+  group.llm !== null ? "ok" : group.llmError ? "risk" : "warn";
+
+const llmDetailLabel = (group) =>
+  group.llm !== null ? "LLM 主题" : group.llmError ? "LLM 失败" : group.llmUnused ? "本地分组" : "无法判断 LLM";
+
+const buildGroupView = (groupId, analysis, manifest, llmError = null, llmUnused = false) => {
   const name = analysis.groupNames?.[groupId] || groupId;
   const llm = analysis.llmSummary ?? null;
   const mediaItems = manifest
@@ -101,6 +117,8 @@ const buildGroupView = (groupId, analysis, manifest) => {
     firstHkt: analysis.firstMessageHkt ?? null,
     lastHkt: analysis.lastMessageHkt ?? null,
     llm,
+    llmError: llm !== null ? null : llmError,
+    llmUnused: llm !== null || llmError ? false : llmUnused === true,
     summaryLine: llm?.summary ?? (localTopicLine(analysis) || "本时段没有可归纳的文本消息。"),
     localTopics: analysis.topics ?? [],
     topSpeakers: (analysis.topSpeakers ?? []).slice(0, 5),
@@ -166,12 +184,28 @@ const uncategorizedMarkdown = (group) =>
     .map((item) => `- [${item.hkt}] ${item.speaker}: ${item.note}`)
     .join("\n");
 
+const NEW_THING_LABELS = { model: "模型", tool: "工具", tutorial: "教程", resource: "资源", news: "新闻", event: "活动", other: "其他" };
+
+const newThingLineMarkdown = (item) =>
+  `- [${item.groupName}] ${NEW_THING_LABELS[item.kind] ?? "其他"}·${item.name}: ${item.detail}${item.link ? `（${item.link}）` : ""}`;
+
+const qaLineMarkdown = (item) =>
+  `- [${item.groupName}] 问: ${item.question}｜答: ${item.answer ?? "暂无回答"}`;
+
+// Schema-v3 summaries no longer produce actions/risks, so those sections
+// only appear when an (older) summary actually has entries.
+const optionalMarkdownSection = (title, lines) =>
+  lines.length === 0 ? [] : [`## ${title}`, "", lines.join("\n"), ""];
+
+const mergedHighlights = (groups) => ({
+  newThings: mergeFromGroups(groups, (group) => group.llm?.newThings),
+  qa: mergeFromGroups(groups, (group) => group.llm?.qa),
+  actions: sortActionsOpenFirst(mergeFromGroups(groups, (group) => group.llm?.actions)),
+  risks: sortByImportance(mergeFromGroups(groups, (group) => group.llm?.risks), (item) => item.severity),
+});
+
 const writeMarkdown = (combined, groups, outputPath) => {
-  const actions = sortActionsOpenFirst(mergeFromGroups(groups, (group) => group.llm?.actions));
-  const risks = sortByImportance(
-    mergeFromGroups(groups, (group) => group.llm?.risks),
-    (item) => item.severity,
-  );
+  const { newThings, qa, actions, risks } = mergedHighlights(groups);
   const sections = [
     "# QQ 多群摘要",
     "",
@@ -187,14 +221,10 @@ const writeMarkdown = (combined, groups, outputPath) => {
       .map((group) => `- ${group.label} — 文本 ${group.textMessages} · 媒体 ${group.mediaMessages}: ${group.summaryLine}`)
       .join("\n"),
     "",
-    "## 待处理事项（全部群）",
-    "",
-    actions.map(actionLineMarkdown).join("\n") || "- 无",
-    "",
-    "## 风险点（全部群）",
-    "",
-    risks.map((item) => `- [${item.groupName}] ${item.severity}: ${item.risk}｜证据: ${item.evidence}`).join("\n") || "- 无",
-    "",
+    ...optionalMarkdownSection("新东西（全部群）", newThings.map(newThingLineMarkdown)),
+    ...optionalMarkdownSection("问答（全部群）", qa.map(qaLineMarkdown)),
+    ...optionalMarkdownSection("待处理事项（全部群）", actions.map(actionLineMarkdown)),
+    ...optionalMarkdownSection("风险点（全部群）", risks.map((item) => `- [${item.groupName}] ${item.severity}: ${item.risk}｜证据: ${item.evidence}`)),
     "## 各群详情",
     "",
     groups
@@ -202,7 +232,7 @@ const writeMarkdown = (combined, groups, outputPath) => {
         [
           `### ${group.label}`,
           "",
-          `- 文本 ${group.textMessages} · 媒体 ${group.mediaMessages} · ${group.llm !== null ? "LLM 主题" : "本地分组"}`,
+          `- 文本 ${group.textMessages} · 媒体 ${group.mediaMessages} · ${llmDetailLabel(group)}`,
           `- 时间: ${group.firstHkt ?? "无"} 至 ${group.lastHkt ?? "无"}`,
           "",
           topicMarkdown(group) || "- 无",
@@ -233,7 +263,7 @@ const renderOverviewCards = (groups) =>
         <div class="card-metrics">
           <span>文本 ${escapeHtml(group.textMessages)}</span>
           <span>媒体 ${escapeHtml(group.mediaMessages)}</span>
-          <span class="${group.llm !== null ? "ok" : "warn"}">${group.llm !== null ? "LLM" : "本地"}</span>
+          <span class="${llmChipClass(group)}">${escapeHtml(llmChipLabel(group))}</span>
         </div>
         <p>${escapeHtml(group.summaryLine)}</p>
       </a>`,
@@ -342,7 +372,7 @@ const renderGroupSection = (group) => `
         `文本 ${group.textMessages}`,
         `媒体 ${group.mediaMessages}`,
         `${group.firstHkt ?? "无"} - ${group.lastHkt ?? "无"}`,
-        group.llm !== null ? "LLM 主题" : "本地分组",
+        llmDetailLabel(group),
         ...(group.llmBasisNote !== null ? [group.llmBasisNote] : []),
       ])}
     </div>
@@ -370,13 +400,12 @@ const renderGroupSection = (group) => `
     }
   </section>`;
 
+const optionalHtmlSection = (title, items, renderItem) =>
+  items.length === 0 ? "" : `<section><h2>${escapeHtml(title)}</h2>${renderMergedList(items, renderItem)}</section>`;
+
 const writeHtml = (combined, groups, outputMarkdown) => {
   const htmlPath = outputMarkdown.replace(/\.md$/iu, ".html");
-  const actions = sortActionsOpenFirst(mergeFromGroups(groups, (group) => group.llm?.actions));
-  const risks = sortByImportance(
-    mergeFromGroups(groups, (group) => group.llm?.risks),
-    (item) => item.severity,
-  );
+  const { newThings, qa, actions, risks } = mergedHighlights(groups);
   const html = `<!doctype html>
 <html lang="zh-Hans">
 <head>
@@ -402,6 +431,7 @@ const writeHtml = (combined, groups, outputMarkdown) => {
     .card-metrics span { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
     .card-metrics .ok { color: var(--ok); }
     .card-metrics .warn { color: var(--warn); }
+    .card-metrics .risk { color: var(--risk); }
     .card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin: 16px 0; padding: 18px; }
     h2 { margin: 0 0 12px; font-size: 18px; }
@@ -460,22 +490,30 @@ const writeHtml = (combined, groups, outputMarkdown) => {
       ? `<section style="border-color:var(--risk)"><h2 style="color:var(--risk)">⚠ 扫描不完整</h2><p>${escapeHtml(scanWarningText(combined))}</p></section>`
       : ""}
     <div class="cards">${renderOverviewCards(groups)}</div>
-    <section>
-      <h2>待处理事项（全部群）</h2>
-      ${renderMergedList(
-        actions,
-        (item) =>
-          `<span class="group-tag">[${escapeHtml(item.groupName)}]</span><strong class="action-item">${item.status === "resolved" ? "✅" : "⏳"} ${escapeHtml(item.owner ?? "未指定")}</strong>${escapeHtml(item.task)}${item.resolution ? `<br><time>结果: ${escapeHtml(item.resolution)}</time>` : ""}<br><time>证据: ${escapeHtml(item.evidence)}</time>`,
-      )}
-    </section>
-    <section>
-      <h2>风险点（全部群）</h2>
-      ${renderMergedList(
-        risks,
-        (item) =>
-          `<span class="group-tag">[${escapeHtml(item.groupName)}]</span><strong class="risk-item">${escapeHtml(item.severity)}</strong>${escapeHtml(item.risk)}<br><time>证据: ${escapeHtml(item.evidence)}</time>`,
-      )}
-    </section>
+    ${optionalHtmlSection(
+      "新东西（全部群）",
+      newThings,
+      (item) =>
+        `<span class="group-tag">[${escapeHtml(item.groupName)}]</span><strong class="action-item">${escapeHtml(NEW_THING_LABELS[item.kind] ?? "其他")} · ${escapeHtml(item.name)}</strong>${escapeHtml(item.detail)}${item.link ? `<br><a href="${escapeHtml(item.link)}">${escapeHtml(item.link)}</a>` : ""}`,
+    )}
+    ${optionalHtmlSection(
+      "问答（全部群）",
+      qa,
+      (item) =>
+        `<span class="group-tag">[${escapeHtml(item.groupName)}]</span><strong class="action-item">问</strong>${escapeHtml(item.question)}<br><strong class="action-item">答</strong>${escapeHtml(item.answer ?? "暂无回答")}`,
+    )}
+    ${optionalHtmlSection(
+      "待处理事项（全部群）",
+      actions,
+      (item) =>
+        `<span class="group-tag">[${escapeHtml(item.groupName)}]</span><strong class="action-item">${item.status === "resolved" ? "✅" : "⏳"} ${escapeHtml(item.owner ?? "未指定")}</strong>${escapeHtml(item.task)}${item.resolution ? `<br><time>结果: ${escapeHtml(item.resolution)}</time>` : ""}<br><time>证据: ${escapeHtml(item.evidence)}</time>`,
+    )}
+    ${optionalHtmlSection(
+      "风险点（全部群）",
+      risks,
+      (item) =>
+        `<span class="group-tag">[${escapeHtml(item.groupName)}]</span><strong class="risk-item">${escapeHtml(item.severity)}</strong>${escapeHtml(item.risk)}<br><time>证据: ${escapeHtml(item.evidence)}</time>`,
+    )}
     ${groups.map(renderGroupSection).join("")}
   </main>
 </body>
@@ -493,6 +531,7 @@ const writeDigestJson = (combined, groups, runDir) => {
     textMessages: combined.parsedTextMessages ?? 0,
     mediaMessages: combined.parsedMediaMessages ?? 0,
     llmGroups: groups.filter((group) => group.llm !== null).length,
+    llmFailedGroups: groups.filter((group) => group.llm === null && group.llmError).length,
     overview: groups.map((group) => `${group.name}: ${group.summaryLine}`).join("；"),
     groups: groups.map((group) => ({
       groupId: group.groupId,
@@ -500,6 +539,7 @@ const writeDigestJson = (combined, groups, runDir) => {
       textMessages: group.textMessages,
       mediaMessages: group.mediaMessages,
       llmUsed: group.llm !== null,
+      llmFailed: group.llm === null && Boolean(group.llmError),
       summary: group.summaryLine,
     })),
   };
@@ -519,7 +559,8 @@ const main = () => {
   }
 
   const groups = groupAnalyses
-    .map(({ groupId, analysis }) => buildGroupView(groupId, analysis, manifest))
+    .map(({ groupId, analysis, llmError, llmUnused }) =>
+      buildGroupView(groupId, analysis, manifest, llmError, llmUnused))
     .sort((left, right) => right.textMessages - left.textMessages);
 
   writeMarkdown(combined, groups, args.outputMarkdown);

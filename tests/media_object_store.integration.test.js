@@ -8,7 +8,11 @@ const path = require("node:path");
 const test = require("node:test");
 const zlib = require("node:zlib");
 const { openKnowledgeStore, recordPromptRequest, upsertImage } = require("../src/knowledge_store");
-const { synchronizeManifestMedia } = require("../src/media_object_store");
+const {
+  backfillHarvestedMediaObjects,
+  backfillMissingMediaObjects,
+  synchronizeManifestMedia,
+} = require("../src/media_object_store");
 const knowledge = require("../src/server/knowledge_ops");
 
 const crcTable = (() => {
@@ -217,4 +221,105 @@ test("a hash mismatch is recorded and never enters the durable store", (t) => {
   const manifest = JSON.parse(fs.readFileSync(fixture.manifestPath, "utf8"));
   assert.equal(manifest[0].objectStatus, "hash-mismatch");
   assert.match(manifest[0].actualHash, /^[a-f0-9]{32}$/u);
+});
+
+test("backfill copies Ori for already-harvested rows with empty object_path", (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.toolRoot, { recursive: true, force: true }));
+  const oriPath = path.join(fixture.toolRoot, "nt_data", "Pic", "2026-08", "Ori", "tmp.png");
+  writePng(oriPath, "1girl, solo\nNegative prompt: low quality\nSteps: 20, Sampler: Euler, Model: testModel");
+  const hash = crypto.createHash("md5").update(fs.readFileSync(oriPath)).digest("hex");
+  const dest = path.join(path.dirname(oriPath), `${hash}.png`);
+  fs.renameSync(oriPath, dest);
+  const db = openKnowledgeStore(fixture.knowledgeStorePath);
+  upsertImage(db, imageRecord(hash));
+  db.prepare("UPDATE images SET file_path = ? WHERE hash = ?").run(dest, hash);
+  db.close();
+
+  const stats = backfillHarvestedMediaObjects({
+    knowledgeStorePath: fixture.knowledgeStorePath,
+    objectDir: fixture.objectDir,
+    ntDataDir: path.join(fixture.toolRoot, "nt_data"),
+  });
+
+  assert.equal(stats.needed, 1);
+  assert.equal(stats.candidates, 1);
+  assert.equal(stats.durableStored, 1);
+  const check = openKnowledgeStore(fixture.knowledgeStorePath);
+  const row = check.prepare("SELECT object_path FROM images WHERE hash = ?").get(hash);
+  check.close();
+  assert.equal(fs.existsSync(row.object_path), true);
+  assert.notEqual(path.resolve(row.object_path), path.resolve(dest));
+});
+
+test("run-copy backfill covers harvested rows that still have a file_path", (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.toolRoot, { recursive: true, force: true }));
+  const copiedPath = path.join(path.dirname(fixture.manifestPath), "image", "kept.png");
+  writePng(copiedPath, null);
+  const hash = crypto.createHash("md5").update(fs.readFileSync(copiedPath)).digest("hex");
+  const db = openKnowledgeStore(fixture.knowledgeStorePath);
+  upsertImage(db, imageRecord(hash));
+  db.prepare("UPDATE images SET file_path = ?, file_missing = 0 WHERE hash = ?")
+    .run(path.join(fixture.toolRoot, "nt_data", "Pic", "2025-01", "Ori", `${hash}.png`), hash);
+  db.close();
+  writeManifest(fixture, {
+    rowId: "13",
+    sentAt: 103,
+    groupId: "1001",
+    groupName: "Group",
+    speaker: "User",
+    kind: "image",
+    hash,
+    copiedPath,
+    remoteStatus: "downloaded",
+  });
+
+  const stats = backfillMissingMediaObjects({
+    toolRoot: fixture.toolRoot,
+    runsDir: path.join(fixture.toolRoot, "runs"),
+    objectDir: fixture.objectDir,
+    knowledgeStorePath: fixture.knowledgeStorePath,
+  });
+
+  assert.equal(stats.needed, 1);
+  assert.equal(stats.stored, 1);
+  const check = openKnowledgeStore(fixture.knowledgeStorePath);
+  const row = check.prepare("SELECT object_path FROM images WHERE hash = ?").get(hash);
+  check.close();
+  assert.equal(fs.existsSync(row.object_path), true);
+});
+
+test("an extensionless run copy is skipped instead of aborting backfill", (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.toolRoot, { recursive: true, force: true }));
+  const copiedPath = path.join(path.dirname(fixture.manifestPath), "image", "noext");
+  writePng(copiedPath, null);
+  const hash = crypto.createHash("md5").update(fs.readFileSync(copiedPath)).digest("hex");
+  const db = openKnowledgeStore(fixture.knowledgeStorePath);
+  upsertImage(db, imageRecord(hash));
+  db.close();
+  writeManifest(fixture, {
+    rowId: "14",
+    sentAt: 104,
+    groupId: "1001",
+    groupName: "Group",
+    speaker: "User",
+    kind: "image",
+    hash,
+    copiedPath,
+    remoteStatus: "downloaded",
+  });
+
+  const stats = backfillMissingMediaObjects({
+    toolRoot: fixture.toolRoot,
+    runsDir: path.join(fixture.toolRoot, "runs"),
+    objectDir: fixture.objectDir,
+    knowledgeStorePath: fixture.knowledgeStorePath,
+  });
+
+  assert.equal(stats.integrityRejected, 1);
+  const check = openKnowledgeStore(fixture.knowledgeStorePath);
+  assert.equal(check.prepare("SELECT object_path FROM images WHERE hash = ?").get(hash).object_path, "");
+  check.close();
 });

@@ -3,6 +3,11 @@ const path = require("node:path");
 const { readJson } = require("../report_utils");
 const { collectRun, collectRuns, pathExists, dirSize, parseRunTimestamp } = require("../run_index");
 const messageStore = require("../message_store");
+const { summarizeCatchup } = require("../run_catchup");
+const { normalizeLlmError, readLlmError, readLlmUnused } = require("../llm_status");
+const { resolvePasteCursor: resolvePasteCursorMatch } = require("../paste_cursor");
+const { formatHkt } = require("../unviewed_range");
+const picksExport = require("../picks_export");
 
 const toolRoot = path.resolve(__dirname, "..", "..");
 const configPath = path.join(toolRoot, "config", "defaults.json");
@@ -202,7 +207,7 @@ const getState = () => {
     groupActivity: getGroupActivity(),
     runDefaults: config.runDefaults ?? {},
     knownGroups: getKnownGroups(config),
-    runs: collectRuns(config.runsDir, config.reportsDir).map((run) => ({
+    runs: collectRuns(config.runsDir, config.reportsDir, { includeDisk: false }).map((run) => ({
       ...run,
       // Absolute paths stay for /api/open; webPath is what the UI links to.
       runId: run.runId,
@@ -225,6 +230,26 @@ const trimTopic = (topic) => ({
   sampleMessages: (topic.sampleMessages ?? []).slice(-8),
 });
 
+const withLlmSummary = (analysisDir, analysis) => {
+  let next = analysis;
+  if (!(analysis?.llmSummary && String(analysis.llmSummary.summary ?? "").trim() !== "")) {
+    const llmPath = path.join(analysisDir, "llm-summary.json");
+    if (pathExists(llmPath)) {
+      next = { ...next, llmSummary: readJson(llmPath) };
+    }
+  }
+  const usedLlm = next?.llmSummary && String(next.llmSummary.summary ?? "").trim() !== "";
+  if (!usedLlm) {
+    const llmError = readLlmError(analysisDir);
+    if (llmError !== null) {
+      next = { ...next, llmError, llmUnused: false };
+    } else if (readLlmUnused(analysisDir) !== null) {
+      next = { ...next, llmUnused: true };
+    }
+  }
+  return next;
+};
+
 const groupViewFromAnalysis = (groupId, analysis) => ({
   groupId,
   name: analysis.groupNames?.[groupId] || groupId,
@@ -233,6 +258,8 @@ const groupViewFromAnalysis = (groupId, analysis) => ({
   firstHkt: analysis.firstMessageHkt ?? null,
   lastHkt: analysis.lastMessageHkt ?? null,
   llmSummary: analysis.llmSummary ?? null,
+  llmError: analysis.llmSummary ? null : normalizeLlmError(analysis.llmError),
+  llmUnused: Boolean(analysis.llmSummary || analysis.llmError) ? false : analysis.llmUnused === true,
   localTopics: (analysis.topics ?? [])
     .filter((topic) => topic.count > 0 && topic.id !== "media")
     .slice(0, 10)
@@ -253,19 +280,23 @@ const getRunDetail = (runId) => {
     throw new Error(`Run not found: ${runId}`);
   }
 
-  const combined = readJson(analysisPath);
-  const digestPath = path.join(runDir, "analysis", "digest.json");
+  const analysisDir = path.join(runDir, "analysis");
+  const combined = withLlmSummary(analysisDir, readJson(analysisPath));
+  const digestPath = path.join(analysisDir, "digest.json");
   const digest = pathExists(digestPath) ? readJson(digestPath) : null;
 
-  const groupsDir = path.join(runDir, "analysis", "groups");
+  const groupsDir = path.join(analysisDir, "groups");
   let groups;
   if (pathExists(groupsDir)) {
     groups = fs
       .readdirSync(groupsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => {
-        const groupAnalysisPath = path.join(groupsDir, entry.name, "analysis.json");
-        return pathExists(groupAnalysisPath) ? groupViewFromAnalysis(entry.name, readJson(groupAnalysisPath)) : null;
+        const groupDir = path.join(groupsDir, entry.name);
+        const groupAnalysisPath = path.join(groupDir, "analysis.json");
+        return pathExists(groupAnalysisPath)
+          ? groupViewFromAnalysis(entry.name, withLlmSummary(groupDir, readJson(groupAnalysisPath)))
+          : null;
       })
       .filter((group) => group !== null)
       .sort((left, right) => right.textMessages - left.textMessages);
@@ -303,6 +334,17 @@ const getRunDetail = (runId) => {
     textMessages: combined.parsedTextMessages ?? 0,
     mediaMessages: combined.parsedMediaMessages ?? 0,
     digest,
+    catchup: summarizeCatchup({
+      runId,
+      textMessages: combined.parsedTextMessages ?? 0,
+      mediaMessages: combined.parsedMediaMessages ?? 0,
+      firstHkt: combined.firstMessageHkt ?? null,
+      lastHkt: combined.lastMessageHkt ?? null,
+      digest,
+      groups,
+      scanCoverage: runMeta.scanCoverage,
+      aiCoverage: runMeta.aiCoverage,
+    }),
     groups,
     media,
     scanCoverage: runMeta.scanCoverage,
@@ -313,6 +355,22 @@ const getRunDetail = (runId) => {
 const parseUnixParam = (value) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+const resolvePasteCursor = (body) => {
+  const requested = Array.isArray(body?.groupIds)
+    ? body.groupIds.map(String).filter((id) => /^\d+$/u.test(id))
+    : [];
+  const preferredGroupIds = requested.length > 0
+    ? requested
+    : normalizeWatchlist(loadConfig()).map((entry) => entry.groupId);
+  return resolvePasteCursorMatch({
+    db: getStore(),
+    startPaste: body?.startPaste ?? "",
+    endPaste: body?.endPaste ?? "",
+    preferredGroupIds,
+    formatHkt,
+  });
 };
 
 const getStoreMessages = (query) => {
@@ -537,6 +595,37 @@ const resolveMediaExportDir = (config, existingFolder) => {
     throw new Error(`Media export folder does not exist: ${resolved}`);
   }
   return resolved;
+};
+
+const listGalleryPicks = () => {
+  const config = loadConfig();
+  return picksExport.listPicks(toolRoot, config.reportsDir);
+};
+
+const saveGalleryPicks = (webPaths) => {
+  if (!Array.isArray(webPaths) || webPaths.length === 0) {
+    throw new Error("没有选中任何媒体文件。");
+  }
+  const config = loadConfig();
+  const byPath = new Map((buildMediaIndex().items ?? []).map((item) => [item.webPath, item]));
+  const items = webPaths.map((webPath) => {
+    const meta = byPath.get(webPath) ?? {};
+    return {
+      sourcePath: resolveRunsWebPath(webPath),
+      webPath,
+      contentKey: meta.contentKey ?? "",
+      groupId: meta.groupId ?? "",
+      groupName: meta.groupName ?? "",
+      speaker: meta.speaker ?? "",
+      hkt: meta.hkt ?? "",
+      kind: meta.kind ?? "file",
+    };
+  });
+  return picksExport.savePicks({
+    toolRoot,
+    reportsDir: config.reportsDir,
+    items,
+  });
 };
 
 const exportMediaSelection = (webPaths, existingFolder) => {
@@ -784,6 +873,7 @@ const isPathAllowedToOpen = (targetPath) => {
 module.exports = {
   toolRoot,
   configPath,
+  getStore,
   loadConfig,
   loadRawConfig,
   writeConfig,
@@ -798,14 +888,18 @@ module.exports = {
   getRunDetail,
   isPathAllowedToOpen,
   getStoreMessages,
+  resolvePasteCursor,
   getStoreOverview,
   getStoreTimeline,
   getGalleryRange,
   getGalleryEventActivity,
   saveReadMark,
+  advanceLocalReadMarks: (groupIds) => messageStore.advanceLocalReadMarks(getStore(), groupIds),
   buildMediaIndex,
   finalizeMediaIndex,
   prepareQuickSummary,
   exportMediaSelection,
+  listGalleryPicks,
   resolveKnowledgeExportDir,
+  saveGalleryPicks,
 };

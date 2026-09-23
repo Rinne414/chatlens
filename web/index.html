@@ -4,24 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="cc-token" content="__CC_TOKEN__">
-  <title>QQ 摘要控制台</title>
+  <meta name="theme-color" content="#1565c0">
+  <title>QQ 群消息简报</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/brief.css">
 </head>
 <body>
   <div class="shell">
     <aside class="rail">
       <div class="brand">
         <span class="brand-mark">QQ</span>
-        <span class="brand-text">摘要控制台</span>
+        <span class="brand-text">群消息简报</span>
       </div>
       <nav id="nav">
-        <button data-view="run" class="active">运行</button>
+        <button data-view="brief" class="active">简报</button>
         <button data-view="messages">消息</button>
-        <button data-view="history">历史报告</button>
         <button data-view="media">画廊</button>
         <button data-view="knowledge">咒语库</button>
-        <button data-view="watchlist">关注群</button>
-        <button data-view="storage">存储</button>
         <button data-view="settings">设置</button>
       </nav>
       <div class="rail-foot">
@@ -33,10 +35,11 @@
     </aside>
     <main>
       <header class="topbar">
-        <h1 id="view-title">运行</h1>
+        <h1 id="view-title">简报</h1>
         <button id="job-pill" class="job-pill idle" hidden></button>
       </header>
-      <div id="view-run" class="view"></div>
+      <div id="view-brief" class="view"></div>
+      <div id="view-run" class="view" hidden></div>
       <div id="view-messages" class="view" hidden></div>
       <div id="view-history" class="view" hidden></div>
       <div id="view-media" class="view" hidden></div>
@@ -58,5 +61,6 @@
   <script src="/knowledge.js"></script>
   <script src="/storage.js"></script>
   <script src="/settings.js"></script>
+  <script src="/brief.js"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { llmAbsentSummary, readLlmError, readLlmUnused } = require("./llm_status");
 
 const parseArgs = (argv) => {
   if (argv.length !== 5) {
@@ -271,7 +272,10 @@ const writeMarkdownReport = (analysis, lines, outputPath, mediaReport) => {
     "",
     "## LLM 动态摘要",
     "",
-    analysis.llmSummary?.summary ?? "- 未启用 LLM；这里只包含本地动态分组和统计。",
+    analysis.llmSummary?.summary ?? llmAbsentSummary(analysis.llmError, {
+      markdown: true,
+      unused: Boolean(analysis.llmUnused),
+    }),
     ...(llmBasisText(analysis) !== null ? ["", `> ℹ ${llmBasisText(analysis)}`] : []),
     "",
     "## LLM 动态主题",
@@ -286,14 +290,10 @@ const writeMarkdownReport = (analysis, lines, outputPath, mediaReport) => {
     "",
     uncategorizedMarkdown(analysis.llmSummary) || "- 无",
     "",
-    "## 待处理事项",
-    "",
-    actionMarkdown(analysis.llmSummary?.actions) || "- 无",
-    "",
-    "## 风险点",
-    "",
-    riskMarkdown(analysis.llmSummary?.risks) || "- 无",
-    "",
+    ...optionalSection("新东西", newThingMarkdown(analysis.llmSummary?.newThings)),
+    ...optionalSection("问答", qaMarkdown(analysis.llmSummary?.qa)),
+    ...optionalSection("待处理事项", actionMarkdown(analysis.llmSummary?.actions)),
+    ...optionalSection("风险点", riskMarkdown(analysis.llmSummary?.risks)),
     "## LLM 筛选链接",
     "",
     llmLinkMarkdown(analysis.llmSummary?.links) || "- 无",
@@ -417,6 +417,20 @@ const renderLlmTopics = (summary) =>
 const renderLlmList = (items, renderItem) =>
   `<ul>${(items ?? []).map((item) => `<li>${renderItem(item)}</li>`).join("")}</ul>`;
 
+const NEW_THING_LABELS = { model: "模型", tool: "工具", tutorial: "教程", resource: "资源", news: "新闻", event: "活动", other: "其他" };
+
+// Schema-v3 lists; sections are omitted when empty rather than showing "无".
+const optionalHtml = (title, items, renderItem) =>
+  (items ?? []).length === 0 ? "" : `<section><h2>${escapeHtml(title)}</h2>${renderLlmList(items, renderItem)}</section>`;
+
+const optionalSection = (title, body) => (body.length === 0 ? [] : [`## ${title}`, "", body, ""]);
+
+const newThingMarkdown = (items) =>
+  (items ?? []).map((item) => `- ${NEW_THING_LABELS[item.kind] ?? "其他"}·${item.name}: ${item.detail}${item.link ? `（${item.link}）` : ""}`).join("\n");
+
+const qaMarkdown = (items) =>
+  (items ?? []).map((item) => `- 问: ${item.question}｜答: ${item.answer ?? "暂无回答"}`).join("\n");
+
 const renderMediaGallery = (mediaReport) => {
   if (!mediaReport.manifestExists) {
     return "<p>未导出媒体文件；需要媒体时运行时启用 <code>-ExportMedia</code>。</p>";
@@ -516,7 +530,7 @@ const writeHtmlReport = (analysis, outputMarkdown, mediaReport) => {
       : ""}
     <section>
       <h2>LLM 动态摘要</h2>
-      <p>${escapeHtml(analysis.llmSummary?.summary ?? "未启用 LLM；这里只包含本地动态分组和统计。")}</p>
+      <p>${escapeHtml(analysis.llmSummary?.summary ?? llmAbsentSummary(analysis.llmError, { unused: Boolean(analysis.llmUnused) }))}</p>
       ${llmBasisText(analysis) !== null ? `<p style="color:var(--muted);font-size:12px">${escapeHtml(llmBasisText(analysis))}</p>` : ""}
     </section>
     <section>
@@ -537,14 +551,10 @@ const writeHtmlReport = (analysis, outputMarkdown, mediaReport) => {
       <h2>未归类但可能重要</h2>
       ${renderLlmList(analysis.llmSummary?.uncategorized, (item) => `<time>${escapeHtml(item.hkt)}</time><span class="speaker">${escapeHtml(item.speaker)}</span><p>${escapeHtml(item.note)}</p>`)}
     </section>
-    <section>
-      <h2>待处理事项</h2>
-      ${renderLlmList(analysis.llmSummary?.actions, (item) => `<span class="speaker">${item.status === "resolved" ? "✅" : "⏳"} ${escapeHtml(item.owner ?? "未指定")}</span><p>${escapeHtml(item.task)}${item.resolution ? `<br>结果: ${escapeHtml(item.resolution)}` : ""}<br>证据: ${escapeHtml(item.evidence)}</p>`)}
-    </section>
-    <section>
-      <h2>风险点</h2>
-      ${renderLlmList(analysis.llmSummary?.risks, (item) => `<span class="speaker">${escapeHtml(item.severity)}</span><p>${escapeHtml(item.risk)}<br>证据: ${escapeHtml(item.evidence)}</p>`)}
-    </section>
+    ${optionalHtml("新东西", analysis.llmSummary?.newThings, (item) => `<span class="speaker">${escapeHtml(NEW_THING_LABELS[item.kind] ?? "其他")} · ${escapeHtml(item.name)}</span><p>${escapeHtml(item.detail)}${item.link ? `<br><a href="${escapeHtml(item.link)}">${escapeHtml(item.link)}</a>` : ""}</p>`)}
+    ${optionalHtml("问答", analysis.llmSummary?.qa, (item) => `<span class="speaker">问</span><p>${escapeHtml(item.question)}<br>答: ${escapeHtml(item.answer ?? "暂无回答")}</p>`)}
+    ${optionalHtml("待处理事项", analysis.llmSummary?.actions, (item) => `<span class="speaker">${item.status === "resolved" ? "✅" : "⏳"} ${escapeHtml(item.owner ?? "未指定")}</span><p>${escapeHtml(item.task)}${item.resolution ? `<br>结果: ${escapeHtml(item.resolution)}` : ""}<br>证据: ${escapeHtml(item.evidence)}</p>`)}
+    ${optionalHtml("风险点", analysis.llmSummary?.risks, (item) => `<span class="speaker">${escapeHtml(item.severity)}</span><p>${escapeHtml(item.risk)}<br>证据: ${escapeHtml(item.evidence)}</p>`)}
     <section>
       <h2>本地动态分组</h2>
       ${renderTopicDetails(analysis.topics)}
@@ -576,9 +586,23 @@ const writeHtmlReport = (analysis, outputMarkdown, mediaReport) => {
   return htmlPath;
 };
 
+const attachLlmAbsence = (analysis, analysisJson) => {
+  if (analysis.llmSummary) {
+    return analysis;
+  }
+  const analysisDir = path.dirname(analysisJson);
+  const llmError = readLlmError(analysisDir);
+  const llmUnused = readLlmUnused(analysisDir);
+  return {
+    ...analysis,
+    llmError,
+    llmUnused: llmError === null && llmUnused !== null,
+  };
+};
+
 const main = () => {
   const args = parseArgs(process.argv);
-  const analysis = readJson(args.analysisJson);
+  const analysis = attachLlmAbsence(readJson(args.analysisJson), args.analysisJson);
   const lines = readLines(args.messagesText);
   const mediaReport = loadMediaReport(args.analysisJson);
   writeMarkdownReport(analysis, lines, args.outputMarkdown, mediaReport);

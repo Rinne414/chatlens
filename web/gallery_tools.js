@@ -255,6 +255,46 @@ const GalleryTools = (() => {
     return "file";
   };
 
+  const pickIdentity = (item) => {
+    if (item.contentKeySource === "hash" && typeof item.contentKey === "string" && item.contentKey.length > 0) {
+      return `hash:${item.contentKey}`;
+    }
+    if (typeof item.webPath !== "string" || item.webPath.length === 0) {
+      throw new Error("Gallery pick identity requires a content hash or webPath");
+    }
+    return `path:${item.webPath}`;
+  };
+
+  const itemIsSavedPick = (item, savedIdentities) => savedIdentities.has(pickIdentity(item));
+
+  const identitiesFromPickRecords = (records) => {
+    const identities = new Set();
+    for (const record of records) {
+      if (typeof record.hash === "string" && record.hash.length > 0) {
+        identities.add(`hash:${record.hash}`);
+      }
+      if (typeof record.contentKey === "string" && record.contentKey.length > 0) {
+        identities.add(`hash:${record.contentKey}`);
+      }
+      if (typeof record.webPath === "string" && record.webPath.length > 0) {
+        identities.add(`path:${record.webPath}`);
+      }
+    }
+    return identities;
+  };
+
+  const filterGalleryItemsByPickStatus = (items, savedIdentities, filter) => {
+    const predicates = {
+      all: () => true,
+      unsaved: (item) => itemIsSavedPick(item, savedIdentities) !== true,
+      saved: (item) => itemIsSavedPick(item, savedIdentities) === true,
+    };
+    if (predicates[filter] === undefined) {
+      throw new Error(`Unsupported gallery pick filter: ${filter}`);
+    }
+    return items.filter(predicates[filter]);
+  };
+
   const galleryNeighborPath = (paths, currentPath, direction) => {
     if (paths.length === 0) {
       throw new Error("Gallery navigation requires at least one item");
@@ -296,8 +336,12 @@ const GalleryTools = (() => {
     compareGalleryCollections,
     filterGalleryEventsByReview,
     filterGalleryItems,
+    filterGalleryItemsByPickStatus,
     filterGalleryOccurrences,
     galleryEmptyState,
+    identitiesFromPickRecords,
+    itemIsSavedPick,
+    pickIdentity,
     galleryMessageRowCandidates,
     galleryPresentation,
     galleryNeighborPath,

@@ -130,13 +130,16 @@ const coverageNote = (group) => {
     : "";
 };
 
+const groupLlmTitleLabel = (group) =>
+  group.llmSummary !== null ? "LLM 主题" : group.llmError ? "LLM 失败" : group.llmUnused ? "本地分组" : "无法判断 LLM";
+
 const groupSectionNode = (group, media, runId) => {
   const groupMedia = media.filter((item) => item.groupId === group.groupId).slice(0, 12);
   const isVideoPath = (value) => /\.(mp4|mov|webm|mkv|avi)$/iu.test(value);
 
   return el("div", { class: "card group-section", id: `reader-group-${group.groupId}` },
     el("h2", {}, group.name,
-      el("small", {}, `${group.groupId} · 文本 ${group.textMessages} · 媒体 ${group.mediaMessages} · ${group.llmSummary !== null ? "LLM 主题" : "本地分组"}${coverageNote(group)}`)),
+      el("small", {}, `${group.groupId} · 文本 ${group.textMessages} · 媒体 ${group.mediaMessages} · ${groupLlmTitleLabel(group)}${coverageNote(group)}`)),
     group.llmSummary?.summary ? el("p", { class: "card-sub" }, group.llmSummary.summary) : null,
     timelineNodes(group, runId),
     topicNodes(group, runId),
@@ -169,7 +172,35 @@ const groupSectionNode = (group, media, runId) => {
 const mergedItems = (groups, pick) =>
   groups.flatMap((group) => (pick(group) ?? []).map((item) => ({ ...item, groupName: group.name })));
 
-const openReader = async (runId) => {
+const readerReturnView = () => (app.readerOrigin?.view === "history" ? "history" : "run");
+
+const readerBackLabel = () => (readerReturnView() === "history" ? "← 返回历史" : "← 返回运行");
+
+const rememberReaderOrigin = (origin) => {
+  if (origin?.view === "history" || origin?.view === "run") {
+    app.readerOrigin = { view: origin.view };
+  }
+};
+
+const returnFromReader = () => {
+  const view = readerReturnView();
+  showView(view);
+  if (view === "history") {
+    renderHistoryView();
+    return;
+  }
+  renderRunView();
+};
+
+const readerBackButton = () => el("button", {
+  class: "btn small",
+  "data-testid": "reader-back",
+  dataset: { backView: readerReturnView() },
+  onclick: returnFromReader,
+}, readerBackLabel());
+
+const openReader = async (runId, origin) => {
+  rememberReaderOrigin(origin);
   showView("reader");
   setChildren($("#view-reader"), el("div", { class: "card" }, el("div", { class: "empty" }, "加载中…")));
 
@@ -177,7 +208,9 @@ const openReader = async (runId) => {
   try {
     detail = await api(`/api/run-detail?id=${encodeURIComponent(runId)}`);
   } catch (error) {
-    setChildren($("#view-reader"), el("div", { class: "card" }, el("div", { class: "notice risk" }, error.message)));
+    setChildren($("#view-reader"),
+      el("div", { class: "reader-head" }, readerBackButton()),
+      el("div", { class: "card" }, el("div", { class: "notice risk" }, error.message)));
     return;
   }
 
@@ -186,7 +219,7 @@ const openReader = async (runId) => {
   const risks = mergedItems(detail.groups, (group) => group.llmSummary?.risks);
 
   const head = el("div", { class: "reader-head" },
-    el("button", { class: "btn small", onclick: () => { showView("history"); renderHistoryView(); } }, "← 返回"),
+    readerBackButton(),
     el("h2", {}, `${detail.firstHkt ?? ""} — ${detail.lastHkt ?? ""}`),
     el("span", { class: "tag plain" }, `文本 ${detail.textMessages}`),
     el("span", { class: "tag plain" }, `媒体 ${detail.mediaMessages}`),
@@ -200,11 +233,15 @@ const openReader = async (runId) => {
         ? "旧报告没有保存扫描覆盖元数据，不能据此断言没有漏消息。"
         : `${unixToHkt(scan.requestedStartUnix).slice(0, 16)} - ${unixToHkt(scan.requestedEndUnix).slice(5, 16)} · 覆盖 ${Math.round(scan.coverageRatio * 100)}%${scan.missingSeconds > 0 ? ` · 缺失 ${formatDuration(scan.missingSeconds)}` : ""}`)),
     el("div", {},
-      el("strong", {}, ai.status === "not-used" ? "未使用 AI" : ai.status === "empty" ? "AI 无文本输入" : ai.status === "complete" ? "AI 输入完整" : ai.status === "unknown" ? "AI 输入完整性未知" : "AI 输入不完整"),
+      el("strong", {}, ai.status === "not-used" ? "未使用 AI" : ai.status === "failed" ? "AI 摘要失败" : ai.status === "empty" ? "AI 无文本输入" : ai.status === "complete" ? "AI 输入完整" : ai.status === "indeterminate" ? "无法判断是否使用 AI" : ai.status === "unknown" ? "AI 输入完整性未知" : "AI 输入不完整"),
       el("span", {}, ai.status === "not-used"
         ? "仅本地统计与分组。"
+        : ai.status === "failed"
+          ? "LLM 调用失败，已改用本地分组。"
         : ai.status === "empty"
           ? "这个范围没有可提交给 AI 的文本消息。"
+        : ai.status === "indeterminate"
+          ? "旧报告没有留下 LLM 成败记录，不能判断是未使用还是失败。"
         : ai.status === "unknown"
           ? "旧报告没有保存 AI 输入覆盖元数据，不能判断遗漏了多少文本。"
           : `AI 实际处理 ${ai.includedMessages}/${ai.totalMessages} 条文本。`)));
@@ -219,7 +256,7 @@ const openReader = async (runId) => {
           el("div", { class: "row" },
             el("span", { class: "tag plain" }, `文本 ${group.textMessages}`),
             el("span", { class: "tag plain" }, `媒体 ${group.mediaMessages}`),
-            el("span", { class: `tag ${group.llmSummary !== null ? "" : "plain"}` }, group.llmSummary !== null ? "LLM" : "本地")),
+            el("span", { class: `tag ${group.llmSummary !== null ? "" : "plain"}` }, group.llmSummary !== null ? "LLM" : group.llmError ? "LLM 失败" : group.llmUnused ? "本地" : "无法判断")),
           el("p", {}, group.llmSummary?.summary ?? ""))))
     : null;
 
@@ -246,10 +283,36 @@ const openReader = async (runId) => {
             el("span", { class: "ev" }, `证据: ${item.evidence}`)))))
     : null;
 
-  setChildren($("#view-reader"), 
+  const newThings = mergedItems(detail.groups, (group) => group.llmSummary?.newThings);
+  const newThingsCard = newThings.length > 0
+    ? el("div", { class: "card" },
+        el("h2", {}, "新东西（全部群）"),
+        el("ul", { class: "item-list" }, newThings.map((item) =>
+          el("li", {},
+            el("span", { class: "gtag" }, `[${item.groupName}]`),
+            el("span", { class: "who" }, `${BRIEF_KIND_LABELS[item.kind] ?? "新东西"} · ${item.name}`),
+            item.detail,
+            item.link ? el("a", { class: "ev", href: item.link, target: "_blank", rel: "noopener noreferrer" }, item.link) : null))))
+    : null;
+
+  const qaItems = mergedItems(detail.groups, (group) => group.llmSummary?.qa);
+  const qaCard = qaItems.length > 0
+    ? el("div", { class: "card" },
+        el("h2", {}, "问答（全部群）"),
+        el("ul", { class: "item-list" }, qaItems.map((item) =>
+          el("li", { class: item.resolved ? "" : "resolved" },
+            el("span", { class: "gtag" }, `[${item.groupName}]`),
+            el("span", { class: "who" }, "问"),
+            item.question,
+            el("span", { class: "ev" }, `答: ${item.answer ?? "暂无回答"}`)))))
+    : null;
+
+  setChildren($("#view-reader"),
     head,
     trustCard,
     overview,
+    newThingsCard,
+    qaCard,
     actionsCard,
     risksCard,
     ...detail.groups.map((group) => groupSectionNode(group, detail.media, runId)));

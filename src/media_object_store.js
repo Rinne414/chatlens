@@ -97,7 +97,7 @@ const persistMediaObject = (sourcePathValue, objectDirValue, hashValue) => {
   }
   const extension = path.extname(sourcePath).toLowerCase();
   if (!IMAGE_EXTENSIONS.has(extension)) {
-    throw new TypeError(`Unsupported persistent media extension. Path=${sourcePath} Extension=${extension}`);
+    return { objectPath: null, status: "unsupported-extension" };
   }
   const actualHash = hashFileMd5(sourcePath);
   if (actualHash !== hash) {
@@ -116,6 +116,169 @@ const persistMediaObject = (sourcePathValue, objectDirValue, hashValue) => {
     );
   }
   return { objectPath, status: "stored" };
+};
+
+// Ori holds the untouched original; Thumb is QQ's re-encode and never carries
+// metadata. Both are named by the md5 of the ORIGINAL, so the same hash locates
+// either -- but only Ori is worth copying into media-objects.
+//
+// One directory listing per month, reused across every hash in a harvest.
+const buildOriIndex = (ntDataDir) => {
+  const picRoot = path.join(ntDataDir, "Pic");
+  const byHash = new Map();
+  let months;
+  try {
+    months = fs.readdirSync(picRoot, { withFileTypes: true });
+  } catch {
+    return byHash;
+  }
+  for (const month of months) {
+    if (!month.isDirectory()) {
+      continue;
+    }
+    const oriDir = path.join(picRoot, month.name, "Ori");
+    let names;
+    try {
+      names = fs.readdirSync(oriDir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const match = name.toLowerCase().match(/^([a-f0-9]{32})\./u);
+      if (match !== null && !byHash.has(match[1])) {
+        byHash.set(match[1], path.join(oriDir, name));
+      }
+    }
+  }
+  return byHash;
+};
+
+const ORIGINAL_CACHE_PATH = /[/\\]ori[/\\]/iu;
+
+const isOriginalCachePath = (filePath) =>
+  typeof filePath === "string" && ORIGINAL_CACHE_PATH.test(filePath);
+
+const ATTACH_BATCH = 50;
+
+// File copies stay outside the harvest transaction so a slow copy does not hold
+// the knowledge-base lock. Only Ori paths belong in sourceByHash; a hash
+// mismatch is counted, not thrown, so a corrupt cache slot cannot abort
+// attribution. Attach in batches so a long backfill still records object_path
+// if the process is interrupted.
+const persistOriginalsForHashes = ({ hashes, sourceByHash, objectDir, db, onProgress }) => {
+  const stats = { durableStored: 0, durableReused: 0, durableFailed: 0 };
+  const attached = [];
+  const existingPath = db.prepare("SELECT object_path AS objectPath FROM images WHERE hash = ?");
+  const flushAttached = () => {
+    if (attached.length === 0) {
+      return;
+    }
+    const batch = attached.splice(0, attached.length);
+    db.transaction(() => {
+      for (const item of batch) {
+        attachMediaObject(db, item);
+      }
+    })();
+  };
+  const report = () => {
+    if (typeof onProgress === "function") {
+      onProgress({ ...stats });
+    }
+  };
+  let processed = 0;
+  for (const hash of hashes) {
+    const sourcePath = sourceByHash.get(hash);
+    if (sourcePath === undefined) {
+      continue;
+    }
+    const already = existingPath.get(hash)?.objectPath ?? "";
+    if (already !== "" && fs.existsSync(already)) {
+      stats.durableReused += 1;
+      processed += 1;
+      if (processed % ATTACH_BATCH === 0) {
+        report();
+      }
+      continue;
+    }
+    try {
+      const persisted = persistMediaObject(sourcePath, objectDir, hash);
+      if (persisted.objectPath === null) {
+        stats.durableFailed += 1;
+      } else {
+        if (persisted.status === "stored") {
+          stats.durableStored += 1;
+        } else {
+          stats.durableReused += 1;
+        }
+        attached.push({ hash, objectPath: persisted.objectPath });
+        if (attached.length >= ATTACH_BATCH) {
+          flushAttached();
+        }
+      }
+    } catch {
+      stats.durableFailed += 1;
+    }
+    processed += 1;
+    if (processed % ATTACH_BATCH === 0) {
+      report();
+    }
+  }
+  flushAttached();
+  report();
+  return stats;
+};
+
+// Historical harvest wrote file_path to Ori but did not copy into
+// media-objects. Live harvest only copies the current export, so this is the
+// path that protects already-harvested rows before QQ evicts the cache.
+const backfillHarvestedMediaObjects = (args) => {
+  const knowledgeStorePath = ensurePath(args.knowledgeStorePath, "knowledgeStorePath");
+  const objectDir = ensurePath(args.objectDir, "objectDir");
+  const ntDataDir = typeof args.ntDataDir === "string" && args.ntDataDir.trim() !== ""
+    ? ensurePath(args.ntDataDir, "ntDataDir")
+    : "";
+  const db = openKnowledgeStore(knowledgeStorePath);
+  try {
+    const rows = db.prepare(`
+      SELECT hash, file_path AS filePath, object_path AS objectPath
+      FROM images
+    `).all();
+    const needed = [];
+    for (const row of rows) {
+      if (typeof row.objectPath === "string" && row.objectPath !== "" && fs.existsSync(row.objectPath)) {
+        continue;
+      }
+      needed.push(row);
+    }
+    const oriIndex = ntDataDir === "" ? new Map() : buildOriIndex(ntDataDir);
+    const sourceByHash = new Map();
+    for (const row of needed) {
+      const fromIndex = oriIndex.get(row.hash);
+      if (fromIndex !== undefined) {
+        sourceByHash.set(row.hash, fromIndex);
+        continue;
+      }
+      if (isOriginalCachePath(row.filePath) && fs.existsSync(row.filePath)) {
+        sourceByHash.set(row.hash, row.filePath);
+      }
+    }
+    const persisted = persistOriginalsForHashes({
+      hashes: needed.map((row) => row.hash),
+      sourceByHash,
+      objectDir,
+      db,
+      onProgress: args.onProgress,
+    });
+    return {
+      needed: needed.length,
+      candidates: sourceByHash.size,
+      durableStored: persisted.durableStored,
+      durableReused: persisted.durableReused,
+      durableFailed: persisted.durableFailed,
+    };
+  } finally {
+    db.close();
+  }
 };
 
 const readManifest = (manifestPathValue) => {
@@ -325,7 +488,7 @@ const backfillMissingMediaObjects = (args) => {
   const db = openKnowledgeStore(knowledgeStorePath);
   const needed = new Set(db.prepare(`
     SELECT hash FROM images
-    WHERE object_path = '' AND (file_path = '' OR file_missing = 1)
+    WHERE object_path = ''
   `).all().map((row) => row.hash));
   db.close();
 
@@ -362,9 +525,12 @@ const backfillMissingMediaObjects = (args) => {
 
 module.exports = {
   MediaObjectIntegrityError,
+  backfillHarvestedMediaObjects,
   backfillMissingMediaObjects,
+  buildOriIndex,
   findExistingMediaObject,
   hashFileMd5,
   persistMediaObject,
+  persistOriginalsForHashes,
   synchronizeManifestMedia,
 };

@@ -16,6 +16,7 @@ const {
   markMissingFiles,
   storeSummary,
   tagsFromPrompt,
+  applyChatPrompt,
 } = require("../src/knowledge_store");
 
 const tempStore = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kb-")), "knowledge.db");
@@ -254,6 +255,52 @@ test("summary counts images, attribution and distinct assets", () => {
   assert.deepEqual(
     summary.generators.map((row) => row.generator).sort(),
     ["comfyui", "forge"],
+  );
+  db.close();
+});
+
+test("a longer chat-sourced prompt fills an empty image prompt and the FTS index", () => {
+  const db = openKnowledgeStore(tempStore());
+  const hash = "c".repeat(32);
+  upsertImage(db, imageRecord({ hash, generator: "stripped", prompt: "", loras: [] }));
+
+  const result = applyChatPrompt(db, { hash, prompt: "1girl, solo, long hair, looking at viewer" });
+
+  assert.equal(result.applied, true);
+  const row = db.prepare("SELECT prompt, generator FROM images WHERE hash = ?").get(hash);
+  assert.equal(row.prompt, "1girl, solo, long hair, looking at viewer");
+  assert.equal(row.generator, "stripped", "chat backfill must not pretend the file had metadata");
+  const fts = db.prepare("SELECT prompt FROM images_fts WHERE hash = ?").get(hash);
+  assert.match(fts.prompt, /long hair/u);
+  const tags = db.prepare("SELECT tag FROM image_tags WHERE hash = ? ORDER BY tag").all(hash).map((item) => item.tag);
+  assert.ok(tags.includes("long hair"));
+  db.close();
+});
+
+test("a shorter chat answer does not overwrite a longer metadata prompt", () => {
+  const db = openKnowledgeStore(tempStore());
+  upsertImage(db, imageRecord({ prompt: "masterpiece, 1girl, solo, long hair, blue eyes" }));
+
+  const result = applyChatPrompt(db, { hash: "a".repeat(32), prompt: "1girl" });
+
+  assert.equal(result.applied, false);
+  assert.equal(db.prepare("SELECT prompt FROM images WHERE hash = ?").get("a".repeat(32)).prompt, "masterpiece, 1girl, solo, long hair, blue eyes");
+  db.close();
+});
+
+test("a longer chat answer replaces a short or truncated metadata prompt", () => {
+  const db = openKnowledgeStore(tempStore());
+  upsertImage(db, imageRecord({ prompt: "1girl" }));
+
+  const result = applyChatPrompt(db, {
+    hash: "a".repeat(32),
+    prompt: "masterpiece, best quality, 1girl, solo, long hair",
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(
+    db.prepare("SELECT prompt FROM images WHERE hash = ?").get("a".repeat(32)).prompt,
+    "masterpiece, best quality, 1girl, solo, long hair",
   );
   db.close();
 });

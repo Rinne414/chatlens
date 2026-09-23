@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const Database = require("better-sqlite3-multiple-ciphers");
+const { parseMessageMeta } = require("./message_meta");
 
 const sqlQuote = (value) => `'${value.replaceAll("'", "''")}'`;
 
@@ -50,7 +51,36 @@ const parseArgs = (argv) => {
     endUnix: Number.parseInt(argv[6], 10),
     outputPath: argv[7],
     scanLimit: Number.parseInt(argv[8], 10),
+    groupStarts: loadGroupStarts(),
   };
+};
+
+const loadGroupStarts = () => {
+  const filePath = process.env.QQ_GROUP_STARTS_JSON;
+  if (!filePath) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const starts = {};
+    for (const [groupId, value] of Object.entries(parsed)) {
+      const unix = Number(value);
+      if (/^\d+$/u.test(groupId) && Number.isFinite(unix) && unix > 0) {
+        starts[groupId] = Math.floor(unix);
+      }
+    }
+    return starts;
+  } catch {
+    return {};
+  }
+};
+
+const startUnixForGroup = (defaultStart, groupStarts, groupId) => {
+  const override = Number(groupStarts?.[String(groupId)]);
+  return Number.isFinite(override) && override > 0 ? override : defaultStart;
 };
 
 // Legacy byte-scanner: matches the `82 16` tail of the plain-text element tag
@@ -446,7 +476,7 @@ const exportMessages = (args, key) => {
       ].join("\n"),
     );
 
-    const startUnix = BigInt(args.startUnix);
+    const groupStarts = args.groupStarts ?? {};
     const endUnix = BigInt(args.endUnix);
     // Runaway guard only (default 1e6). Because the query is walked newest-first
     // (msg_seq desc) a cap hit drops the OLDEST rows, so the requested window is
@@ -472,6 +502,7 @@ const exportMessages = (args, key) => {
 
     for (const groupId of args.groupIds) {
       const groupIdInt = BigInt(groupId);
+      const startUnix = BigInt(startUnixForGroup(args.startUnix, groupStarts, groupId));
       const memberNames = memberNamesByGroup.get(groupId) ?? new Map();
       const resolvedGroupName = groupNames.get(groupId) ?? "";
       let groupScanned = 0;
@@ -524,6 +555,8 @@ const exportMessages = (args, key) => {
           if (row.msg_type1 === 2n) {
             messages.push({
               ...messageBase,
+              isSelf: row.is_self === 1n,
+              ...parseMessageMeta(row.body_hex),
               text: getMessageText(row.body_hex),
             });
           }
@@ -631,6 +664,9 @@ const exportMessages = (args, key) => {
       groupIds: args.groupIds,
       groupNames: Object.fromEntries(args.groupIds.map((groupId) => [groupId, groupNames.get(groupId) ?? ""])),
       startUnix: args.startUnix,
+      groupStarts: Object.fromEntries(
+        args.groupIds.map((groupId) => [groupId, startUnixForGroup(args.startUnix, groupStarts, groupId)]),
+      ),
       endUnix: args.endUnix,
       scanned,
       stopReason,

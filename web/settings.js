@@ -2,7 +2,7 @@
 
 /* ---------- settings view: QQ paths, keys, LLM config ---------- */
 
-const settingsState = { status: null, models: [], schedule: null, scheduleError: null, llmDraft: null, llmNotice: null, qqCandidates: [], pathNotice: null };
+const settingsState = { status: null, models: [], background: null, backgroundError: null, backgroundNotice: null, llmDraft: null, llmNotice: null, qqCandidates: [], pathNotice: null };
 // One-click NTQQ key recovery lives across re-renders (renderSettingsView rebuilds
 // the whole view), so its busy flag and last notice are kept module-level.
 const autoKeyState = { busy: false, notice: null };
@@ -22,14 +22,31 @@ const openSettingsView = async () => {
     return;
   }
   renderSettingsView();
+  await refreshBackgroundStatus();
+};
+
+const refreshBackgroundStatus = async () => {
   try {
-    settingsState.schedule = await api("/api/schedule");
-    settingsState.scheduleError = null;
+    settingsState.background = await api("/api/background");
+    settingsState.backgroundError = null;
   } catch (error) {
-    settingsState.schedule = null;
-    settingsState.scheduleError = error.message;
+    settingsState.background = null;
+    settingsState.backgroundError = error.message;
   }
   renderSettingsView();
+};
+
+const isWindowsHost = () => settingsState.status?.platform === "win32";
+
+const secretStorageText = () => {
+  const backend = settingsState.status?.secretBackend;
+  if (backend === "dpapi") {
+    return "用 Windows DPAPI 加密存在本机 %APPDATA%\\QQSummaryTools\\，只有当前 Windows 用户能解密";
+  }
+  if (backend === "secret-tool") {
+    return "存进系统钥匙圈（GNOME Keyring / KWallet，经 secret-tool）";
+  }
+  return "存在 ~/.config/QQSummaryTools/，文件权限 0600，只有你自己能读";
 };
 
 const savedTag = (isSaved) =>
@@ -58,12 +75,24 @@ const renderSettingsView = () => {
     return;
   }
 
-  const schedule = settingsState.schedule;
+  const background = settingsState.background;
+  const backgroundDetail = () => {
+    if (settingsState.backgroundError !== null) {
+      return `读取失败：${settingsState.backgroundError}`;
+    }
+    if (background === null) {
+      return "读取中";
+    }
+    if (!background.settings.enabled) {
+      return "已关闭";
+    }
+    return background.lastError ? "上次出错" : `每 ${background.settings.intervalMinutes} 分钟`;
+  };
   const readiness = [
     { label: "QQ 数据库", ok: status.ntDbDirExists, detail: status.ntDbDirExists ? "路径可用" : "路径不可用" },
     { label: "解密密钥", ok: status.ntqqKeySaved, detail: status.ntqqKeySaved ? "已保存" : "未保存" },
     { label: "AI 总结", ok: status.llmKeySaved && status.llm.model.length > 0, detail: status.llmKeySaved && status.llm.model.length > 0 ? status.llm.model : "未配置完整" },
-    { label: "定时任务", ok: schedule?.enabled === true && schedule?.result?.status !== "failed", detail: settingsState.scheduleError !== null ? `读取失败：${settingsState.scheduleError}` : schedule === null ? "读取中" : schedule.enabled ? schedule.result?.text ?? "已开启" : "未开启" },
+    { label: "后台刷新", ok: background?.settings?.enabled === true && !background?.lastError, detail: backgroundDetail() },
   ];
   const readinessCard = el("div", { class: "system-readiness", "data-testid": "system-readiness" },
     readiness.map((item) => el("div", { class: `readiness-item ${item.ok ? "ok" : "attention"}` },
@@ -71,7 +100,12 @@ const renderSettingsView = () => {
       el("strong", {}, item.detail))));
 
   /* --- QQ database paths --- */
-  const dbInput = el("input", { type: "text", value: status.ntDbDir, placeholder: "例如 C:\\Users\\你\\Documents\\Tencent Files\\你的QQ号\\nt_qq\\nt_db", style: "width:100%" });
+  const dbInput = el("input", {
+    type: "text",
+    value: status.ntDbDir,
+    placeholder: isWindowsHost() ? "例如 C:\\Users\\你\\Documents\\Tencent Files\\你的QQ号\\nt_qq\\nt_db" : "例如 /home/你/.config/QQ/nt_qq_xxxx/nt_db",
+    style: "width:100%",
+  });
   const dataInput = el("input", { type: "text", value: status.ntDataDir, placeholder: "nt_data 目录（媒体导出用，可留空）", style: "width:100%" });
   const pathMsg = el("span", { style: "font-size:13px" });
   if (settingsState.pathNotice !== null) {
@@ -175,7 +209,7 @@ const renderSettingsView = () => {
             try {
               await api("/api/settings/keys", { method: "POST", body: JSON.stringify({ [which]: input.value }) });
               input.value = "";
-              settingsFeedback(msg, "已加密保存（DPAPI，只有当前 Windows 用户能解密）。", false);
+              settingsFeedback(msg, "已加密保存。", false);
               settingsState.status = await api("/api/settings");
               // Update the tag in place — a full re-render would wipe this feedback line.
               tag.textContent = "✓ 已保存";
@@ -226,7 +260,7 @@ const renderSettingsView = () => {
 
   const keysCard = el("div", { class: "card" },
     el("h2", {}, "密钥"),
-    el("p", { class: "card-sub" }, "两把密钥都用 Windows DPAPI 加密存在本机 %APPDATA%\\QQSummaryTools\\，不进项目目录，不进 Git。"),
+    el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}，不进项目目录，不进 Git。`),
     keyRow("NTQQ_DB_KEY（QQ 数据库解密密钥）", "ntqqKey", status.ntqqKeySaved, ntqqKeyHint),
     keyRow("LLM API Key（AI 总结用，可选）", "llmKey", status.llmKeySaved,
       el("p", { class: "card-sub", style: "margin:0 0 8px" },
@@ -317,8 +351,8 @@ const renderSettingsView = () => {
       llmMsg),
     settingsState.models.length > 0 ? modelChips : null);
 
-  /* --- scheduled digest --- */
-  const scheduleCard = renderScheduleCard();
+  /* --- background refresh, notifications, desktop --- */
+  const backgroundCard = renderBackgroundCard();
 
   /* --- check & update --- */
   const updateCard = renderUpdateCard();
@@ -330,7 +364,7 @@ const renderSettingsView = () => {
       el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。"),
       el("li", {}, "外部流量仅两处：头像走 QQ 公开 CDN；开启 AI 总结时消息文本会发送到你配置的 LLM 服务。")));
 
-  setChildren($("#view-settings"), readinessCard, pathsCard, keysCard, llmCard, scheduleCard, updateCard, aboutCard);
+  setChildren($("#view-settings"), readinessCard, renderMoreLinks(), pathsCard, keysCard, llmCard, backgroundCard, updateCard, aboutCard);
 };
 
 /* --- check & update card --- */
@@ -384,7 +418,9 @@ const renderUpdateCard = () => {
                 el("p", { class: "card-sub" },
                   "控制台正在退出并替换程序文件，完成后会自动重新启动并打开新页面。",
                   el("br"),
-                  "如果 30 秒后没有自动打开，请手动双击 Start-QQ-Console.cmd。")));
+                  isWindowsHost()
+                    ? "如果 30 秒后没有自动打开，请手动双击 Start-QQ-Console.cmd。"
+                    : "如果 30 秒后没有自动打开，请运行安装目录里的 ./start.sh。")));
             return;
           } catch (error) {
             updateState.notice = { text: `更新失败：${error.message}`, isError: true };
@@ -409,89 +445,122 @@ const renderUpdateCard = () => {
     notesBlock);
 };
 
-const renderScheduleCard = () => {
-  const schedule = settingsState.schedule;
+/* --- pages that moved off the rail --- */
+
+const renderMoreLinks = () =>
+  el("div", { class: "settings-more" },
+    el("span", { class: "card-sub" }, "更多："),
+    el("button", { class: "chip", onclick: () => openView("watchlist") }, "⭐ 关注群"),
+    el("button", { class: "chip", onclick: () => openView("run") }, "▶ 自定义时间范围总结"),
+    el("button", { class: "chip", onclick: () => openView("history") }, "📚 历史报告"),
+    el("button", { class: "chip", onclick: () => openView("storage") }, "💾 存储"));
+
+/* --- background refresh, notifications, desktop integration --- */
+
+const backgroundToggle = (label, hint, checked, onChange) =>
+  el("label", { class: "bg-toggle" },
+    el("input", { type: "checkbox", checked, onchange: (event) => onChange(event.target.checked) }),
+    el("span", {}, el("strong", {}, label), hint ? el("small", {}, hint) : null));
+
+const saveBackgroundSetting = async (patch) => {
+  try {
+    await api("/api/background", { method: "POST", body: JSON.stringify(patch) });
+    settingsState.backgroundNotice = { text: "已保存。", isError: false };
+  } catch (error) {
+    settingsState.backgroundNotice = { text: error.message, isError: true };
+  }
+  await refreshBackgroundStatus();
+};
+
+const desktopAction = async (path, body, okText) => {
+  try {
+    await api(path, { method: "POST", body: JSON.stringify(body) });
+    settingsState.backgroundNotice = { text: okText, isError: false };
+  } catch (error) {
+    settingsState.backgroundNotice = { text: error.message, isError: true };
+  }
+  await refreshBackgroundStatus();
+};
+
+const backgroundStatusLine = (background) => {
+  if (background.readinessProblem) {
+    return el("div", { class: "notice warn" }, `后台刷新暂停：${background.readinessProblem}。`);
+  }
+  if (background.running) {
+    return el("p", { class: "bg-status busy" }, "正在刷新…");
+  }
+  const facts = [
+    background.lastFinishedAt ? `上次 ${unixToHkt(Math.floor(Date.parse(background.lastFinishedAt) / 1000)).slice(5, 16)}` : "还没有刷新过",
+    background.nextRunAt ? `下次 ${unixToHkt(Math.floor(Date.parse(background.nextRunAt) / 1000)).slice(11, 16)}` : null,
+    background.lastResult?.briefing?.budget ? `今天 AI 调用 ${background.lastResult.briefing.budget.used}/${background.lastResult.briefing.budget.limit}` : null,
+  ].filter(Boolean);
+  return el("div", {},
+    el("p", { class: "bg-status" }, facts.join(" · ")),
+    background.lastError ? el("div", { class: "notice risk" }, `上次刷新出错：${background.lastError}`) : null);
+};
+
+const renderBackgroundCard = () => {
+  const background = settingsState.background;
   const msg = el("span", { style: "font-size:13px" });
-  const timeInput = el("input", { type: "time", value: schedule?.time || "09:00", style: "width:120px" });
-
-  const refresh = async () => {
-    try {
-      settingsState.schedule = await api("/api/schedule");
-    } catch {
-      settingsState.schedule = { enabled: false };
-    }
-    renderSettingsView();
-  };
-
-  const statusLine = schedule === null
-    ? el("span", { class: "card-sub" }, "正在读取…")
-    : schedule.enabled
-      ? el("div", { class: "schedule-status" },
-          el("div", {}, savedTag(true), el("span", { class: `schedule-result ${schedule.result?.status ?? "never-run"}` }, schedule.result?.text ?? "状态未知")),
-          el("div", { class: "schedule-facts" },
-            el("span", {}, `每天 ${schedule.time}`),
-            el("span", {}, `下次 ${schedule.nextRun || "等待系统计算"}`),
-            el("span", {}, `上次 ${schedule.lastRun || "尚无"}`),
-            el("span", {}, schedule.coverageThroughUnix === null
-              ? `${schedule.unscannedGroupCount}/${schedule.targetGroupCount} 群尚无共同覆盖点`
-              : `关注群共同覆盖至 ${unixToHkt(schedule.coverageThroughUnix).slice(0, 16)}`),
-            schedule.missedRuns > 0 ? el("span", { class: "risk-text" }, `系统记录 ${schedule.missedRuns} 次漏跑`) : null))
-      : el("span", { class: "tag plain" }, "未开启");
-
+  if (settingsState.backgroundNotice !== null) {
+    settingsFeedback(msg, settingsState.backgroundNotice.text, settingsState.backgroundNotice.isError);
+  }
+  if (background === null) {
+    return el("div", { class: "card" }, el("h2", {}, "后台与通知"),
+      settingsState.backgroundError !== null
+        ? el("div", { class: "notice risk" }, `读取失败：${settingsState.backgroundError}`)
+        : el("p", { class: "card-sub" }, "正在读取…"));
+  }
+  const current = background.settings;
+  const desktop = background.desktop ?? {};
+  const loginLabel = isWindowsHost() ? "开机后在后台运行" : "登录后在后台运行";
   return el("div", { class: "card" },
-    el("h2", {}, "定时总结"),
+    el("h2", {}, "后台与通知"),
     el("p", { class: "card-sub" },
-      "用 Windows 计划任务每天定点自动总结「关注群」。它独立运行，不需要控制台开着；" +
-      "如果到点时电脑关机或睡眠，开机后会自动补跑这次（不会静默跳过）。" +
-      "每次都从上次记录点继续扫描，停机多久都不会漏消息。"),
-    settingsState.scheduleError !== null
-      ? el("div", { class: "notice risk" }, `无法读取 Windows 计划任务状态：${settingsState.scheduleError}`)
-      : null,
-    el("div", { class: "row", style: "margin-bottom:10px" }, statusLine),
-    el("div", { class: "row" },
-      el("span", { style: "font-size:13px" }, "每天"),
-      timeInput,
+      "控制台开着时（窗口可以关掉），会每隔一段时间自动收新消息、攒够一段就交给 AI 总结。你打开「简报」时内容已经准备好。每条消息只总结一次，费用和每天手动跑一次差不多；另有每日调用上限兜底。"),
+    backgroundStatusLine(background),
+    el("div", { class: "bg-grid" },
+      backgroundToggle("自动刷新", "关闭后只有手动总结", current.enabled, (value) => saveBackgroundSetting({ enabled: value })),
+      backgroundToggle("自动 AI 总结", "关闭后只收消息、不调用 AI", current.autoSummarize, (value) => saveBackgroundSetting({ autoSummarize: value })),
+      backgroundToggle("有人 @ 我或回复我时通知", null, current.notifyMentions, (value) => saveBackgroundSetting({ notifyMentions: value })),
+      backgroundToggle("每天早上推送一次简报", "9 点后第一次刷新时", current.notifyDaily, (value) => saveBackgroundSetting({ notifyDaily: value })),
+      backgroundToggle(loginLabel, "不弹窗口，打开简报时秒开", desktop.autostart === true, (value) =>
+        desktopAction("/api/desktop/autostart", { enabled: value }, value ? "已开启：下次登录会自动在后台运行。" : "已关闭开机后台运行。"))),
+    el("div", { class: "row", style: "margin-top:12px" },
+      el("span", { style: "font-size:13px" }, "刷新间隔"),
+      el("select", {
+        onchange: (event) => saveBackgroundSetting({ intervalMinutes: Number(event.target.value) }),
+      }, [5, 10, 15, 30, 60].map((minutes) =>
+        el("option", { value: String(minutes), selected: minutes === current.intervalMinutes }, `${minutes} 分钟`))),
       el("button", {
-        class: "btn small primary",
-        onclick: async (event) => {
-          event.target.disabled = true;
-          try {
-            await api("/api/schedule", { method: "POST", body: JSON.stringify({ enabled: true, time: timeInput.value, sinceHours: 26 }) });
-            settingsFeedback(msg, "已设置。", false);
-            await refresh();
-            return;
-          } catch (error) {
-            settingsFeedback(msg, error.message, true);
-          }
-          event.target.disabled = false;
+        class: "btn small",
+        disabled: background.running,
+        onclick: async () => {
+          await desktopAction("/api/background/run-now", { force: true }, "已开始刷新，并会把攒着的新消息一起总结。");
         },
-      }, schedule?.enabled ? "更新时间" : "开启定时"),
-      schedule?.enabled
-        ? el("button", {
-            class: "btn small",
-            onclick: async () => {
-              try {
-                await api("/api/schedule/run-now", { method: "POST" });
-                settingsFeedback(msg, "已触发一次运行（后台执行）。", false);
-              } catch (error) {
-                settingsFeedback(msg, error.message, true);
-              }
-            },
-          }, "立即运行一次")
-        : null,
-      schedule?.enabled
-        ? el("button", {
-            class: "btn small danger",
-            onclick: async () => {
-              try {
-                await api("/api/schedule", { method: "POST", body: JSON.stringify({ enabled: false }) });
-                settingsFeedback(msg, "已关闭定时。", false);
-                await refresh();
-              } catch (error) {
-                settingsFeedback(msg, error.message, true);
-              }
-            },
-          }, "关闭")
-        : null,
-      msg));
+      }, "立即刷新"),
+      el("button", {
+        class: "btn small",
+        onclick: () => desktopAction("/api/desktop/shortcut", {}, isWindowsHost()
+          ? "已在开始菜单创建「QQ 群消息简报」（快捷键 Ctrl+Alt+U）。"
+          : "已在应用菜单创建「QQ 群消息简报」。"),
+      }, desktop.appShortcut ? "重建开始菜单快捷方式" : "创建开始菜单快捷方式"),
+      el("button", {
+        class: "btn small danger",
+        onclick: async () => {
+          if (!window.confirm("停止后台服务？\n页面会断开；之后从开始菜单或启动器重新打开即可。")) {
+            return;
+          }
+          try {
+            await api("/api/shutdown", { method: "POST", body: "{}" });
+          } catch {
+            // The server is going away; a dropped connection is expected.
+          }
+          setChildren($("#view-settings"), el("div", { class: "card" }, el("h2", {}, "后台服务已停止"),
+            el("p", { class: "card-sub" }, "需要时从开始菜单 / 应用菜单的「QQ 群消息简报」重新打开。")));
+        },
+      }, "停止后台服务"),
+      msg),
+    el("p", { class: "card-sub", style: "margin:12px 0 0" },
+      "想要像 App 一样的独立窗口：在 Chrome / Edge 地址栏右侧点「安装」图标，之后从开始菜单直接打开，任务栏图标还会显示 @ 你的数量。"));
 };

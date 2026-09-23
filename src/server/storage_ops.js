@@ -12,6 +12,7 @@ const STORAGE_CATEGORIES = new Set([
   "knowledge-store",
   "knowledge-media",
   "coverage-checkpoints",
+  "database-mirror",
   "temporary-files",
   "run-files",
   "reports-exports",
@@ -134,6 +135,7 @@ const storageCatalog = (context) => {
   const knowledgePaths = ["knowledge.db", "knowledge.db-wal", "knowledge.db-shm", "export-ledger.json"]
     .map((name) => path.join(storeDir, name));
   const knowledgeMediaDir = path.join(storeDir, "media-objects");
+  const mirrorDir = path.join(storeDir, "db-mirror");
   const temporaryTargets = collectTemporaryTargets(context, false).targets;
   const runCleanupError = cleanableRootError(context, context.config.runsDir, "runsDir");
   const reportCleanupError = cleanableRootError(context, context.config.reportsDir, "reportsDir");
@@ -187,7 +189,7 @@ const storageCatalog = (context) => {
       id: "tool-secrets",
       section: "protected",
       label: "加密密钥",
-      description: "Windows DPAPI 加密的 QQ 数据库密钥和 LLM API key。",
+      description: "QQ 数据库密钥和 LLM API key（Windows 用 DPAPI 加密；Linux 存系统钥匙圈或权限 0600 的文件）。",
       paths: [context.secretDir],
       exists: pathExists(context.secretDir),
       openPath: context.secretDir,
@@ -256,6 +258,21 @@ const storageCatalog = (context) => {
       cleanupCategory: null,
       cleanupImpact: "删除后续跑进度会丢失，同一范围可能需要从头补扫。",
       cleanupBlockedReason: "检查点用于可靠续跑，不作为常规清理项。",
+      measurement: "automatic",
+    },
+    {
+      id: "database-mirror",
+      section: "regenerable",
+      label: "数据库镜像",
+      description: "QQ 消息数据库的持久只读副本。后台刷新只重写有变化的部分，所以每次只需几秒；体积与 QQ 数据库相当。",
+      paths: [mirrorDir],
+      exists: pathExists(mirrorDir),
+      openPath: mirrorDir,
+      policy: "keep",
+      policyLabel: "可重建",
+      cleanupCategory: null,
+      cleanupImpact: "删除后下一次刷新会重新完整复制一次 QQ 数据库（首次较慢），之后恢复为增量同步。",
+      cleanupBlockedReason: "后台刷新随时可能在读写镜像；如需释放空间，请先在设置页停止后台服务再手动删除该目录。",
       measurement: "automatic",
     },
     {

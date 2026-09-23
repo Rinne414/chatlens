@@ -112,12 +112,14 @@ const buildStem = (item, index) => {
 // otherwise the answer someone gave in chat -- which for a stripped image is the
 // only record that exists.
 const promptFor = (item) => {
-  if (typeof item.prompt === "string" && item.prompt.trim().length > 0) {
-    return { text: item.prompt.trim(), source: "metadata" };
+  const metadata = typeof item.prompt === "string" ? item.prompt.trim() : "";
+  const answered = (item.promptRequests ?? []).find((request) => String(request.answerText ?? "").trim().length > 0);
+  const chat = answered === undefined ? "" : String(answered.answerText).trim();
+  if (chat !== "" && (metadata === "" || chat.length > metadata.length)) {
+    return { text: chat, source: "chat" };
   }
-  const answered = (item.promptRequests ?? []).find((request) => request.answerText.trim().length > 0);
-  if (answered !== undefined) {
-    return { text: answered.answerText.trim(), source: "chat" };
+  if (metadata !== "") {
+    return { text: metadata, source: "metadata" };
   }
   return { text: "", source: "none" };
 };

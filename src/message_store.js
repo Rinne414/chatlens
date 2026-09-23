@@ -33,17 +33,37 @@ const SCHEMA_STATEMENTS = [
   )`,
 ];
 
+// Columns added after the first release. meta_version marks rows ingested
+// with @/reply parsing, so a later re-scan can fill the mention columns of
+// rows stored by older versions (plain INSERT OR IGNORE would keep them empty).
+const ADDED_MESSAGE_COLUMNS = [
+  ["speaker_uin", "TEXT NOT NULL DEFAULT ''"],
+  ["is_self", "INTEGER NOT NULL DEFAULT 0"],
+  ["at_uins", "TEXT NOT NULL DEFAULT ''"],
+  ["at_all", "INTEGER NOT NULL DEFAULT 0"],
+  ["reply_to_uin", "TEXT NOT NULL DEFAULT ''"],
+  ["reply_to_seq", "TEXT NOT NULL DEFAULT ''"],
+  ["msg_seq", "TEXT NOT NULL DEFAULT ''"],
+  ["meta_version", "INTEGER NOT NULL DEFAULT 0"],
+];
+const META_VERSION = 1;
+
 const openStore = (storePath) => {
   fs.mkdirSync(path.dirname(storePath), { recursive: true });
   const db = new Database(storePath);
   db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
   for (const statement of SCHEMA_STATEMENTS) {
     db.prepare(statement).run();
   }
   const columns = db.prepare("PRAGMA table_info(messages)").all().map((column) => column.name);
-  if (!columns.includes("speaker_uin")) {
-    db.prepare("ALTER TABLE messages ADD COLUMN speaker_uin TEXT NOT NULL DEFAULT ''").run();
+  for (const [name, definition] of ADDED_MESSAGE_COLUMNS) {
+    if (!columns.includes(name)) {
+      db.prepare(`ALTER TABLE messages ADD COLUMN ${name} ${definition}`).run();
+    }
   }
+  db.prepare("CREATE INDEX IF NOT EXISTS idx_messages_self ON messages(is_self, group_id)").run();
+  db.prepare("CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(sent_at)").run();
   return db;
 };
 
@@ -96,12 +116,30 @@ const ingestExport = (db, exportData, runId) => {
     INSERT OR IGNORE INTO messages (group_id, row_id, sent_at, speaker, text, is_media, media_kinds, speaker_uin)
     VALUES (@groupId, @rowId, @sentAt, @speaker, @text, @isMedia, @mediaKinds, @speakerUin)
   `);
+  // Text rows carry @/reply facts. An existing row stored by an older version
+  // (meta_version 0) gets them filled in; anything else is left untouched.
+  const upsertTextMessage = db.prepare(`
+    INSERT INTO messages (group_id, row_id, sent_at, speaker, text, is_media, media_kinds, speaker_uin,
+                          is_self, at_uins, at_all, reply_to_uin, reply_to_seq, msg_seq, meta_version)
+    VALUES (@groupId, @rowId, @sentAt, @speaker, @text, 0, '', @speakerUin,
+            @isSelf, @atUins, @atAll, @replyToUin, @replyToSeq, @msgSeq, ${META_VERSION})
+    ON CONFLICT(group_id, row_id) DO UPDATE SET
+      is_self = excluded.is_self,
+      at_uins = excluded.at_uins,
+      at_all = excluded.at_all,
+      reply_to_uin = excluded.reply_to_uin,
+      reply_to_seq = excluded.reply_to_seq,
+      msg_seq = excluded.msg_seq,
+      meta_version = excluded.meta_version
+    WHERE messages.meta_version < excluded.meta_version
+  `);
   const insertRange = db.prepare(
     "INSERT INTO scan_ranges (group_id, start_unix, end_unix, run_id) VALUES (?, ?, ?, ?)",
   );
   const upsertName = db.prepare(
     "INSERT INTO group_names (group_id, name) VALUES (?, ?) ON CONFLICT(group_id) DO UPDATE SET name = excluded.name WHERE excluded.name <> ''",
   );
+  const hasRow = db.prepare("SELECT 1 FROM messages WHERE group_id = ? AND row_id = ?");
 
   let inserted = 0;
   const ingestAll = db.transaction(() => {
@@ -110,16 +148,22 @@ const ingestExport = (db, exportData, runId) => {
       if (text.length === 0) {
         continue;
       }
-      inserted += insertMessage.run({
+      const existed = hasRow.get(String(message.groupId), String(message.rowId)) !== undefined;
+      const changes = upsertTextMessage.run({
         groupId: String(message.groupId),
         rowId: String(message.rowId),
         sentAt: message.sentAt,
         speaker: getSpeaker(message),
         text,
-        isMedia: 0,
-        mediaKinds: "",
         speakerUin: String(message.senderUin ?? ""),
+        isSelf: message.isSelf === true ? 1 : 0,
+        atUins: (Array.isArray(message.atUins) ? message.atUins : []).map(String).join(","),
+        atAll: message.atAll === true ? 1 : 0,
+        replyToUin: String(message.replyTo?.uin ?? ""),
+        replyToSeq: String(message.replyTo?.seq ?? ""),
+        msgSeq: String(message.msgSeq ?? ""),
       }).changes;
+      inserted += existed ? 0 : changes;
     }
 
     for (const message of exportData.mediaMessages ?? []) {
@@ -141,8 +185,10 @@ const ingestExport = (db, exportData, runId) => {
     // coverage, so the missing part can still be re-fetched later. Legacy
     // exports without the field keep the old whole-window behavior.
     const hasCoveredField = Object.prototype.hasOwnProperty.call(exportData, "coveredFromUnix");
-    const coveredFrom = hasCoveredField ? exportData.coveredFromUnix : exportData.startUnix;
+    const defaultCoveredFrom = hasCoveredField ? exportData.coveredFromUnix : exportData.startUnix;
     for (const groupId of exportData.groupIds ?? []) {
+      const keyed = Number(exportData.groupStarts?.[groupId]);
+      const coveredFrom = Number.isFinite(keyed) && keyed > 0 ? keyed : defaultCoveredFrom;
       if (Number.isFinite(coveredFrom) && Number.isFinite(exportData.endUnix) && coveredFrom < exportData.endUnix) {
         insertRange.run(String(groupId), coveredFrom, exportData.endUnix, runId ?? "");
       }
@@ -591,7 +637,118 @@ const getLatestMessage = (db, groupId) =>
     .prepare("SELECT sent_at AS sentAt, row_id AS rowId FROM messages WHERE group_id = ? ORDER BY sent_at DESC, row_id DESC LIMIT 1")
     .get(String(groupId)) ?? null;
 
+const advanceLocalReadMarks = (db, groupIds) => {
+  let advanced = 0;
+  for (const groupId of groupIds ?? []) {
+    const latest = getLatestMessage(db, groupId);
+    if (latest === null) {
+      continue;
+    }
+    setReadMark(db, groupId, latest.sentAt, latest.rowId);
+    advanced += 1;
+  }
+  return { advanced };
+};
+
+/* ---------- "跟我有关": who I am, and what points at me ---------- */
+
+const MIN_NAME_LENGTH = 2;
+const MAX_SELF_NAMES = 6;
+
+// The account owner, derived from the data itself: QQ marks every message the
+// logged-in account sent (is_self), so no QQ number has to be configured —
+// which matters on Linux, where the data path does not contain it.
+const getSelfIdentity = (db, extraUins = []) => {
+  const uins = new Set(
+    db.prepare("SELECT DISTINCT speaker_uin AS uin FROM messages WHERE is_self = 1 AND speaker_uin <> ''").all().map((row) => row.uin),
+  );
+  for (const uin of extraUins) {
+    if (/^\d{5,}$/u.test(String(uin))) {
+      uins.add(String(uin));
+    }
+  }
+  const names = db
+    .prepare(`
+      SELECT speaker AS name, COUNT(*) AS count FROM messages
+      WHERE is_self = 1 AND speaker <> ''
+      GROUP BY speaker ORDER BY count DESC LIMIT ${MAX_SELF_NAMES}
+    `)
+    .all()
+    .map((row) => row.name.trim())
+    .filter((name) => [...name].length >= MIN_NAME_LENGTH && !/^\d+$/u.test(name));
+  return { uins: [...uins], names: [...new Set(names)] };
+};
+
+const escapeLike = (value) => String(value).replace(/[\\%_]/gu, (match) => `\\${match}`);
+
+// Messages (not sent by me) that @ me, reply to one of my messages, @all, or
+// say one of my display names. Newest first; `kind` is the strongest reason.
+const getMentions = (db, { fromUnix, toUnix, groupIds, identity, limit = 60 }) => {
+  const uins = identity?.uins ?? [];
+  const names = identity?.names ?? [];
+  if (uins.length === 0 && names.length === 0) {
+    return [];
+  }
+  const params = { fromUnix, toUnix };
+  const reasons = [];
+  uins.forEach((uin, index) => {
+    params[`uin${index}`] = uin;
+    reasons.push(`(',' || m.at_uins || ',') LIKE '%,' || @uin${index} || ',%'`);
+    reasons.push(`m.reply_to_uin = @uin${index}`);
+  });
+  names.forEach((name, index) => {
+    params[`name${index}`] = `%${escapeLike(name)}%`;
+    reasons.push(`m.text LIKE @name${index} ESCAPE '\\'`);
+  });
+  reasons.push("m.at_all = 1");
+  const groupFilter = Array.isArray(groupIds) && groupIds.length > 0
+    ? `AND m.group_id IN (${groupIds.map((groupId, index) => {
+      params[`group${index}`] = String(groupId);
+      return `@group${index}`;
+    }).join(", ")})`
+    : "";
+  const rows = db
+    .prepare(`
+      SELECT m.group_id AS groupId, COALESCE(n.name, '') AS groupName, m.row_id AS rowId, m.sent_at AS sentAt,
+             m.speaker, m.speaker_uin AS speakerUin, m.text, m.at_uins AS atUins, m.at_all AS atAll,
+             m.reply_to_uin AS replyToUin, m.reply_to_seq AS replyToSeq
+      FROM messages m
+      LEFT JOIN group_names n ON n.group_id = m.group_id
+      WHERE m.is_media = 0 AND m.is_self = 0
+        AND m.sent_at >= @fromUnix AND m.sent_at < @toUnix
+        ${groupFilter}
+        AND (${reasons.join(" OR ")})
+      ORDER BY m.sent_at DESC, m.row_id DESC
+      LIMIT ${Math.max(1, Math.min(200, Number(limit) || 60))}
+    `)
+    .all(params);
+
+  const findMine = db.prepare(
+    "SELECT text FROM messages WHERE group_id = ? AND msg_seq = ? AND is_self = 1 AND is_media = 0 LIMIT 1",
+  );
+  const uinSet = new Set(uins);
+  return rows.map((row) => {
+    const atMe = row.atUins.split(",").some((uin) => uinSet.has(uin));
+    const replyToMe = uinSet.has(row.replyToUin);
+    const kind = atMe ? "at" : replyToMe ? "reply" : row.atAll === 1 ? "atAll" : "name";
+    const quoted = replyToMe && row.replyToSeq !== "" ? findMine.get(row.groupId, row.replyToSeq)?.text ?? null : null;
+    return {
+      groupId: row.groupId,
+      groupName: row.groupName,
+      rowId: row.rowId,
+      sentAt: row.sentAt,
+      speaker: row.speaker,
+      speakerUin: row.speakerUin,
+      text: row.text,
+      kind,
+      quotedMine: quoted,
+    };
+  });
+};
+
 module.exports = {
+  getSelfIdentity,
+  getMentions,
   openStore,
   sanitizeSnippet,
   lightCleanText,
@@ -608,4 +765,5 @@ module.exports = {
   getReadMark,
   setReadMark,
   getLatestMessage,
+  advanceLocalReadMarks,
 };

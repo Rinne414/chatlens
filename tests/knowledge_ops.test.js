@@ -8,7 +8,7 @@ const test = require("node:test");
 const Database = require("better-sqlite3-multiple-ciphers");
 
 const knowledge = require("../src/server/knowledge_ops");
-const { openKnowledgeStore, upsertImage, recordSighting, recordPromptRequest } = require("../src/knowledge_store");
+const { openKnowledgeStore, upsertImage, recordSighting, recordPromptRequest, attachMediaObject } = require("../src/knowledge_store");
 
 // A tool root with a populated store, shaped like the real one.
 const makeToolRoot = (build) => {
@@ -554,6 +554,44 @@ test("a thumbnail is refused for an unknown or malformed hash", () => {
   assert.equal(knowledge.thumbnailFilePath(root, "f".repeat(32)), null);
 });
 
+test("a durable object is preferred over a Thumb recorded as the cache path", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kops-object-"));
+  const hash = "b".repeat(32);
+  const thumbPath = path.join(root, "cache", "Pic", "2026-08", "Thumb", `${hash}_0.png`);
+  const objectPath = path.join(root, "store", "media-objects", hash.slice(0, 2), `${hash}.png`);
+  fs.mkdirSync(path.dirname(thumbPath), { recursive: true });
+  fs.mkdirSync(path.dirname(objectPath), { recursive: true });
+  fs.writeFileSync(thumbPath, Buffer.alloc(200));
+  fs.writeFileSync(objectPath, Buffer.alloc(4000));
+
+  const db = openKnowledgeStore(path.join(root, "store", "knowledge.db"));
+  upsertImage(db, image(hash, { filePath: thumbPath }));
+  attachMediaObject(db, { hash, objectPath });
+  db.close();
+
+  assert.equal(knowledge.imageFilePath(root, hash), objectPath);
+  assert.ok(knowledge.thumbnailFilePath(root, hash).endsWith("_0.png"));
+  const exported = knowledge.collectForExport(root, { hashes: [hash] });
+  assert.equal(exported.items[0].filePath, objectPath);
+});
+
+test("a Thumb-only cache path is not treated as the original", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kops-thumbonly-"));
+  const hash = "c".repeat(32);
+  const thumbPath = path.join(root, "cache", "Pic", "2026-08", "Thumb", `${hash}_0.png`);
+  fs.mkdirSync(path.dirname(thumbPath), { recursive: true });
+  fs.writeFileSync(thumbPath, Buffer.alloc(200));
+
+  const db = openKnowledgeStore(path.join(root, "store", "knowledge.db"));
+  upsertImage(db, image(hash, { filePath: thumbPath }));
+  db.close();
+
+  assert.equal(knowledge.imageFilePath(root, hash), null);
+  assert.ok(knowledge.thumbnailFilePath(root, hash).endsWith("_0.png"));
+  const exported = knowledge.collectForExport(root, { hashes: [hash] });
+  assert.equal(exported.items[0].filePath, "", "export must not copy a Thumb as the original");
+});
+
 // --- attribution reason ----------------------------------------------------
 
 // A tool root with both a knowledge store and a message store, so coverage
@@ -653,16 +691,34 @@ test("overview aggregates the reasons and the covered window", () => {
   assert.deepEqual(result.coverage, { fromUnix: 1000, toUnix: 2000, rangeCount: 1 });
 });
 
-test("placeholder rows are left out of the reason breakdown", () => {
+test("stripped group images are counted in the reason breakdown so the grid is honest", () => {
   const root = makeToolRootWithCoverage((db) => {
     upsertImage(db, image("a".repeat(32), { fileMtime: 500 }));
-    upsertImage(db, image("b".repeat(32), { fileMtime: 500, generator: "stripped", prompt: "", loras: [] }));
+    upsertImage(db, image("b".repeat(32), { fileMtime: 1500, generator: "stripped", prompt: "", loras: [] }));
+    recordSighting(db, {
+      hash: "b".repeat(32), groupId: "1001", rowId: "1", sentAt: 1500, speaker: "Alice", speakerUin: "1", groupName: "G1",
+    });
   }, [{ startUnix: 1000, endUnix: 2000 }]);
 
   const result = knowledge.overview(root);
-  const total = Object.values(result.reasons).reduce((sum, count) => sum + count, 0);
+  assert.equal(result.reasons.attributed, 1);
+  assert.equal(result.reasons["outside-coverage"], 1);
+});
 
-  assert.equal(total, 1, "a placeholder is not a knowledge-base image");
+test("says only some groups were scanned when coverage is per-group", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kops-cov-"));
+  const knowledgeDb = openKnowledgeStore(path.join(root, "store", "knowledge.db"));
+  upsertImage(knowledgeDb, image("a".repeat(32), { fileMtime: 1500 }));
+  knowledgeDb.close();
+  const messagesDb = new Database(path.join(root, "store", "messages.db"));
+  messagesDb.prepare("CREATE TABLE scan_ranges (group_id TEXT, start_unix INTEGER, end_unix INTEGER, run_id TEXT DEFAULT '')").run();
+  messagesDb.prepare("INSERT INTO scan_ranges (group_id, start_unix, end_unix) VALUES (?, ?, ?)").run("1001", 1000, 2000);
+  messagesDb.prepare("INSERT INTO scan_ranges (group_id, start_unix, end_unix) VALUES (?, ?, ?)").run("2002", 9000, 9100);
+  messagesDb.close();
+
+  const item = knowledge.searchImages(root, {}).items[0];
+  assert.equal(item.attributionReason, "not-in-messages");
+  assert.equal(item.coverageGroupCount, 1);
 });
 
 test("works when the message store is absent entirely", () => {

@@ -1,71 +1,30 @@
 const fs = require("node:fs");
+const http = require("node:http");
+const https = require("node:https");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const state = require("./toolkit_state");
-const { quotePs } = require("./run_jobs");
+const secrets = require("../secrets");
+const platform = require("../platform");
+const { detectPrefixBytes } = require("../db_mirror");
+const linuxScan = require("../linux_key_scan");
 const packageInfo = require("../../package.json");
 
-const SECRET_DIR = path.join(process.env.APPDATA ?? "", "QQSummaryTools");
-const SECRET_FILES = {
-  ntqqKey: "ntqq-db-key.dpapi",
-  llmKey: "deepseek-api-key.dpapi",
-};
-const getSecretDirectory = () => path.resolve(SECRET_DIR);
 const BASE_URL_PATTERN = /^https?:\/\/[\w.-]+(?::\d+)?(?:\/[\w./-]*)?$/u;
 const MODEL_NAME_PATTERN = /^[\w.:/-]{1,64}$/u;
-// Absolute Windows directory without quote-breaking or illegal path characters —
-// these values later travel through PowerShell/npm command lines.
-const WINDOWS_DIR_PATTERN = /^[A-Za-z]:[\\/][^"<>|]*$/u;
-const hasControlChar = (value) => [...String(value)].some((ch) => ch.codePointAt(0) < 32);
+const MODEL_LIST_TIMEOUT_MS = 30000;
+const KEY_SCAN_TIMEOUT_MS = 300000;
+const KEY_VERIFY_TIMEOUT_MS = 420000;
 
-const runPowershell = (commandText, stdinText, { timeoutMs } = {}) =>
+const getSecretDirectory = () => path.resolve(secrets.secretDir());
+
+// Runs a child with the same node binary as this server (works in the
+// zero-setup bundle, where no system node exists). Resolves with the exit
+// code and captured output instead of rejecting on non-zero exits.
+const runProcess = (command, args, timeoutMs, { input } = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn("powershell.exe", [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-EncodedCommand",
-      Buffer.from(commandText, "utf16le").toString("base64"),
-    ], { windowsHide: true });
-
-    let stdout = "";
-    let stderr = "";
-    let timer = null;
-    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-      timer = setTimeout(() => {
-        child.kill();
-        reject(new Error("PowerShell 执行超时。"));
-      }, timeoutMs);
-    }
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
-    child.on("error", (error) => {
-      if (timer) { clearTimeout(timer); }
-      reject(error);
-    });
-    child.on("close", (code) => {
-      if (timer) { clearTimeout(timer); }
-      if (code === 0) {
-        resolve(stdout);
-      } else {
-        const lastLine = stderr.trim().split(/\r?\n/u).filter((line) => line.trim().length > 0).at(-1) ?? "";
-        reject(new Error(lastLine.slice(0, 300) || `PowerShell 退出码 ${code}`));
-      }
-    });
-    if (typeof stdinText === "string") {
-      child.stdin.write(stdinText, "utf8");
-    }
-    child.stdin.end();
-  });
-
-// Runs one of the toolkit's own node scripts with the SAME node binary that is
-// running this server (process.execPath) — so it works in the zero-setup bundle
-// too, where there is no system "node" on PATH. Returns exit code + captured
-// output instead of rejecting, since callers care about non-zero exits.
-const runNodeScript = (scriptPath, args, timeoutMs) =>
-  new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], { windowsHide: true });
+    const child = spawn(command, args, { windowsHide: true });
     let stdout = "";
     let stderr = "";
     let timer = null;
@@ -85,17 +44,25 @@ const runNodeScript = (scriptPath, args, timeoutMs) =>
       if (timer) { clearTimeout(timer); }
       resolve({ code, stdout, stderr });
     });
+    if (typeof input === "string") {
+      child.stdin.write(input, "utf8");
+    }
+    child.stdin.end();
   });
+
+const lastLine = (text) => String(text ?? "").trim().split(/\r?\n/u).filter((line) => line.trim().length > 0).at(-1) ?? "";
 
 const getSettingsStatus = () => {
   const config = state.loadConfig();
   return {
     version: packageInfo.version,
-    ntqqKeySaved: fs.existsSync(path.join(SECRET_DIR, SECRET_FILES.ntqqKey)),
-    llmKeySaved: fs.existsSync(path.join(SECRET_DIR, SECRET_FILES.llmKey)),
+    platform: process.platform,
+    secretBackend: secrets.describeSecretStorage().backend,
+    ntqqKeySaved: secrets.hasSecret("ntqqKey"),
+    llmKeySaved: secrets.hasSecret("llmKey"),
     ntDbDir: config.ntDbDir ?? "",
     ntDataDir: config.ntDataDir ?? "",
-    ntDbDirExists: typeof config.ntDbDir === "string" && fs.existsSync(config.ntDbDir),
+    ntDbDirExists: typeof config.ntDbDir === "string" && config.ntDbDir.length > 0 && fs.existsSync(config.ntDbDir),
     ntDataDirExists: typeof config.ntDataDir === "string" && config.ntDataDir.length > 0 && fs.existsSync(config.ntDataDir),
     llm: {
       baseUrl: config.llm?.baseUrl ?? "",
@@ -104,61 +71,51 @@ const getSettingsStatus = () => {
   };
 };
 
-// The secret travels via stdin only — never on a command line, never in a log.
+// The secret travels via stdin/keyring only — never on a command line or log.
 const saveSecret = async (which, secretValue) => {
-  const fileName = SECRET_FILES[which];
-  if (fileName === undefined) {
-    throw new Error(`未知的密钥类型: ${which}`);
-  }
-  const secret = String(secretValue ?? "").trim();
-  if (secret.length < 8 || secret.length > 512) {
-    throw new Error("密钥长度不合理（应为 8-512 个字符）。");
-  }
-
-  const command = [
-    "$ErrorActionPreference = 'Stop'",
-    "$plain = [Console]::In.ReadToEnd().Trim()",
-    "if ($plain.Length -lt 8) { throw 'Secret from stdin is empty.' }",
-    "$secure = ConvertTo-SecureString -String $plain -AsPlainText -Force",
-    "$encrypted = ConvertFrom-SecureString -SecureString $secure",
-    "$dir = Join-Path $env:APPDATA 'QQSummaryTools'",
-    "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
-    `Set-Content -LiteralPath (Join-Path $dir '${fileName}') -Value $encrypted -Encoding ASCII`,
-    "exit 0",
-  ].join("\n");
-  await runPowershell(command, secret);
+  await secrets.saveSecret(which, secretValue);
 };
 
-// Lists model ids from any OpenAI-compatible endpoint. The API key stays inside
-// the PowerShell process (read from DPAPI); only model ids come back on stdout.
-// Always fetches from the base URL already persisted in config: the stored key
-// must never be sent to a caller-supplied URL.
+const getJson = (rawUrl, headers) =>
+  new Promise((resolve, reject) => {
+    const url = new URL(rawUrl);
+    const transport = url.protocol === "http:" ? http : https;
+    const request = transport.get(url, { headers }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`模型列表请求失败（HTTP ${response.statusCode}）。`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error("模型列表不是合法 JSON。"));
+        }
+      });
+    });
+    request.setTimeout(MODEL_LIST_TIMEOUT_MS, () => request.destroy(new Error("模型列表请求超时。")));
+    request.on("error", reject);
+  });
+
+// Lists model ids from any OpenAI-compatible endpoint. Always uses the base
+// URL already persisted in config: the stored key must never be sent to a
+// caller-supplied URL.
 const fetchLlmModels = async () => {
   const config = state.loadConfig();
   const trimmed = String(config.llm?.baseUrl ?? "").trim().replace(/\/+$/u, "");
   if (!BASE_URL_PATTERN.test(trimmed)) {
     throw new Error("先保存 LLM 配置（API 地址），再获取模型列表。");
   }
-  if (!fs.existsSync(path.join(SECRET_DIR, SECRET_FILES.llmKey))) {
+  if (!secrets.hasSecret("llmKey")) {
     throw new Error("先在上方保存 LLM API key，再获取模型列表。");
   }
-
-  const commonPs = path.join(state.toolRoot, "scripts", "common.ps1");
-  const command = [
-    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-    "$ErrorActionPreference = 'Stop'",
-    `. ${quotePs(commonPs)}`,
-    "$key = Read-SavedSecret -FileName 'deepseek-api-key.dpapi' -SecretName 'LLM API key'",
-    `$resp = Invoke-RestMethod -Uri '${trimmed}/models' -Headers @{ Authorization = \"Bearer $key\" } -TimeoutSec 30`,
-    "$items = if ($null -ne $resp.PSObject.Properties['data']) { $resp.data } else { $resp }",
-    "foreach ($m in @($items)) { if ($null -ne $m.PSObject.Properties['id']) { Write-Output $m.id } }",
-    "exit 0",
-  ].join("\n");
-
-  const output = await runPowershell(command);
-  const models = [...new Set(
-    output.split(/\r?\n/u).map((line) => line.trim()).filter((line) => MODEL_NAME_PATTERN.test(line)),
-  )];
+  const key = (await secrets.readSecret("llmKey")).trim();
+  const body = await getJson(`${trimmed}/models`, { authorization: `Bearer ${key}` });
+  const items = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
+  const models = [...new Set(items.map((item) => String(item?.id ?? "").trim()).filter((id) => MODEL_NAME_PATTERN.test(id)))];
   if (models.length === 0) {
     throw new Error("该地址没有返回模型列表（检查 baseUrl 与 API key）。");
   }
@@ -188,17 +145,19 @@ const saveLlmConfig = ({ baseUrl, model }) => {
   return { baseUrl: trimmedUrl, model: nextModel };
 };
 
+const exampleDbDir = () => (platform.isWindows ? "C:\\...\\nt_qq\\nt_db" : "/home/你/.config/QQ/nt_qq_xxxx/nt_db");
+
 const saveQqPaths = ({ ntDbDir, ntDataDir }) => {
   const dbDir = String(ntDbDir ?? "").trim();
   const dataDir = String(ntDataDir ?? "").trim();
   if (dbDir.length === 0) {
     throw new Error("nt_db 目录不能为空。");
   }
-  if (!WINDOWS_DIR_PATTERN.test(dbDir) || hasControlChar(dbDir)) {
-    throw new Error("nt_db 目录应为绝对路径（例如 C:\\...\\nt_qq\\nt_db），且不能包含 \" < > | 字符。");
+  if (!platform.isSafeAbsoluteDir(dbDir)) {
+    throw new Error(`nt_db 目录应为绝对路径（例如 ${exampleDbDir()}），且不能包含引号等特殊字符。`);
   }
-  if (dataDir.length > 0 && (!WINDOWS_DIR_PATTERN.test(dataDir) || hasControlChar(dataDir))) {
-    throw new Error("nt_data 目录应为绝对路径，且不能包含 \" < > | 字符。");
+  if (dataDir.length > 0 && !platform.isSafeAbsoluteDir(dataDir)) {
+    throw new Error("nt_data 目录应为绝对路径，且不能包含引号等特殊字符。");
   }
   saveConfigPatch({ ntDbDir: dbDir, ntDataDir: dataDir });
   return {
@@ -209,62 +168,129 @@ const saveQqPaths = ({ ntDbDir, ntDataDir }) => {
   };
 };
 
-// Best-effort scan of the default QQNT data locations for this Windows user.
-// QQ defaults to Documents\Tencent Files, but the storage location is
+const safeReaddir = (dir) => {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+};
+
+const lastModified = (filePath) => {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return 0;
+  }
+};
+
+// Windows: QQ defaults to Documents\Tencent Files, but the location is
 // user-configurable — also probe <drive>:\Tencent Files on every drive letter
 // (each base plus its nested "Tencent Files\Tencent Files" layout).
-const detectQqPaths = () => {
-  const candidates = [];
+const windowsCandidates = () => {
   const bases = [
     path.join(os.homedir(), "Documents", "Tencent Files"),
-    // OneDrive-redirected Documents (common on consumer Windows installs)
-    // lives outside os.homedir()/Documents and used to defeat auto-detection.
+    // OneDrive-redirected Documents live outside os.homedir()/Documents.
     ...(process.env.OneDrive ? [path.join(process.env.OneDrive, "Documents", "Tencent Files")] : []),
     path.join(os.homedir(), "OneDrive", "Documents", "Tencent Files"),
   ];
   for (let code = 67; code <= 90; code += 1) {
     bases.push(`${String.fromCharCode(code)}:\\Tencent Files`);
   }
-  const roots = [];
-  for (const base of bases) {
-    roots.push(base, path.join(base, "Tencent Files"));
-  }
-  for (const root of roots) {
-    if (!fs.existsSync(root)) {
-      continue;
-    }
-    let entries;
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
+  const candidates = [];
+  for (const root of bases.flatMap((base) => [base, path.join(base, "Tencent Files")])) {
+    for (const entry of safeReaddir(root)) {
       if (!entry.isDirectory() || !/^\d{5,}$/u.test(entry.name)) {
         continue;
       }
       const ntDbDir = path.join(root, entry.name, "nt_qq", "nt_db");
-      if (fs.existsSync(ntDbDir) && !candidates.some((candidate) => candidate.ntDbDir === ntDbDir)) {
-        candidates.push({
-          qq: entry.name,
-          ntDbDir,
-          ntDataDir: path.join(root, entry.name, "nt_qq", "nt_data"),
-        });
+      if (fs.existsSync(ntDbDir)) {
+        candidates.push({ qq: entry.name, ntDbDir, ntDataDir: path.join(root, entry.name, "nt_qq", "nt_data") });
       }
     }
   }
   return candidates;
 };
 
-// QQNT prepends a 1024-byte fake header ("SQLite header 3\0…") to nt_msg.db;
-// SQLCipher only opens a copy with that prefix stripped.
-const NT_MSG_PREFIX_BYTES = 1024;
+// Linux QQ (QQNT 3.x) keeps one nt_qq_<hash> folder per account under its
+// config dir; the folder name does not contain the QQ number, so candidates
+// are labelled by folder and ordered by most recent use.
+const linuxCandidates = () => {
+  const home = os.homedir();
+  const configHome = process.env.XDG_CONFIG_HOME && path.isAbsolute(process.env.XDG_CONFIG_HOME)
+    ? process.env.XDG_CONFIG_HOME
+    : path.join(home, ".config");
+  const roots = [
+    path.join(configHome, "QQ"),
+    path.join(home, ".var", "app", "com.qq.QQ", "config", "QQ"),
+    path.join(home, "snap", "qq", "current", ".config", "QQ"),
+  ];
+  const candidates = [];
+  for (const root of roots) {
+    for (const entry of safeReaddir(root)) {
+      if (!entry.isDirectory() || !entry.name.startsWith("nt_qq")) {
+        continue;
+      }
+      const ntDbDir = path.join(root, entry.name, "nt_db");
+      if (fs.existsSync(path.join(ntDbDir, "nt_msg.db"))) {
+        candidates.push({
+          qq: entry.name,
+          ntDbDir,
+          ntDataDir: path.join(root, entry.name, "nt_data"),
+          lastUsed: lastModified(path.join(ntDbDir, "nt_msg.db")),
+        });
+      }
+    }
+  }
+  return candidates.sort((left, right) => right.lastUsed - left.lastUsed).map(({ lastUsed, ...rest }) => rest);
+};
+
+const detectQqPaths = () => {
+  const found = platform.isWindows ? windowsCandidates() : linuxCandidates();
+  return found.filter((candidate, index) => found.findIndex((other) => other.ntDbDir === candidate.ntDbDir) === index);
+};
+
+// Runs the platform's QQ memory scanner and returns the candidate file path.
+const scanForCandidates = async (candidatesPath) => {
+  if (platform.isWindows) {
+    const script = path.join(state.toolRoot, "scripts", "scan_qq_memory_keys.ps1");
+    const scan = await runProcess("powershell.exe", [
+      "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+      "-File", script, "-OutputPath", candidatesPath,
+    ], KEY_SCAN_TIMEOUT_MS);
+    if (scan.code !== 0) {
+      throw new Error(lastLine(scan.stderr).slice(0, 300) || `内存扫描失败（退出码 ${scan.code}）。`);
+    }
+    return;
+  }
+  // Reading another process's memory needs ptrace rights. pkexec shows the
+  // desktop's password prompt and runs ONLY the system /bin/sh + dd, copying
+  // QQ's memory regions to our stdout; the candidate scan happens here,
+  // unprivileged. No file from this (user-writable) install ever runs as root.
+  if (!platform.commandExists("pkexec")) {
+    throw new Error("没有找到 pkexec，无法弹出授权窗口。可在终端运行 sudo node src/linux_key_scan.js --output /tmp/qq-keys.txt 自行扫描，或直接手动粘贴密钥。");
+  }
+  const pids = linuxScan.findQqPids();
+  if (pids.length === 0) {
+    throw new Error("没有找到正在运行的 QQ 进程。请先打开并登录 QQ，再重试自动获取密钥。");
+  }
+  const specs = linuxScan.regionSpecs(pids);
+  if (specs.length === 0) {
+    throw new Error("读不到 QQ 进程的内存布局，请确认 QQ 以当前用户身份运行。");
+  }
+  const scan = await linuxScan.streamPrivilegedScan(specs, KEY_SCAN_TIMEOUT_MS);
+  if (scan.code === 126 || scan.code === 127) {
+    throw new Error("授权被取消，未读取 QQ 内存。");
+  }
+  if (scan.bytes === 0) {
+    throw new Error(`没有读到 QQ 进程内存（退出码 ${scan.code}）。可改用手动粘贴密钥。`);
+  }
+  fs.writeFileSync(candidatesPath, [...scan.candidates].join("\n"), { mode: 0o600 });
+};
 
 // One-click NTQQ key recovery: scan the running QQ process memory for key
-// candidates, then verify each against a throwaway copy of the user's own DB
-// and DPAPI-save the one that decrypts it. This removes the biggest barrier for
-// non-technical users (previously they had to find the 16/32-char key by hand).
-// The key value never leaves the child processes — it is not returned or logged.
+// candidates, verify them against the start of the user's own database, and
+// save the one that decrypts it. The key never leaves the child processes.
 const autoDetectKey = async () => {
   const config = state.loadConfig();
   const ntDbDir = String(config.ntDbDir ?? "").trim();
@@ -277,41 +303,19 @@ const autoDetectKey = async () => {
   }
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-autokey-"));
-  const cleanDb = path.join(workDir, "nt_msg.clean.db");
+  const sampleDb = path.join(workDir, "nt_msg.sample.db");
   const candidatesPath = path.join(workDir, "candidates.txt");
   try {
-    // 1) Strip the fake header into a temp copy so SQLCipher can open it.
-    //    Copying needs no key; the original QQ database is never modified.
-    const copy = await runNodeScript(
-      path.join(state.toolRoot, "src", "copy_clean_db.js"),
-      [sourceDb, cleanDb, String(NT_MSG_PREFIX_BYTES)],
-      60000,
-    );
-    if (copy.code !== 0) {
-      throw new Error("复制数据库副本失败，无法用来验证密钥。请确认 QQ 数据库路径正确。");
-    }
-
-    // 2) Scan the running QQ process memory for 16/32-char key candidates.
-    const scanScript = path.join(state.toolRoot, "scripts", "scan_qq_memory_keys.ps1");
-    const scanCommand = [
-      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-      "$ErrorActionPreference = 'Stop'",
-      `& ${quotePs(scanScript)} -OutputPath ${quotePs(candidatesPath)}`,
-      "exit 0",
-    ].join("\n");
-    await runPowershell(scanCommand, undefined, { timeoutMs: 240000 });
+    const { writeDatabaseSample } = require("../save_key_from_candidates");
+    writeDatabaseSample(sourceDb, sampleDb, detectPrefixBytes(sourceDb));
+    await scanForCandidates(candidatesPath);
     if (!fs.existsSync(candidatesPath)) {
       throw new Error("内存扫描没有产生候选。请确认 QQ 已打开并登录后重试。");
     }
-
-    // 3) Verify candidates against the DB and DPAPI-save the one that works.
-    const secretPath = path.join(SECRET_DIR, SECRET_FILES.ntqqKey);
-    // Memory scans yield tens of thousands of candidates; verifying each one
-    // opens the DB, so on slower machines this can run several minutes.
-    const verify = await runNodeScript(
-      path.join(state.toolRoot, "src", "save_key_from_candidates.js"),
-      [cleanDb, candidatesPath, secretPath],
-      420000,
+    const verify = await runProcess(
+      process.execPath,
+      [path.join(state.toolRoot, "src", "save_key_from_candidates.js"), sampleDb, candidatesPath],
+      KEY_VERIFY_TIMEOUT_MS,
     );
     let result = null;
     try {

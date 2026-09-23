@@ -7,15 +7,18 @@ const {
   validateCoverageRepairPlan,
 } = require("../coverage_repair_plan");
 const { loadState: loadCoverageRepairState } = require("../coverage_repair");
-const { loadConfig, toolRoot } = require("./toolkit_state");
+const { loadConfig, getStoreOverview, advanceLocalReadMarks, toolRoot } = require("./toolkit_state");
+const { resolveSummaryRange } = require("../unviewed_range");
+const platform = require("../platform");
 
 const MAX_LOG_LINES = 4000;
 const MINIMUM_COVERAGE_REPAIR_HEADROOM_BYTES = 4 * 1024 * 1024 * 1024;
 const coverageRepairRoot = path.join(toolRoot, "store", "coverage-repairs");
+const mirrorMessageDb = path.join(toolRoot, "store", "db-mirror", "nt_msg.clean.db");
+const pipelineScript = (name) => path.join(toolRoot, "src", "pipeline", name);
 const TIME_TEXT_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:\s*(?:Z|[+-]\d{2}:\d{2}))?$/u;
 // UI times are Beijing time (UTC+8) everywhere; stamp the offset explicitly so
-// PowerShell never parses them in the machine-local timezone — that used to
-// shift scan windows by hours for users outside UTC+8 (or fail the run).
+// the pipeline never parses them in the machine-local timezone.
 const withBeijingOffset = (text) => (/(?:Z|[+-]\d{2}:\d{2})\s*$/u.test(text) ? text : `${text} +08:00`);
 
 let currentJob = null;
@@ -166,12 +169,20 @@ const applyLine = (job, line) => {
     return;
   }
 
-  if (line.includes("prepare-clean-dbs") && line.startsWith(">")) {
+  if (line === "progress=copy-start") {
     setStage(job, "copy");
     return;
   }
-  if (line.startsWith("cleanDir=")) {
+  if (line === "progress=export-start" || line === "progress=list-start") {
     setStage(job, job.type === "group-list" ? "list" : "export");
+    return;
+  }
+  if (line === "progress=media-start") {
+    setStage(job, "media");
+    return;
+  }
+  if (line === "progress=report-start") {
+    setStage(job, "report");
     return;
   }
   if (line.startsWith("progress=export-done") || line.startsWith("progress=analyze-done")) {
@@ -198,29 +209,12 @@ const applyLine = (job, line) => {
     job.llmFailures += 1;
     return;
   }
-  if (line.includes("export-media") && line.startsWith(">")) {
-    setStage(job, "media");
-    return;
-  }
-  if (line.startsWith("htmlPath=") || line.startsWith("digestPath=")) {
-    setStage(job, "report");
-  }
 
   const match = line.match(/^(\w+)=(.+)$/u);
   if (match !== null && RESULT_KEYS.has(match[1])) {
     job.result[match[1]] = match[2].trim();
   }
 };
-
-const buildPowershellArgs = (commandText) => [
-  "-NoProfile",
-  "-ExecutionPolicy",
-  "Bypass",
-  "-EncodedCommand",
-  Buffer.from(commandText, "utf16le").toString("base64"),
-];
-
-const quotePs = (value) => `'${String(value).replaceAll("'", "''")}'`;
 
 const readJsonFile = (filePath, label) => {
   try {
@@ -309,10 +303,9 @@ const estimateCoverageRepair = ({ batches }) => {
   const paths = coverageRepairPaths(plan.planId);
   const snapshotBytes = sourceSnapshotBytes(ntDbDir);
   const existingTemporaryBytes = directoryBytes(paths.workDir);
-  const cleanMessageDb = path.join(paths.workDir, "clean-db", "nt_msg.clean.db");
-  const cleanGroupDb = path.join(paths.workDir, "clean-db", "group_info.clean.db");
-  const snapshotReady = fs.existsSync(cleanMessageDb) && fs.existsSync(cleanGroupDb);
-  const additionalTemporaryBytes = snapshotReady ? 0 : snapshotBytes;
+  // Repairs read the shared, persistent database mirror; only its first
+  // creation needs room for a full copy.
+  const additionalTemporaryBytes = fs.existsSync(mirrorMessageDb) ? 0 : snapshotBytes;
   const availableBytes = freeDiskBytes(toolRoot);
   const headroomBytes = coverageRepairHeadroomBytes(snapshotBytes);
   const requiredFreeBytes = additionalTemporaryBytes + headroomBytes;
@@ -359,28 +352,52 @@ const ensureCoverageRepairPlan = (plan) => {
   return paths;
 };
 
-const buildCoverageRepairCommand = (planPath) => {
+const buildCoverageRepairArgs = (planPath) => {
   if (typeof planPath !== "string" || planPath.trim().length === 0 || !path.isAbsolute(planPath)) {
     throw new TypeError(`Coverage repair plan path must be absolute. value=${planPath}`);
   }
-  const script = path.join(toolRoot, "scripts", "repair_coverage.ps1");
-  return `& ${quotePs(script)} -PlanPath ${quotePs(planPath)}`;
+  return [pipelineScript("coverage_repair_run.js"), planPath];
+};
+
+const isInsideDir = (root, target) => {
+  const relative = path.relative(root, target);
+  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+};
+
+const GROUP_STARTS_NAME = /^group-starts-\d+\.json$/u;
+
+// Job temps only: coverage-repair <planId>.work dirs, and the unviewed-run
+// group-starts-*.json files written next to the store (not the store itself).
+const resolveAllowedCleanupPath = (cleanupPath) => {
+  const resolved = path.resolve(cleanupPath);
+  const repairRoot = path.resolve(coverageRepairRoot);
+  const storeDir = path.resolve(path.join(toolRoot, "store"));
+  if (path.dirname(resolved) === repairRoot && resolved.endsWith(".work") && isInsideDir(repairRoot, resolved)) {
+    return resolved;
+  }
+  if (path.dirname(resolved) === storeDir && GROUP_STARTS_NAME.test(path.basename(resolved))) {
+    return resolved;
+  }
+  throw new Error(`Refusing to clean a path outside job temp roots. path=${resolved}`);
 };
 
 const safeCleanupPaths = (cleanupPaths) => {
-  const resolvedRoot = path.resolve(coverageRepairRoot);
   for (const cleanupPath of cleanupPaths) {
-    const resolved = path.resolve(cleanupPath);
-    const relative = path.relative(resolvedRoot, resolved);
-    if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative) || !resolved.endsWith(".work")) {
-      throw new Error(`Refusing to clean a path outside the coverage repair work root. path=${resolved}`);
-    }
-    fs.rmSync(resolved, { recursive: true, force: true });
+    fs.rmSync(resolveAllowedCleanupPath(cleanupPath), { recursive: true, force: true });
   }
 };
 
-const spawnJob = (type, label, commandText, stages, cleanupPaths) => {
-  if (currentJob !== null && currentJob.status === "running") {
+const jobCleanupFailureMessage = (jobType, cleanupError) => {
+  const prefix = jobType === "coverage-repair" ? "补扫完成" : "任务完成";
+  return `${prefix}，但临时文件清理失败: ${cleanupError.message}`;
+};
+
+const isJobRunning = () => currentJob !== null && currentJob.status === "running";
+
+// args[0] is the pipeline script; everything travels as argv (no shell, so no
+// quoting or injection concerns) and runs on the same node binary as us.
+const spawnJob = (type, label, args, stages, cleanupPaths) => {
+  if (isJobRunning()) {
     throw new Error("已有任务在运行中，请等待完成或先取消。");
   }
 
@@ -407,17 +424,9 @@ const spawnJob = (type, label, commandText, stages, cleanupPaths) => {
     cleanupPaths: [...cleanupPaths],
   };
 
-  // [Console]::OutputEncoding forces UTF-8 on redirected stdout so Chinese log lines survive.
-  const wrapped = [
-    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-    "$ErrorActionPreference = 'Stop'",
-    commandText,
-    "exit $LASTEXITCODE",
-  ].join("\n");
-
-  const child = spawn("powershell.exe", buildPowershellArgs(wrapped), {
+  const child = spawn(process.execPath, args, {
     cwd: toolRoot,
-    windowsHide: true,
+    ...platform.spawnOptionsForTree(),
   });
   job.pid = child.pid;
 
@@ -461,7 +470,7 @@ const spawnJob = (type, label, commandText, stages, cleanupPaths) => {
     }
     if (job.status === "cancelled") {
       if (cleanupError !== null) {
-        job.error = `任务已取消，但临时目录清理失败: ${cleanupError.message}`;
+        job.error = `任务已取消，但临时文件清理失败: ${cleanupError.message}`;
       }
       return;
     }
@@ -469,7 +478,14 @@ const spawnJob = (type, label, commandText, stages, cleanupPaths) => {
     if (code !== 0 && job.error === null) {
       job.error = `进程退出码 ${code}`;
     } else if (cleanupError !== null) {
-      job.error = `补扫完成，但临时目录清理失败: ${cleanupError.message}`;
+      job.error = jobCleanupFailureMessage(job.type, cleanupError);
+    }
+    if (job.status === "done" && job.advanceReadMarks === true) {
+      try {
+        advanceLocalReadMarks(job.targetGroupIds ?? []);
+      } catch (error) {
+        console.error(`advanceLocalReadMarks failed: ${error.message}`);
+      }
     }
     job.endedAt = new Date().toISOString();
     finishStages(job, job.status);
@@ -486,14 +502,14 @@ const buildRangeArgs = (range) => {
     if (!Number.isInteger(hours) || hours <= 0 || hours > 24 * 90) {
       throw new Error(`无效的小时数: ${range.hours}`);
     }
-    return `-SinceHours ${hours}`;
+    return ["--since-hours", String(hours)];
   }
   if (range?.type === "days") {
     const days = Number.parseInt(range.days, 10);
     if (!Number.isInteger(days) || days <= 0 || days > 365) {
       throw new Error(`无效的天数: ${range.days}`);
     }
-    return `-Days ${days}`;
+    return ["--days", String(days)];
   }
   if (range?.type === "custom") {
     const start = String(range.start ?? "").trim();
@@ -504,30 +520,68 @@ const buildRangeArgs = (range) => {
     if (end.length > 0 && !TIME_TEXT_PATTERN.test(end)) {
       throw new Error(`无效的结束时间: ${end}`);
     }
-    const endArg = end.length > 0 ? ` -EndTime ${quotePs(withBeijingOffset(end))}` : "";
-    return `-StartTime ${quotePs(withBeijingOffset(start))}${endArg}`;
+    const endArgs = end.length > 0 ? ["--end", withBeijingOffset(end)] : [];
+    return ["--start", withBeijingOffset(start), ...endArgs];
   }
   throw new Error(`未知的时间范围类型: ${range?.type}`);
 };
 
+const watchlistGroupIds = () =>
+  (loadConfig().watchlist ?? [])
+    .map((item) => (typeof item === "string" ? item.trim() : String(item?.groupId ?? "").trim()))
+    .filter((groupId) => /^\d+$/u.test(groupId));
+
 const startSummaryJob = ({ mode, groupIds, range }) => {
-  const script = path.join(toolRoot, "scripts", "run_one_click_summary.ps1");
-  let target;
+  let targetArgs;
+  let targetIds;
   if (mode === "watchlist") {
-    target = "-UseWatchlist";
+    targetArgs = ["--watchlist"];
+    targetIds = watchlistGroupIds();
   } else if (mode === "groups") {
     const ids = (groupIds ?? []).map(String).map((value) => value.trim());
     if (ids.length === 0 || ids.some((value) => !/^\d+$/u.test(value))) {
       throw new Error("群号必须是纯数字，且至少一个。");
     }
-    target = `-GroupIds ${quotePs(ids.join(","))}`;
+    targetArgs = ["--groups", ids.join(",")];
+    targetIds = ids;
   } else {
     throw new Error(`未知的运行模式: ${mode}`);
   }
 
-  const rangeArgs = buildRangeArgs(range);
-  const command = `& ${quotePs(script)} ${target} ${rangeArgs} -NoOpenReport`;
-  return spawnJob("summary", "总结运行", command, SUMMARY_STAGES, []);
+  let jobRange = range;
+  let label = "总结运行";
+  const cleanupPaths = [];
+  let groupStartsArgs = [];
+  const isUnviewed = range?.type === "sinceRead";
+  if (isUnviewed) {
+    const overview = getStoreOverview();
+    const byId = new Map((overview.groups ?? []).map((group) => [group.groupId, group]));
+    const fallbackHours = Number(loadConfig().runDefaults?.sinceHours) || 24;
+    const resolved = resolveSummaryRange(range, {
+      nowUnix: Math.floor(Date.now() / 1000),
+      fallbackHours,
+      groups: targetIds.map((groupId) => ({
+        groupId,
+        readMarkSentAt: byId.get(groupId)?.readMark?.sentAt ?? null,
+      })),
+    });
+    jobRange = resolved.range;
+    label = resolved.label ?? label;
+    const groupStarts = resolved.resolved?.groupStarts ?? {};
+    if (Object.keys(groupStarts).length > 0) {
+      const startsPath = path.join(toolRoot, "store", `group-starts-${Date.now()}.json`);
+      fs.mkdirSync(path.dirname(startsPath), { recursive: true });
+      fs.writeFileSync(startsPath, `${JSON.stringify(groupStarts)}\n`, "utf8");
+      cleanupPaths.push(startsPath);
+      groupStartsArgs = ["--group-starts", startsPath];
+    }
+  }
+
+  const args = [pipelineScript("summary_run.js"), ...targetArgs, ...buildRangeArgs(jobRange), ...groupStartsArgs];
+  const job = spawnJob("summary", label, args, SUMMARY_STAGES, cleanupPaths);
+  job.advanceReadMarks = isUnviewed;
+  job.targetGroupIds = targetIds;
+  return job;
 };
 
 const startCoverageRepairJob = ({ batches }) => {
@@ -542,8 +596,7 @@ const startCoverageRepairJob = ({ batches }) => {
   }
   const plan = createCoverageRepairPlan(batches, COVERAGE_REPAIR_CHUNK_SECONDS);
   const paths = ensureCoverageRepairPlan(plan);
-  const command = buildCoverageRepairCommand(paths.planPath);
-  const job = spawnJob("coverage-repair", "安全补扫覆盖记录", command, COVERAGE_REPAIR_STAGES, [paths.workDir]);
+  const job = spawnJob("coverage-repair", "安全补扫覆盖记录", buildCoverageRepairArgs(paths.planPath), COVERAGE_REPAIR_STAGES, [paths.workDir]);
   job.repairCurrent = Math.min(estimate.completedTaskCount + 1, estimate.taskCount);
   job.repairTotal = estimate.taskCount;
   job.groupsDone = estimate.completedTaskCount;
@@ -552,11 +605,8 @@ const startCoverageRepairJob = ({ batches }) => {
   return job;
 };
 
-const startGroupListJob = () => {
-  const script = path.join(toolRoot, "scripts", "list_groups.ps1");
-  const command = `& ${quotePs(script)}`;
-  return spawnJob("group-list", "刷新群列表", command, GROUP_LIST_STAGES, []);
-};
+const startGroupListJob = () =>
+  spawnJob("group-list", "刷新群列表", [pipelineScript("group_list_run.js")], GROUP_LIST_STAGES, []);
 
 /* ---------- quick selection summary (separate lightweight slot) ---------- */
 
@@ -597,19 +647,11 @@ const startQuickSummaryJob = ({ inputPath, outputPath, meta, llm }) => {
     logTail: [],
   };
 
+  // The child decrypts the saved LLM key itself (src/secrets.js) when the
+  // env var is unset, so the key never passes through this process.
   const script = path.join(toolRoot, "src", "llm_quick_summary.js");
-  const commonPs = path.join(toolRoot, "scripts", "common.ps1");
-  // The DeepSeek key only exists DPAPI-encrypted; a PS wrapper decrypts it into env for the child.
-  const wrapped = [
-    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-    "$ErrorActionPreference = 'Stop'",
-    `. ${quotePs(commonPs)}`,
-    "$env:DEEPSEEK_API_KEY = Read-SavedSecret -FileName 'deepseek-api-key.dpapi' -SecretName 'DeepSeek API key'",
-    `& node ${quotePs(script)} ${quotePs(inputPath)} ${quotePs(outputPath)} ${quotePs(baseUrl)} ${quotePs(model)} 'DEEPSEEK_API_KEY' | Out-Host`,
-    "exit $LASTEXITCODE",
-  ].join("\n");
-
-  const child = spawn("powershell.exe", buildPowershellArgs(wrapped), { cwd: toolRoot, windowsHide: true });
+  const apiKeyEnv = String(llm?.apiKeyEnv ?? "").trim() || "DEEPSEEK_API_KEY";
+  const child = spawn(process.execPath, [script, inputPath, outputPath, baseUrl, model, apiKeyEnv], { cwd: toolRoot, windowsHide: true });
   const consume = (chunk) => {
     for (const line of chunk.toString("utf8").split(/\r?\n/u)) {
       if (line.trim().length > 0) {
@@ -674,8 +716,7 @@ const cancelJob = () => {
   currentJob.error = "已被用户取消";
   currentJob.endedAt = new Date().toISOString();
   finishStages(currentJob, "failed");
-  const killer = spawn("taskkill", ["/pid", String(currentJob.pid), "/t", "/f"], { windowsHide: true });
-  killer.on("error", (error) => console.error(`taskkill failed: ${error.message}`));
+  platform.killTree(currentJob.pid);
   return currentJob;
 };
 
@@ -717,10 +758,12 @@ module.exports = {
   startGroupListJob,
   cancelJob,
   jobSnapshot,
+  isJobRunning,
   startQuickSummaryJob,
   quickSummarySnapshot,
-  quotePs,
-  buildCoverageRepairCommand,
+  buildCoverageRepairArgs,
+  buildRangeArgs,
   estimateCoverageRepair,
   safeCleanupPaths,
+  jobCleanupFailureMessage,
 };

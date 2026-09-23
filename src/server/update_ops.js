@@ -4,6 +4,8 @@ const https = require("node:https");
 const { spawn } = require("node:child_process");
 const state = require("./toolkit_state");
 const jobs = require("./run_jobs");
+const background = require("./background");
+const platform = require("../platform");
 const packageInfo = require("../../package.json");
 
 const GITHUB_REPO = "peter119lee/chatlens";
@@ -99,18 +101,30 @@ const checkUpdate = async () => {
   };
 };
 
-// Zero-setup bundles ship their own node\node.exe; source installs don't.
-// Each flavor must update with its own zip (the bundle carries a matched
-// node.exe + prebuilt better_sqlite3.node pair).
-const isBundleInstall = () => fs.existsSync(path.join(state.toolRoot, "node", "node.exe"));
+// Zero-setup bundles ship their own node (node\node.exe / node/bin/node);
+// source installs don't. Each flavor must update with its own archive (a
+// bundle carries a matched node + prebuilt better_sqlite3.node pair).
+const isBundleInstall = () =>
+  fs.existsSync(path.join(state.toolRoot, "node", "node.exe")) || fs.existsSync(path.join(state.toolRoot, "node", "bin", "node"));
 
-const pickAsset = (assets) => {
-  const zips = assets.filter((asset) => /\.zip$/iu.test(asset.name) && typeof asset.downloadUrl === "string");
-  if (isBundleInstall()) {
-    return zips.find((asset) => /win-x64/iu.test(asset.name)) ?? null;
+const PLATFORM_ASSET = /-(?:win|linux)-x64\./iu;
+
+// Pure: which release asset fits this install (exported for tests).
+const pickAssetFor = (assets, { windows, bundle }) => {
+  const usable = assets.filter((asset) => typeof asset.downloadUrl === "string");
+  if (windows) {
+    const zips = usable.filter((asset) => /\.zip$/iu.test(asset.name));
+    return bundle
+      ? zips.find((asset) => /-win-x64\.zip$/iu.test(asset.name)) ?? null
+      : zips.find((asset) => !PLATFORM_ASSET.test(asset.name)) ?? null;
   }
-  return zips.find((asset) => !/win-x64/iu.test(asset.name)) ?? zips[0] ?? null;
+  const tarballs = usable.filter((asset) => /\.tar\.gz$/iu.test(asset.name));
+  return bundle
+    ? tarballs.find((asset) => /-linux-x64\.tar\.gz$/iu.test(asset.name)) ?? null
+    : tarballs.find((asset) => !PLATFORM_ASSET.test(asset.name)) ?? null;
 };
+
+const pickAsset = (assets) => pickAssetFor(assets, { windows: platform.isWindows, bundle: isBundleInstall() });
 
 const downloadToFile = async (url, destination) => {
   const response = await httpRequest(url, { asStream: true });
@@ -176,7 +190,7 @@ const updaterScriptText = () =>
     "",
     "    $launcher = Join-Path $InstallDir 'Start-QQ-Console.cmd'",
     "    if (Test-Path -LiteralPath $launcher) {",
-    "        Start-Process -FilePath $launcher -WorkingDirectory $InstallDir",
+    "        Start-Process -FilePath $launcher -WorkingDirectory $InstallDir -WindowStyle Minimized",
     "    }",
     "} catch {",
     "    Write-Log ('更新失败: ' + $_.Exception.Message)",
@@ -184,10 +198,54 @@ const updaterScriptText = () =>
     "",
   ].join("\r\n");
 
-const applyUpdate = async () => {
+// POSIX updater: same flow with tar; all values arrive as positional args.
+const LINUX_UPDATER_SCRIPT = [
+  "#!/bin/sh",
+  "ARCHIVE=\"$1\"; INSTALL_DIR=\"$2\"; SERVER_PID=\"$3\"",
+  "WORK_DIR=$(dirname \"$ARCHIVE\")",
+  "LOG=\"$WORK_DIR/update.log\"",
+  "log() { echo \"[$(date '+%Y-%m-%d %H:%M:%S')] $1\" >> \"$LOG\"; }",
+  "log \"waiting for server pid $SERVER_PID\"",
+  "i=0; while kill -0 \"$SERVER_PID\" 2>/dev/null && [ $i -lt 60 ]; do sleep 1; i=$((i+1)); done",
+  "rm -rf \"$WORK_DIR/extracted\" && mkdir -p \"$WORK_DIR/extracted\"",
+  "if ! tar -xzf \"$ARCHIVE\" -C \"$WORK_DIR/extracted\"; then log 'extract failed'; exit 1; fi",
+  "SRC=\"$WORK_DIR/extracted\"",
+  "if [ \"$(ls -1 \"$SRC\" | wc -l)\" -eq 1 ] && [ -d \"$SRC/$(ls -1 \"$SRC\")\" ]; then SRC=\"$SRC/$(ls -1 \"$SRC\")\"; fi",
+  "if ! cp -a \"$SRC/.\" \"$INSTALL_DIR/\"; then log 'copy failed'; exit 1; fi",
+  "rm -rf \"$WORK_DIR/extracted\" \"$ARCHIVE\"",
+  "log 'update installed, restarting'",
+  "cd \"$INSTALL_DIR\" && nohup sh ./start.sh >/dev/null 2>&1 &",
+  "",
+].join("\n");
+
+const spawnUpdater = (updateDir, archivePath) => {
+  if (platform.isWindows) {
+    // BOM so Windows PowerShell 5.1 reads the Chinese log strings correctly.
+    const scriptPath = path.join(updateDir, "apply_update.ps1");
+    fs.writeFileSync(scriptPath, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(updaterScriptText(), "utf8")]));
+    return spawn("powershell.exe", [
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
+      "-ZipPath", archivePath, "-InstallDir", state.toolRoot, "-ServerPid", String(process.pid),
+    ], { detached: true, stdio: "ignore", windowsHide: true });
+  }
+  const scriptPath = path.join(updateDir, "apply_update.sh");
+  fs.writeFileSync(scriptPath, LINUX_UPDATER_SCRIPT, { mode: 0o755 });
+  return spawn("sh", [scriptPath, archivePath, state.toolRoot, String(process.pid)], { detached: true, stdio: "ignore" });
+};
+
+// A running pipeline child keeps the native sqlite addon (and store files)
+// open; on Windows the updater's copy would then fail halfway through.
+const assertIdle = () => {
   if (jobs.jobSnapshot(0).job?.status === "running") {
     throw new Error("有任务正在运行，请等它完成后再更新。");
   }
+  if (background.getStatus().running) {
+    throw new Error("后台正在整理新消息，请等一两分钟它完成后再更新。");
+  }
+};
+
+const applyUpdate = async () => {
+  assertIdle();
 
   const info = await checkUpdate();
   if (!info.hasUpdate) {
@@ -195,36 +253,22 @@ const applyUpdate = async () => {
   }
   const asset = pickAsset(info.assets);
   if (asset === null) {
-    throw new Error("最新版本没有适用于本安装方式的 zip 安装包。");
+    throw new Error("最新版本没有适用于本安装方式的安装包，请到 GitHub 发布页手动下载。");
   }
 
   const updateDir = path.join(state.toolRoot, "dist", "update");
   fs.mkdirSync(updateDir, { recursive: true });
-  const zipPath = path.join(updateDir, asset.name);
-  await downloadToFile(asset.downloadUrl, zipPath);
-
-  // BOM so Windows PowerShell 5.1 reads the Chinese log strings correctly.
-  const scriptPath = path.join(updateDir, "apply_update.ps1");
-  fs.writeFileSync(scriptPath, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(updaterScriptText(), "utf8")]));
-
-  const child = spawn("powershell.exe", [
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    scriptPath,
-    "-ZipPath",
-    zipPath,
-    "-InstallDir",
-    state.toolRoot,
-    "-ServerPid",
-    String(process.pid),
-  ], { detached: true, stdio: "ignore", windowsHide: true });
-  child.unref();
+  const archivePath = path.join(updateDir, path.basename(asset.name));
+  await downloadToFile(asset.downloadUrl, archivePath);
+  // The download took a while: re-check, and stop the scheduler so no new
+  // refresh starts between now and exit.
+  assertIdle();
+  background.stop();
+  spawnUpdater(updateDir, archivePath).unref();
 
   // Let the HTTP response flush, then exit so the updater can swap files.
   setTimeout(() => process.exit(0), 800);
   return { updating: true, targetVersion: info.latestVersion };
 };
 
-module.exports = { checkUpdate, applyUpdate };
+module.exports = { checkUpdate, applyUpdate, pickAssetFor, isNewerVersion };

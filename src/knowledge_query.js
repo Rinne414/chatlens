@@ -284,6 +284,8 @@ const SYNTAX_ROWS = [
   { syntax: "aspect:portrait", meaning: "square / landscape / portrait" },
   { syntax: "date:2026-07-01..2026-07-31", meaning: "按图片时间筛选" },
   { syntax: "has:answer", meaning: "已有文字或媒体回复（prompt / lora / file / answer / sender / negative）" },
+  { syntax: "has:prompt", meaning: "图上有咒语（含群里 kkt 回填的）" },
+  { syntax: "has:sender", meaning: "对得上发图人" },
   { syntax: "no:file", meaning: "本地没有可用原图" },
 ];
 

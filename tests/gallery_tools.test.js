@@ -9,7 +9,11 @@ const {
   compareGalleryCollections,
   filterGalleryEventsByReview,
   filterGalleryItems,
+  filterGalleryItemsByPickStatus,
   galleryEmptyState,
+  identitiesFromPickRecords,
+  itemIsSavedPick,
+  pickIdentity,
   galleryMessageRowCandidates,
   galleryPresentation,
   galleryNeighborPath,
@@ -221,4 +225,49 @@ test("gallery review records validate local state and filter events by workflow"
   assert.deepEqual(filterGalleryEventsByReview(events, reviews, "follow-up").map((event) => event.id), ["e2"]);
   assert.throws(() => normalizeGalleryReview({ status: "invalid", favorite: false, note: "" }), /review status/u);
   assert.throws(() => normalizeGalleryReview({ status: "reviewed", favorite: false }), /review note/u);
+});
+
+test("gallery pick identity prefers a content hash and falls back to the web path", () => {
+  assert.equal(pickIdentity({
+    contentKey: "a".repeat(32),
+    contentKeySource: "hash",
+    webPath: "/runs/a.jpg",
+  }), `hash:${"a".repeat(32)}`);
+  assert.equal(pickIdentity({
+    contentKey: "same-name.jpg",
+    contentKeySource: "filename",
+    webPath: "/runs/a.jpg",
+  }), "path:/runs/a.jpg");
+  assert.throws(() => pickIdentity({ contentKeySource: "filename" }), /webPath/u);
+});
+
+test("gallery pick status filter keeps unsaved items visible for the next group pass", () => {
+  const hashed = { ...items[1], contentKey: "a".repeat(32), contentKeySource: "hash" };
+  const named = { ...items[2], contentKey: "b.jpg", contentKeySource: "filename" };
+  const saved = new Set([`hash:${"a".repeat(32)}`]);
+
+  assert.equal(itemIsSavedPick(hashed, saved), true);
+  assert.equal(itemIsSavedPick(named, saved), false);
+  assert.deepEqual(filterGalleryItemsByPickStatus([hashed, named], saved, "unsaved").map((item) => item.webPath), [named.webPath]);
+  assert.deepEqual(filterGalleryItemsByPickStatus([hashed, named], saved, "saved").map((item) => item.webPath), [hashed.webPath]);
+  assert.throws(() => filterGalleryItemsByPickStatus([hashed], saved, "pretty"), /pick filter/u);
+});
+
+test("saved pick records mark thumbs by gallery content key after a reload", () => {
+  const identities = identitiesFromPickRecords([
+    { hash: "a".repeat(32), contentKey: "e".repeat(32), webPath: "/runs/thumb.jpg" },
+  ]);
+  const thumb = {
+    webPath: "/runs/other-thumb.jpg",
+    contentKey: "e".repeat(32),
+    contentKeySource: "hash",
+  };
+
+  assert.equal(itemIsSavedPick(thumb, identities), true);
+  assert.equal(itemIsSavedPick({ webPath: "/runs/thumb.jpg", contentKeySource: "filename" }, identities), true);
+  assert.equal(itemIsSavedPick({
+    webPath: "/runs/unrelated.jpg",
+    contentKey: "b".repeat(32),
+    contentKeySource: "hash",
+  }, identities), false);
 });

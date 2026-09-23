@@ -9,7 +9,9 @@ const {
   compareGalleryCollections,
   filterGalleryEventsByReview,
   filterGalleryItems,
+  filterGalleryItemsByPickStatus,
   filterGalleryOccurrences,
+  itemIsSavedPick,
   galleryEmptyState,
   galleryMessageRowCandidates,
   galleryNeighborPath,
@@ -110,7 +112,27 @@ const galleryFilters = (overrides) => ({
   ...overrides,
 });
 
-const mediaFilteredItems = () => filterGalleryItems(app.mediaTab.data?.items ?? [], galleryFilters({}));
+const gallerySavedIdentities = () => new Set([
+  ...[...app.mediaTab.picks.hashes].map((hash) => `hash:${hash}`),
+  ...[...app.mediaTab.picks.paths].map((webPath) => `path:${webPath}`),
+]);
+
+const mediaFilteredItems = () => filterGalleryItemsByPickStatus(
+  filterGalleryItems(app.mediaTab.data?.items ?? [], galleryFilters({})),
+  gallerySavedIdentities(),
+  app.mediaTab.pickFilter,
+);
+
+const selectedMediaItems = () => {
+  const byPath = new Map((app.mediaTab.data?.items ?? []).map((item) => [item.webPath, item]));
+  return [...app.mediaTab.selected]
+    .map((webPath) => byPath.get(webPath))
+    .filter((item) => item !== undefined && isVisualMedia(item));
+};
+
+const itemIsKeptPick = (item) => itemIsSavedPick(item, gallerySavedIdentities());
+
+const unsavedSelectedMedia = () => selectedMediaItems().filter((item) => itemIsKeptPick(item) !== true);
 
 const galleryFilteredOccurrences = () => filterGalleryOccurrences(app.mediaTab.data?.items ?? [], galleryFilters({ groupId: "all" }));
 
@@ -185,12 +207,30 @@ const loadGalleryEventActivity = async (events) => {
   renderMediaView();
 };
 
+const loadGalleryPicks = async () => {
+  const result = await api("/api/picks");
+  const records = result.items ?? [];
+  replaceMediaTab({
+    picks: {
+      ...app.mediaTab.picks,
+      hashes: new Set(records.flatMap((item) => [item.hash, item.contentKey].filter((value) => typeof value === "string" && value.length > 0))),
+      paths: new Set(records.map((item) => item.webPath).filter((value) => typeof value === "string" && value.startsWith("/runs/"))),
+      error: null,
+    },
+  });
+};
+
 const openMediaView = async (forceRefresh) => {
   showView("media");
   if (app.mediaTab.data === null || forceRefresh === true) {
     setChildren($("#view-media"), el("div", { class: "card" }, el("div", { class: "empty" }, "正在扫描媒体索引…")));
     try {
-      const data = await api(`/api/media-index${forceRefresh === true ? "?refresh=1" : ""}`);
+      const [data] = await Promise.all([
+        api(`/api/media-index${forceRefresh === true ? "?refresh=1" : ""}`),
+        loadGalleryPicks().catch((error) => {
+          replaceMediaTab({ picks: { ...app.mediaTab.picks, error: error.message } });
+        }),
+      ]);
       replaceMediaTab({
         data,
         renderedCount: MEDIA_RENDER_BATCH,
@@ -203,6 +243,12 @@ const openMediaView = async (forceRefresh) => {
     } catch (error) {
       setChildren($("#view-media"), el("div", { class: "card" }, el("div", { class: "notice risk" }, `读取媒体索引失败: ${error.message}`)));
       return;
+    }
+  } else {
+    try {
+      await loadGalleryPicks();
+    } catch (error) {
+      replaceMediaTab({ picks: { ...app.mediaTab.picks, error: error.message } });
     }
   }
   try {
@@ -275,35 +321,73 @@ const toggleMediaSelect = (item) => {
   renderMediaView();
 };
 
-const exportSelectedMedia = async () => {
-  if (app.mediaTab.selected.size === 0) {
+const saveGalleryPicksSelection = async () => {
+  const unsaved = unsavedSelectedMedia();
+  if (unsaved.length === 0 || app.mediaTab.picks.saving === true) {
     return;
   }
+  replaceMediaTab({ picks: { ...app.mediaTab.picks, saving: true, error: null, result: null } });
+  renderMediaView();
+  const paths = unsaved.map((item) => item.webPath);
   try {
-    const paths = [...app.mediaTab.selected];
-    let folder = null;
-    let copied = 0;
+    let saved = 0;
+    let skipped = 0;
     const failed = [];
+    const folders = [];
+    const hashes = new Set(app.mediaTab.picks.hashes);
     for (let offset = 0; offset < paths.length; offset += MEDIA_EXPORT_BATCH) {
       const batch = paths.slice(offset, offset + MEDIA_EXPORT_BATCH);
-      const result = await api("/api/media-export", {
+      const result = await api("/api/picks/save", {
         method: "POST",
         body: JSON.stringify({
           paths: batch,
-          folder,
           openFolder: offset + batch.length >= paths.length,
         }),
       });
-      folder = result.folder;
-      copied += result.copied;
+      saved += result.saved;
+      skipped += result.skipped;
       failed.push(...result.failed);
+      for (const hash of [...(result.hashes ?? []), ...(result.skippedHashes ?? []), ...(result.contentKeys ?? [])]) {
+        hashes.add(hash);
+      }
+      for (const folder of result.folders ?? []) {
+        if (!folders.includes(folder)) {
+          folders.push(folder);
+        }
+      }
     }
-    alert(`已导出 ${copied} 个原始文件到：\n${folder}${failed.length > 0 ? `\n（${failed.length} 个失败）` : ""}\n文件夹已自动打开。`);
-    replaceMediaTab({ selected: new Set(), selecting: false });
+    const failedPaths = new Set(failed.map((item) => item.webPath));
+    const attempted = new Set(paths);
+    const selected = new Set([...app.mediaTab.selected].filter((webPath) => attempted.has(webPath) === false || failedPaths.has(webPath)));
+    const pathsKept = new Set(app.mediaTab.picks.paths);
+    for (const webPath of attempted) {
+      if (failedPaths.has(webPath) !== true) {
+        pathsKept.add(webPath);
+      }
+    }
+    replaceMediaTab({
+      selected,
+      selecting: selected.size > 0 ? app.mediaTab.selecting : false,
+      picks: {
+        hashes,
+        paths: pathsKept,
+        saving: false,
+        error: null,
+        result: { saved, skipped, failed, folders },
+      },
+    });
     renderMediaView();
   } catch (error) {
-    alert(`导出失败: ${error.message}`);
+    replaceMediaTab({ picks: { ...app.mediaTab.picks, saving: false, error: error.message, result: null } });
+    renderMediaView();
   }
+};
+
+const toggleMediaPick = (item) => {
+  if (itemIsKeptPick(item) === true || isVisualMedia(item) !== true) {
+    return;
+  }
+  toggleMediaSelect(item);
 };
 
 const mediaThumb = (item, loading) => {
@@ -439,27 +523,25 @@ const renderGalleryControls = (allItems, filtered) => {
           : `${summary.firstHkt.slice(0, 16)} - ${summary.lastHkt.slice(5, 16)}`)),
       el("div", { class: "gallery-actions" },
         el("button", { class: "btn icon-btn", title: "刷新媒体索引", "aria-label": "刷新媒体索引", onclick: () => openMediaView(true) }, "↻"),
-        tab.surface === "files"
-          ? el("button", {
-              class: `btn small ${tab.selecting ? "primary" : ""}`,
-              "data-testid": "gallery-select-mode",
-              onclick: () => {
-                replaceMediaTab({ selecting: !tab.selecting, selected: new Set(), viewerPath: null });
-                renderMediaView();
-              },
-            }, tab.selecting ? "退出选择" : "选择")
-          : null,
-        tab.surface === "files" && tab.selecting
+        tab.surface === "files" || tab.surface === "events"
           ? el("button", {
               class: "btn small",
+              "data-testid": "gallery-select-unsaved",
               onclick: () => {
-                replaceMediaTab({ selected: new Set(filtered.filter(isVisualMedia).map((item) => item.webPath)) });
+                const saved = gallerySavedIdentities();
+                replaceMediaTab({
+                  selected: new Set(filtered.filter((item) => isVisualMedia(item) && itemIsSavedPick(item, saved) !== true).map((item) => item.webPath)),
+                });
                 renderMediaView();
               },
-            }, "全选当前")
+            }, "全选当前未保存")
           : null,
-        tab.surface === "files" && tab.selecting
-          ? el("button", { class: "btn small primary", disabled: tab.selected.size === 0, onclick: exportSelectedMedia }, `导出原图 (${tab.selected.size})`)
+        unsavedSelectedMedia().length > 0
+          ? el("button", {
+              class: "btn small primary",
+              disabled: tab.picks.saving,
+              onclick: () => void saveGalleryPicksSelection(),
+            }, tab.picks.saving ? "正在保存…" : `保存精选 (${unsavedSelectedMedia().length})`)
           : null)),
     renderGallerySurfaceNav(),
     tab.reviewStorageError === undefined
@@ -533,6 +615,16 @@ const renderGalleryControls = (allItems, filtered) => {
           galleryOption("time-asc", "最早优先", tab.sort),
           galleryOption("size-desc", "文件最大", tab.sort)))),
     el("div", { class: "gallery-range-row" },
+      el("label", {}, el("span", {}, "精选"), el("select", {
+        "data-testid": "gallery-pick-filter",
+        onchange: (event) => {
+          replaceMediaTab({ pickFilter: event.target.value, renderedCount: MEDIA_RENDER_BATCH });
+          renderMediaView();
+        },
+      },
+      galleryOption("all", "全部图片", tab.pickFilter),
+      galleryOption("unsaved", "未保存", tab.pickFilter),
+      galleryOption("saved", "已精选", tab.pickFilter))),
       el("label", {}, el("span", {}, "开始"), el("input", {
         type: "datetime-local",
         value: Number.isFinite(tab.fromUnix) ? unixToHkt(tab.fromUnix).slice(0, 16).replace(" ", "T") : "",
@@ -561,12 +653,41 @@ const reviewStatusLabel = (review) => ({
   "follow-up": "待跟进",
 }[review.status]);
 
+const renderGalleryPickBox = (item) => {
+  if (!isVisualMedia(item)) {
+    return null;
+  }
+  const saved = itemIsKeptPick(item);
+  const picked = app.mediaTab.selected.has(item.webPath);
+  return el("label", {
+    class: `gallery-pick${picked || saved ? " on" : ""}${saved ? " saved" : ""}`,
+    title: saved ? "已保存到精选相册" : picked ? "从本次选择中移除" : "加入本次精选",
+    "data-testid": "gallery-pick",
+    onclick: (event) => event.stopPropagation(),
+  },
+  el("input", {
+    type: "checkbox",
+    checked: picked || saved,
+    disabled: saved,
+    "aria-label": saved ? "已保存到精选相册" : "加入精选",
+    onchange: (event) => {
+      event.stopPropagation();
+      if (saved) {
+        return;
+      }
+      toggleMediaPick(item);
+    },
+  }));
+};
+
 const renderEventMediaRail = (event) => el("div", { class: "gallery-event-media" },
-  event.items.slice(0, 6).map((item) => el("button", {
-    class: "gallery-event-thumb",
-    "aria-label": `查看 ${item.speaker} 在 ${item.hkt.slice(0, 16)} 的媒体`,
-    onclick: () => openGalleryViewer(item, event),
-  }, mediaThumb(item, "lazy"))),
+  event.items.slice(0, 6).map((item) => el("div", { class: "gallery-event-thumb-wrap" },
+    el("button", {
+      class: "gallery-event-thumb",
+      "aria-label": `查看 ${item.speaker} 在 ${item.hkt.slice(0, 16)} 的媒体`,
+      onclick: () => openGalleryViewer(item, event),
+    }, mediaThumb(item, "lazy")),
+    renderGalleryPickBox(item))),
   event.items.length > 6 ? el("span", { class: "gallery-event-more" }, `+${event.items.length - 6}`) : null);
 
 const renderEventCard = (event) => {
@@ -641,6 +762,7 @@ const renderGalleryEvents = (events) => {
 
 const mediaItemNode = (item, mode, event) => {
   const picked = app.mediaTab.selected.has(item.webPath);
+  const saved = itemIsKeptPick(item);
   const caption = mode === "detail"
     ? el("figcaption", {},
         el("strong", {}, item.groupName || item.groupId),
@@ -652,12 +774,12 @@ const mediaItemNode = (item, mode, event) => {
         } }, "查看前后消息"))
     : null;
   return el("figure", {
-    class: `media-item ${picked ? "picked" : ""} ${app.mediaTab.selecting ? "selecting" : ""}`,
+    class: `media-item ${picked ? "picked" : ""} ${saved ? "saved-pick" : ""} ${app.mediaTab.selecting ? "selecting" : ""}`,
     title: `${item.speaker} · ${item.hkt.slice(0, 16)} · ${formatBytes(item.bytes)}`,
     dataset: { mediaPath: item.webPath },
     "data-testid": "gallery-item",
-    onclick: () => app.mediaTab.selecting ? toggleMediaSelect(item) : openGalleryViewer(item, event),
-  }, mediaThumb(item, "lazy"), caption);
+    onclick: () => app.mediaTab.selecting ? toggleMediaPick(item) : openGalleryViewer(item, event),
+  }, mediaThumb(item, "lazy"), renderGalleryPickBox(item), caption);
 };
 
 const renderGalleryFiles = (shown, events) => {
@@ -874,6 +996,18 @@ const renderGalleryViewer = (shown, events) => {
             el("strong", {}, item.speaker || "未知参与者"),
             el("span", {}, `${item.hkt.slice(0, 16)} · ${kindLabel} · ${formatBytes(item.bytes)}`)),
           el("div", { class: "gallery-viewer-actions" },
+            (() => {
+              const saved = itemIsKeptPick(item);
+              const picked = app.mediaTab.selected.has(item.webPath);
+              if (saved) {
+                return el("button", { class: "btn small active", disabled: true, "data-testid": "gallery-viewer-pick" }, "已保存");
+              }
+              return el("button", {
+                class: `btn small ${picked ? "primary" : ""}`,
+                "data-testid": "gallery-viewer-pick",
+                onclick: () => toggleMediaPick(item),
+              }, picked ? "移出精选" : "加入精选");
+            })(),
             el("button", { class: "btn small", onclick: () => openMessageContextForMedia(item) }, "原消息"),
             el("button", { class: "btn small", onclick: () => window.open(item.webPath, "_blank", "noopener") }, "打开原文件")))),
       event === null ? null : renderGalleryStory(event))));
@@ -918,6 +1052,53 @@ const renderGalleryEmpty = () => {
     }) }, "在时间表中查看"));
 };
 
+const pickResultText = (result) => {
+  const parts = [`已保存 ${result.saved} 张到精选相册`];
+  if (result.skipped > 0) {
+    parts.push(`跳过 ${result.skipped} 张已保存`);
+  }
+  if (result.failed.length > 0) {
+    parts.push(`${result.failed.length} 张失败`);
+  }
+  if (result.folders.length === 1) {
+    parts.push(result.folders[0]);
+  } else if (result.folders.length > 1) {
+    parts.push(`${result.folders.length} 个群文件夹`);
+  }
+  return parts.join(" · ");
+};
+
+const renderGalleryPickBar = () => {
+  const tab = app.mediaTab;
+  const unsaved = unsavedSelectedMedia();
+  if (tab.selected.size === 0 && tab.picks.result === null && tab.picks.error === null) {
+    return null;
+  }
+  return el("div", { class: "gallery-pick-bar", "data-testid": "gallery-pick-bar" },
+    tab.picks.error === null ? null : el("div", { class: "notice risk" }, tab.picks.error),
+    tab.picks.result === null ? null : el("div", { class: "notice ok" }, pickResultText(tab.picks.result)),
+    tab.selected.size === 0
+      ? null
+      : el("div", { class: "gallery-pick-bar-row" },
+          el("strong", {}, `${unsaved.length} 张待保存`),
+          el("span", {}, tab.selected.size > unsaved.length
+            ? `已选 ${tab.selected.size} 张，其中 ${tab.selected.size - unsaved.length} 张已在相册里`
+            : "按群写入 reports/picks，下一群重复同一操作即可"),
+          el("button", {
+            class: "btn small",
+            onclick: () => {
+              replaceMediaTab({ selected: new Set(), picks: { ...tab.picks, result: null } });
+              renderMediaView();
+            },
+          }, "清空选择"),
+          el("button", {
+            class: "btn small primary",
+            disabled: unsaved.length === 0 || tab.picks.saving,
+            "data-testid": "gallery-save-picks",
+            onclick: () => void saveGalleryPicksSelection(),
+          }, tab.picks.saving ? "正在保存…" : `保存精选 (${unsaved.length})`)));
+};
+
 const renderMediaView = () => {
   const filtered = mediaFilteredItems();
   const renderedCount = galleryRenderedCount();
@@ -946,7 +1127,7 @@ const renderMediaView = () => {
           el("span", {}, `已加载 ${renderedCount} / ${surfaceTotal} ${surfaceLabel}`),
           el("button", { class: "btn small", "data-testid": "gallery-load-more", onclick: loadMoreGalleryItems }, "继续加载"))
       : null);
-  setChildren($("#view-media"), renderGalleryControls(allItems, filtered), gallery, renderGalleryViewer(shown, events));
+  setChildren($("#view-media"), renderGalleryControls(allItems, filtered), gallery, renderGalleryPickBar(), renderGalleryViewer(shown, events));
   observeGalleryLoadMore();
 };
 
@@ -970,6 +1151,15 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     replaceMediaTab({ viewerPath: null, viewerEventId: null, story: null });
     renderMediaView();
+    return;
+  }
+  if (event.key === " " || event.key === "Spacebar") {
+    event.preventDefault();
+    const current = mediaFilteredItems().find((item) => item.webPath === app.mediaTab.viewerPath)
+      ?? galleryEvents().flatMap((candidate) => candidate.items).find((item) => item.webPath === app.mediaTab.viewerPath);
+    if (current !== undefined) {
+      toggleMediaPick(current);
+    }
     return;
   }
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") {

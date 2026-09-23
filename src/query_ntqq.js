@@ -60,4 +60,8 @@ const main = () => {
   }
 };
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { openDatabase, requireEnv };

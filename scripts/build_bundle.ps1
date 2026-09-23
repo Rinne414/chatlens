@@ -65,10 +65,8 @@ try {
         if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force }
     }
 
-    # 4) Bundle launcher runs the bundled node directly (no system Node, no npm).
-    $ascii = [System.Text.Encoding]::ASCII
-    $cmd = "@echo off`r`nsetlocal`r`ncd /d `"%~dp0`"`r`n`".\node\node.exe`" `".\src\server\control_center.js`"`r`npause`r`n"
-    [System.IO.File]::WriteAllText((Join-Path $stage 'Start-QQ-Console.cmd'), $cmd, $ascii)
+    # 4) No launcher rewrite needed: the tracked Start-QQ-Console.cmd prefers
+    #    node\node.exe when present and starts the console hidden via src\launcher.js.
 
     # 5) Zip with forward-slash entry names (spec-compliant across extractors).
     $outDir = Split-Path -Parent $OutZip

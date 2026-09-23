@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -8,7 +9,7 @@ const test = require("node:test");
 const zlib = require("node:zlib");
 
 const { collectImageRefs, buildOriIndex, harvestRunMedia } = require("../src/harvest_run_media");
-const { openKnowledgeStore, storeSummary } = require("../src/knowledge_store");
+const { openKnowledgeStore, storeSummary, upsertImage } = require("../src/knowledge_store");
 
 // --- ref collection --------------------------------------------------------
 
@@ -131,6 +132,18 @@ const writePlainPng = (filePath) => {
   ]));
 };
 
+// QQ names Ori files by the md5 of their bytes. persistMediaObject refuses a
+// copy when that does not hold, so tests of the durable store must use real names.
+const placeOriByMd5 = (root, writer) => {
+  const oriDir = path.join(root, "Pic", "2026-08", "Ori");
+  const tempPath = path.join(oriDir, "tmp-place.png");
+  writer(tempPath);
+  const hash = crypto.createHash("md5").update(fs.readFileSync(tempPath)).digest("hex");
+  const dest = path.join(oriDir, `${hash}.png`);
+  fs.renameSync(tempPath, dest);
+  return { hash, dest };
+};
+
 test("indexes Ori files by md5 and ignores Thumb", () => {
   const root = makeNtData();
   const hash = "e".repeat(32);
@@ -185,7 +198,7 @@ test("parses and attributes an image in one pass", () => {
   db.close();
 });
 
-test("counts a stripped image separately and does not attribute it", () => {
+test("keeps a stripped original as a card with who posted it", () => {
   const root = makeNtData();
   const hash = "2".repeat(32);
   writePlainPng(path.join(root, "Pic", "2026-08", "Ori", `${hash}.png`));
@@ -196,25 +209,50 @@ test("counts a stripped image separately and does not attribute it", () => {
 
   assert.equal(stats.parsed, 0);
   assert.equal(stats.stripped, 1);
-  assert.equal(stats.attributed, 0, "an image with no metadata is not knowledge-base content");
+  assert.equal(stats.attributed, 1, "group sightings are knowledge even without AI parameters");
 
   const db = openKnowledgeStore(storePath);
-  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM images").get().c, 0);
-  // Recorded in scan_state so a rescan skips it until the file or parser changes.
+  const image = db.prepare("SELECT generator, prompt FROM images WHERE hash = ?").get(hash);
+  assert.equal(image.generator, "stripped");
+  assert.equal(image.prompt, "");
+  const sighting = db.prepare("SELECT speaker FROM sightings WHERE hash = ?").get(hash);
+  assert.equal(sighting.speaker, "Alice");
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM scan_state").get().c, 1);
+  db.close();
+});
+
+test("still attributes a group image when the original is gone but a thumb remains", () => {
+  const root = makeNtData();
+  const hash = "3".repeat(32);
+  writePlainPng(path.join(root, "Pic", "2026-08", "Thumb", `${hash}_0.png`));
+
+  const { stats, storePath } = runHarvest(root, [
+    mediaMessage({ mediaRefs: [{ kind: "image", hash }] }),
+  ]);
+
+  assert.equal(stats.originalMissing, 1);
+  assert.equal(stats.attributed, 1);
+  const db = openKnowledgeStore(storePath);
+  const image = db.prepare("SELECT generator, file_path FROM images WHERE hash = ?").get(hash);
+  assert.equal(image.generator, "stripped");
+  assert.match(image.file_path, /Thumb/u);
   db.close();
 });
 
 test("counts refs whose original is absent from the cache", () => {
   const root = makeNtData();
 
-  const { stats } = runHarvest(root, [
+  const { stats, storePath } = runHarvest(root, [
     mediaMessage({ mediaRefs: [{ kind: "image", hash: "3".repeat(32) }] }),
   ]);
 
   assert.equal(stats.imageRefs, 1);
   assert.equal(stats.originalMissing, 1);
   assert.equal(stats.parsed, 0);
+  assert.equal(stats.attributed, 1, "a missing original still records who posted it");
+  const db = openKnowledgeStore(storePath);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM sightings").get().c, 1);
+  db.close();
 });
 
 test("re-harvesting the same export re-attributes without re-parsing", () => {
@@ -237,6 +275,136 @@ test("re-harvesting the same export re-attributes without re-parsing", () => {
   const db = openKnowledgeStore(storePath);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM sightings WHERE hash = ?").get(hash).c, 1);
   db.close();
+});
+
+test("copies a hash-verified Ori into the durable object store", () => {
+  const root = makeNtData();
+  const { hash, dest } = placeOriByMd5(root, (filePath) => writeAiPng(filePath, PARAMS));
+
+  const { stats, storePath } = runHarvest(root, [
+    mediaMessage({ mediaRefs: [{ kind: "image", hash }] }),
+  ]);
+
+  assert.equal(stats.parsed, 1);
+  assert.equal(stats.durableStored, 1);
+  assert.equal(stats.durableFailed, 0);
+
+  const db = openKnowledgeStore(storePath);
+  const row = db.prepare("SELECT object_path AS objectPath, prompt FROM images WHERE hash = ?").get(hash);
+  db.close();
+  assert.equal(row.prompt, "1girl, solo");
+  assert.equal(fs.existsSync(row.objectPath), true);
+  assert.notEqual(path.resolve(row.objectPath), path.resolve(dest));
+  assert.equal(crypto.createHash("md5").update(fs.readFileSync(row.objectPath)).digest("hex"), hash);
+});
+
+test("does not copy a Thumb into the durable store", () => {
+  const root = makeNtData();
+  const hash = "3".repeat(32);
+  writePlainPng(path.join(root, "Pic", "2026-08", "Thumb", `${hash}_0.png`));
+
+  const { stats, storePath } = runHarvest(root, [
+    mediaMessage({ mediaRefs: [{ kind: "image", hash }] }),
+  ]);
+
+  assert.equal(stats.originalMissing, 1);
+  assert.equal(stats.durableStored, 0);
+  const db = openKnowledgeStore(storePath);
+  const row = db.prepare("SELECT object_path AS objectPath FROM images WHERE hash = ?").get(hash);
+  db.close();
+  assert.equal(row.objectPath, "");
+});
+
+test("re-harvest reuses an existing durable copy", () => {
+  const root = makeNtData();
+  const { hash } = placeOriByMd5(root, (filePath) => writePlainPng(filePath));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "harvest-"));
+  const mediaMessagesJson = path.join(workDir, "media-messages.json");
+  fs.writeFileSync(mediaMessagesJson, JSON.stringify([mediaMessage({ mediaRefs: [{ kind: "image", hash }] })]), "utf8");
+  const storePath = path.join(workDir, "knowledge.db");
+
+  const first = harvestRunMedia({ mediaMessagesJson, ntDataDir: root, storePath });
+  const second = harvestRunMedia({ mediaMessagesJson, ntDataDir: root, storePath });
+
+  assert.equal(first.stats.durableStored, 1);
+  assert.equal(second.stats.durableStored, 0);
+  assert.equal(second.stats.durableReused, 1);
+});
+
+test("durable copy remains after the QQ Ori file is deleted", () => {
+  const root = makeNtData();
+  const { hash, dest } = placeOriByMd5(root, (filePath) => writePlainPng(filePath));
+  const { storePath } = runHarvest(root, [
+    mediaMessage({ mediaRefs: [{ kind: "image", hash }] }),
+  ]);
+  fs.rmSync(dest);
+
+  const db = openKnowledgeStore(storePath);
+  const row = db.prepare("SELECT object_path AS objectPath FROM images WHERE hash = ?").get(hash);
+  db.close();
+  assert.equal(fs.existsSync(dest), false);
+  assert.equal(fs.existsSync(row.objectPath), true);
+});
+
+test("live harvest only copies originals referenced in this export", () => {
+  const root = makeNtData();
+  const other = placeOriByMd5(root, (filePath) => writePlainPng(filePath));
+  const current = placeOriByMd5(root, (filePath) => writeAiPng(filePath, PARAMS));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "harvest-this-run-"));
+  const storePath = path.join(workDir, "knowledge.db");
+  const db = openKnowledgeStore(storePath);
+  upsertImage(db, {
+    hash: other.hash,
+    filePath: other.dest,
+    fileSize: fs.statSync(other.dest).size,
+    fileMtime: 1,
+    container: "png",
+    width: 64,
+    height: 64,
+    generator: "forge",
+    prompt: "other",
+    negativePrompt: "",
+    checkpoint: "",
+    modelHash: "",
+    params: {},
+    rawChunks: {},
+    loras: [],
+    parserVersion: 2,
+    parsedAt: 1,
+  });
+  db.close();
+  const mediaMessagesJson = path.join(workDir, "media-messages.json");
+  fs.writeFileSync(mediaMessagesJson, JSON.stringify([
+    mediaMessage({ mediaRefs: [{ kind: "image", hash: current.hash }] }),
+  ]), "utf8");
+
+  const { stats } = harvestRunMedia({ mediaMessagesJson, ntDataDir: root, storePath });
+
+  assert.equal(stats.durableStored, 1);
+  const check = openKnowledgeStore(storePath);
+  const otherRow = check.prepare("SELECT object_path AS objectPath FROM images WHERE hash = ?").get(other.hash);
+  const currentRow = check.prepare("SELECT object_path AS objectPath FROM images WHERE hash = ?").get(current.hash);
+  check.close();
+  assert.equal(otherRow.objectPath, "");
+  assert.equal(fs.existsSync(currentRow.objectPath), true);
+});
+
+test("a filename whose bytes do not match the md5 is not copied", () => {
+  const root = makeNtData();
+  const hash = "1".repeat(32);
+  writeAiPng(path.join(root, "Pic", "2026-08", "Ori", `${hash}.png`), PARAMS);
+
+  const { stats, storePath } = runHarvest(root, [
+    mediaMessage({ mediaRefs: [{ kind: "image", hash }] }),
+  ]);
+
+  assert.equal(stats.parsed, 1, "attribution still happens");
+  assert.equal(stats.durableFailed, 1);
+  assert.equal(stats.durableStored, 0);
+  const db = openKnowledgeStore(storePath);
+  const row = db.prepare("SELECT object_path AS objectPath FROM images WHERE hash = ?").get(hash);
+  db.close();
+  assert.equal(row.objectPath, "");
 });
 
 test("an export with no media messages does nothing and opens no store", () => {
@@ -289,6 +457,8 @@ test("stores a prompt request alongside the image it points at", () => {
   assert.equal(row.answer_text, PROMPT_ANSWER);
   assert.equal(row.answer_by, "Alice");
   assert.equal(row.target_via, "quote");
+  const image = db.prepare("SELECT prompt FROM images WHERE hash = ?").get(hash);
+  assert.equal(image.prompt, PROMPT_ANSWER, "a longer kkt answer must become searchable on the image");
   db.close();
 });
 
@@ -323,7 +493,7 @@ test("stores an image or file reply for an original-image request", () => {
 
   assert.equal(stats.promptRequests, 1);
   assert.equal(stats.answeredRequests, 1);
-  assert.equal(stats.placeholders, 2, "both the asked-about image and media reply stay displayable");
+  assert.equal(stats.attributed, 2, "both the asked-about image and media reply stay displayable");
   const db = openKnowledgeStore(storePath);
   const row = db.prepare("SELECT answer_kind, answer_text, answer_media_json, answer_by FROM prompt_requests WHERE ask_row_id = ?").get("600");
   assert.equal(row.answer_kind, "media");
@@ -433,23 +603,21 @@ test("keeps a placeholder image row when the ask target had its metadata strippe
   const { stats } = harvestRunMedia({ mediaMessagesJson, ntDataDir: root, storePath, exportJson });
 
   assert.equal(stats.stripped, 1);
-  assert.equal(stats.placeholders, 1);
+  assert.equal(stats.attributed, 1);
 
   const db = openKnowledgeStore(storePath);
   const image = db.prepare("SELECT generator, prompt, file_path FROM images WHERE hash = ?").get(hash);
   assert.equal(image.generator, "stripped", "marks that nothing was read from the file");
-  assert.equal(image.prompt, "", "the placeholder must not invent a prompt");
+  assert.equal(image.prompt, PROMPT_ANSWER, "the kkt answer becomes the searchable prompt");
   assert.ok(image.file_path.length > 0, "the picture itself is still on disk and displayable");
 
-  // The chat-sourced prompt is joinable to the picture.
   const joined = db.prepare(`
     SELECT r.answer_text FROM prompt_requests r JOIN images i ON i.hash = r.image_hash WHERE r.ask_row_id = ?
   `).get("600");
   assert.equal(joined.answer_text, PROMPT_ANSWER);
 
-  // Placeholders must not inflate the knowledge-base image count.
   const summary = storeSummary(db);
-  assert.equal(summary.images, 0);
+  assert.equal(summary.images, 0, "stripped cards still do not count as parsed metadata");
   assert.equal(summary.placeholders, 1);
   db.close();
 });

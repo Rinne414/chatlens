@@ -3,3 +3,6 @@
 # regardless of the cloner's core.autocrlf setting.
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+# POSIX launchers and updater scripts must keep LF endings.
+*.sh text eol=lf

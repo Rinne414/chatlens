@@ -24,7 +24,7 @@ test("media export downloads a cache miss from the official QQ group image CDN",
     fs.writeFileSync(mediaMessagesJson, JSON.stringify([{
       rowId: "1",
       hkt: "2026-08-04 18:32:39",
-      groupId: "827917412",
+      groupId: "900003",
       groupName: "test-group",
       speaker: "test-user",
       mediaRefs: [{

@@ -35,7 +35,7 @@ const REASON_TEXT = {
   evicted: "QQ 缓存中的原图现在已不存在，参数还留着",
   unavailable: "本地没有原图副本，可能从未下载过原图",
   "outside-coverage": "这张图的时间不在已总结的范围内 —— 补跑那段时间就能对上发图人",
-  "not-in-messages": "那段时间已扫过，但群里没出现这张图（你自己生成 / 私聊 / 收藏）",
+  "not-in-messages": "那段时间已扫过部分群，消息里没出现这张图（可能是还没扫的群、私聊、收藏，或你自己生成）",
 };
 
 const replaceKnowledgeTab = (patch) => {
@@ -71,6 +71,8 @@ const SYNTAX_HELP = [
   ["aspect:portrait", "square / landscape / portrait"],
   ["date:2026-07-01..2026-07-31", "按图片时间"],
   ["has:answer", "已有文字或媒体回复"],
+  ["has:prompt", "图上有咒语"],
+  ["has:sender", "对得上发图人"],
   ["no:file", "本地没有可用原图"],
 ];
 
@@ -116,7 +118,7 @@ const loadKnowledgeResults = async ({ append = false } = {}) => {
   }
 
   const params = new URLSearchParams({
-    q: app.knowledgeTab.query,
+    q: knowledgeSearchQuery(),
     generator: app.knowledgeTab.generator,
     groupId: app.knowledgeTab.groupId,
     sender: app.knowledgeTab.sender,
@@ -216,12 +218,17 @@ const copyToClipboard = async (text, label) => {
   }
 };
 
-const promptBlock = (text, label, { truncated = false } = {}) => {
+const promptBlock = (text, label, { truncated = false, clamp = true } = {}) => {
   if (typeof text !== "string" || text.trim().length === 0) {
     return null;
   }
-  const clamped = truncated || text.length > PROMPT_CLAMP_CHARS;
-  const shown = text.length > PROMPT_CLAMP_CHARS ? `${text.slice(0, PROMPT_CLAMP_CHARS)}…` : text;
+  // Cards clamp so a 60-card grid stays scannable. The overlay passes
+  // clamp:false: the card already said "点图看完整", so slicing again would
+  // show the same 320 characters the user just left.
+  const shouldClamp = clamp && (truncated || text.length > PROMPT_CLAMP_CHARS);
+  const shown = shouldClamp && text.length > PROMPT_CLAMP_CHARS
+    ? `${text.slice(0, PROMPT_CLAMP_CHARS)}…`
+    : text;
   return el("div", { class: "kb-prompt" },
     el("div", { class: "kb-prompt-head" },
       el("span", { class: "kb-prompt-label" }, label),
@@ -233,7 +240,7 @@ const promptBlock = (text, label, { truncated = false } = {}) => {
           class: "btn small",
           onclick: () => copyToClipboard(text, label),
         }, "复制")),
-    el("p", { class: clamped ? "kb-prompt-text clamped" : "kb-prompt-text" }, shown));
+    el("p", { class: shouldClamp ? "kb-prompt-text clamped" : "kb-prompt-text" }, shown));
 };
 
 const confidenceBadge = (confidence) => {
@@ -447,7 +454,7 @@ const syntaxHelpPanel = () => {
 const exportRequestBody = () => {
   const selectedOnly = app.knowledgeTab.exportScope === "selected";
   return {
-    query: app.knowledgeTab.query,
+    query: knowledgeSearchQuery(),
     generator: app.knowledgeTab.generator,
     groupId: app.knowledgeTab.groupId,
     sender: app.knowledgeTab.sender,
@@ -666,6 +673,33 @@ const densityToggle = () => {
   return el("div", { class: "kb-density" }, button("detail", "详细"), button("compact", "只看图"));
 };
 
+const LIBRARY_SCOPES = [
+  { value: "prompt", label: "有咒语", query: "has:prompt" },
+  { value: "sender", label: "群里发过", query: "has:sender" },
+  { value: "all", label: "全部", query: "" },
+];
+const SCOPE_KEY = "cc-knowledge-scope";
+
+const knowledgeSearchQuery = () => {
+  const scope = LIBRARY_SCOPES.find((item) => item.value === app.knowledgeTab.libraryScope) ?? LIBRARY_SCOPES[0];
+  return [scope.query, app.knowledgeTab.query].filter((part) => part !== "").join(" ");
+};
+
+const libraryScopeToggle = () => {
+  const button = (value, label) =>
+    el("button", {
+      class: app.knowledgeTab.libraryScope === value ? "btn small active" : "btn small",
+      "data-testid": `kb-scope-${value}`,
+      onclick: () => {
+        replaceKnowledgeTab({ libraryScope: value });
+        localStorage.setItem(SCOPE_KEY, value);
+        loadKnowledgeResults();
+      },
+    }, label);
+  return el("div", { class: "kb-density" },
+    LIBRARY_SCOPES.map((scope) => button(scope.value, scope.label)));
+};
+
 const knowledgeFilters = () => {
   const overview = app.knowledgeTab.overview;
   const generators = overview?.generators ?? [];
@@ -759,7 +793,7 @@ const knowledgeFilters = () => {
           },
         }, "清除筛选")
         : null),
-    el("div", { class: "kb-control-row" }, generatorSelect, groupSelect, senderSelect, sortSelect, densityToggle()),
+    el("div", { class: "kb-control-row" }, libraryScopeToggle(), generatorSelect, groupSelect, senderSelect, sortSelect, densityToggle()),
     searchPreview(),
     syntaxHelpPanel(),
     exportPanel());
@@ -796,7 +830,7 @@ const knowledgeCoverageNote = () => {
       outside === 0 ? null : el("p", { class: "kb-meta" },
         `${outside} 张的时间不在已总结范围内。这些图的参数已经存好了，只是还不知道是谁发的；到「运行」页补跑那段时间就会逐步对上。`),
       notInMessages === 0 ? null : el("p", { class: "kb-meta" },
-        `${notInMessages} 张所在时间段已扫过，但群消息里没有 —— 这些多半是你自己生成、私聊收到或从收藏进缓存的。`),
+        `${notInMessages} 张所在时间段已扫过部分群，但那些群的消息里没有这张图。工具还没读私聊／收藏，所以不能断定来源。`),
       unavailable === 0 ? null : el("p", { class: "kb-meta" },
         `${unavailable} 张从未记录到本地原图路径，可能没有下载过原图。`),
       evicted === 0 ? null : el("p", { class: "kb-meta" },
@@ -1047,8 +1081,8 @@ const renderKnowledgeDetail = () => {
     item.hasFile
       ? el("img", { class: "kb-overlay-image", src: knowledgeFileUrl(item.hash), alt: "原图" })
       : el("div", { class: "kb-thumb missing" }, el("span", {}, unavailableImageText(item.fileMissing))),
-    promptBlock(item.prompt, "咒语"),
-    promptBlock(item.negativePrompt, "负面咒语"),
+    promptBlock(item.prompt, "咒语", { clamp: false }),
+    promptBlock(item.negativePrompt, "负面咒语", { clamp: false }),
     el("div", { class: "kb-detail-grid" },
       detailRow("模型", item.checkpoint),
       detailRow("模型 hash", item.modelHash),
@@ -1148,9 +1182,9 @@ const renderImages = () => {
   }
   if (results.items.length === 0) {
     return el("div", { class: "empty" },
-      app.knowledgeTab.query === "" && app.knowledgeTab.generator === "" && app.knowledgeTab.groupId === "" && app.knowledgeTab.sender === ""
+      app.knowledgeTab.query === "" && app.knowledgeTab.generator === "" && app.knowledgeTab.groupId === "" && app.knowledgeTab.sender === "" && app.knowledgeTab.libraryScope === "all"
         ? "库里还没有图片。"
-        : "没有符合条件的图片。可以放宽筛选，或点「清除筛选」。");
+        : "没有符合条件的图片。可改用「群里发过」或「全部」，或点「清除筛选」。");
   }
 
   const remaining = results.total - results.items.length;

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { readJson } = require("./report_utils");
+const { readLlmError, readLlmUnused } = require("./llm_status");
 
 const pathExists = (filePath) => fs.existsSync(filePath);
 
@@ -35,32 +36,118 @@ const dirSize = (dirPath) => {
   return total;
 };
 
-const latestMtime = (dirPath) => {
-  if (!pathExists(dirPath)) {
-    return 0;
-  }
+// Finished runs do not change size until the next export. /api/state used to
+// walk every file (tens of GB) on each boot; cache the totals next to analysis.
+const DISK_STATS_SCHEMA = "qqsummarytools.run-disk-stats";
+const DISK_STATS_VERSION = 1;
+const EXPORT_META_PREFIX_BYTES = 256 * 1024;
 
-  const stack = [dirPath];
-  let latest = fs.statSync(dirPath).mtimeMs;
-  while (stack.length > 0) {
-    const current = stack.pop();
-    const entries = fs.readdirSync(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const entryPath = path.join(current, entry.name);
-      let stat;
-      try {
-        stat = fs.statSync(entryPath);
-      } catch {
-        continue;
-      }
-      latest = Math.max(latest, stat.mtimeMs);
-      if (entry.isDirectory()) {
-        stack.push(entryPath);
-      }
+const fileStamp = (filePath) => {
+  try {
+    const stat = fs.statSync(filePath);
+    return `${Math.trunc(stat.mtimeMs)}:${stat.size}`;
+  } catch {
+    return "0:0";
+  }
+};
+
+const dirStamp = (dirPath) => {
+  try {
+    const stat = fs.statSync(dirPath);
+    return stat.isDirectory() ? `${Math.trunc(stat.mtimeMs)}` : "0";
+  } catch {
+    return "0";
+  }
+};
+
+const exportStamp = (exportsDir) => {
+  if (!pathExists(exportsDir)) {
+    return "";
+  }
+  return fs
+    .readdirSync(exportsDir)
+    .filter((name) => name.endsWith(".json"))
+    .sort()
+    .map((name) => `${name}:${fileStamp(path.join(exportsDir, name))}`)
+    .join(",");
+};
+
+const diskFingerprint = (runDir) => [
+  fileStamp(path.join(runDir, "analysis", "analysis.json")),
+  fileStamp(path.join(runDir, "analysis", "digest.json")),
+  fileStamp(path.join(runDir, "media", "media-manifest.json")),
+  dirStamp(path.join(runDir, "media")),
+  dirStamp(path.join(runDir, "clean-db")),
+  exportStamp(path.join(runDir, "exports")),
+].join("|");
+
+const diskStatsPath = (runDir) => path.join(runDir, "analysis", "disk-stats.json");
+
+const readDiskStats = (runDir, fingerprint) => {
+  const target = diskStatsPath(runDir);
+  if (!pathExists(target)) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(target, "utf8"));
+  } catch {
+    return null;
+  }
+  if (parsed?.schema !== DISK_STATS_SCHEMA || parsed.version !== DISK_STATS_VERSION) {
+    return null;
+  }
+  if (parsed.fingerprint !== fingerprint) {
+    return null;
+  }
+  if (![parsed.mediaBytes, parsed.cleanDbBytes, parsed.runBytes, parsed.mtimeMs, parsed.mediaRefs,
+    parsed.copiedMedia, parsed.missingMedia, parsed.urlOnlyMedia].every(Number.isFinite)) {
+    return null;
+  }
+  if (parsed.scanCoverage === null || typeof parsed.scanCoverage !== "object" || Array.isArray(parsed.scanCoverage)) {
+    return null;
+  }
+  return parsed;
+};
+
+const writeDiskStats = (runDir, stats) => {
+  try {
+    fs.writeFileSync(diskStatsPath(runDir), `${JSON.stringify(stats)}\n`);
+  } catch {
+    // Listing must still work when the runs directory is readable but not writable.
+  }
+};
+
+// Export JSON is almost all message bodies. Coverage only needs the header
+// written before `messages`; parsing 10MB+ arrays on every listing is wasted.
+const readExportCoverageMeta = (filePath) => {
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return null;
+  }
+  if (stat.size <= EXPORT_META_PREFIX_BYTES) {
+    return readJson(filePath);
+  }
+  const fd = fs.openSync(filePath, "r");
+  let prefix;
+  try {
+    const buffer = Buffer.alloc(EXPORT_META_PREFIX_BYTES);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    prefix = buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+  const cut = prefix.search(/,\s*"(?:messages|mediaMessages|quoteLinks)"\s*:/u);
+  if (cut !== -1) {
+    try {
+      return JSON.parse(`${prefix.slice(0, cut)}}`);
+    } catch {
+      // Prefix was not a complete object (header larger than the window).
     }
   }
-
-  return latest;
+  return readJson(filePath);
 };
 
 const parseRunTimestamp = (runId) => {
@@ -132,7 +219,10 @@ const collectScanCoverage = (runDir) => {
     .readdirSync(exportsDir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
     .map((entry) => {
-      const value = readJson(path.join(exportsDir, entry.name));
+      const value = readExportCoverageMeta(path.join(exportsDir, entry.name));
+      if (value === null || typeof value !== "object") {
+        return null;
+      }
       const startUnix = numberOrNull(value.startUnix);
       const endUnix = numberOrNull(value.endUnix);
       const groupIds = Array.isArray(value.groupIds) ? value.groupIds.map(String) : [];
@@ -177,6 +267,14 @@ const collectScanCoverage = (runDir) => {
   };
 };
 
+const llmCoverageRow = (entry, analysisDir) => ({
+  total: entry.llmSummary?.coverage?.totalTextMessages ?? entry.parsedTextMessages ?? 0,
+  included: entry.llmSummary?.coverage?.includedTextMessages ?? null,
+  used: entry.llmSummary !== null && entry.llmSummary !== undefined,
+  failed: readLlmError(analysisDir) !== null,
+  unused: readLlmUnused(analysisDir) !== null,
+});
+
 const llmCoverageRows = (runDir, analysis, digest) => {
   const groupsDir = path.join(runDir, "analysis", "groups");
   if (digest !== null && pathExists(groupsDir)) {
@@ -184,28 +282,27 @@ const llmCoverageRows = (runDir, analysis, digest) => {
       .readdirSync(groupsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => {
-        const analysisPath = path.join(groupsDir, entry.name, "analysis.json");
-        return pathExists(analysisPath) ? readJson(analysisPath) : null;
+        const groupDir = path.join(groupsDir, entry.name);
+        const analysisPath = path.join(groupDir, "analysis.json");
+        return pathExists(analysisPath) ? llmCoverageRow(readJson(analysisPath), groupDir) : null;
       })
-      .filter((entry) => entry !== null)
-      .map((entry) => ({
-        total: entry.llmSummary?.coverage?.totalTextMessages ?? entry.parsedTextMessages ?? 0,
-        included: entry.llmSummary?.coverage?.includedTextMessages ?? null,
-        used: entry.llmSummary !== null && entry.llmSummary !== undefined,
-      }));
+      .filter((entry) => entry !== null);
   }
-  return [{
-    total: analysis.llmSummary?.coverage?.totalTextMessages ?? analysis.parsedTextMessages ?? 0,
-    included: analysis.llmSummary?.coverage?.includedTextMessages ?? null,
-    used: analysis.llmSummary !== null && analysis.llmSummary !== undefined,
-  }];
+  return [llmCoverageRow(analysis, path.join(runDir, "analysis"))];
 };
 
 const collectAiCoverage = (runDir, analysis, digest) => {
   const rows = llmCoverageRows(runDir, analysis, digest);
   const usedRows = rows.filter((row) => row.used);
   if (usedRows.length === 0) {
-    return { status: "not-used", coverageRatio: null, includedMessages: 0, totalMessages: 0 };
+    const totalMessages = rows.reduce((total, row) => total + row.total, 0);
+    if (rows.some((row) => row.failed)) {
+      return { status: "failed", coverageRatio: null, includedMessages: 0, totalMessages };
+    }
+    if (rows.length > 0 && rows.every((row) => row.unused)) {
+      return { status: "not-used", coverageRatio: null, includedMessages: 0, totalMessages: 0 };
+    }
+    return { status: "indeterminate", coverageRatio: null, includedMessages: 0, totalMessages };
   }
   if (usedRows.some((row) => !Number.isFinite(row.included))) {
     return {
@@ -230,16 +327,16 @@ const collectAiCoverage = (runDir, analysis, digest) => {
 };
 
 // A run left behind with truncated/corrupt JSON must not take down the whole listing.
-const collectRun = (runDir, reportsDir) => {
+const collectRun = (runDir, reportsDir, options) => {
   try {
-    return collectRunUnsafe(runDir, reportsDir);
+    return collectRunUnsafe(runDir, reportsDir, options);
   } catch (error) {
     console.error(`run-index: skipping unreadable run ${path.basename(runDir)}: ${error.message}`);
     return null;
   }
 };
 
-const collectRunUnsafe = (runDir, reportsDir) => {
+const collectRunUnsafe = (runDir, reportsDir, options = {}) => {
   const runId = path.basename(runDir);
   const analysisPath = path.join(runDir, "analysis", "analysis.json");
   if (!pathExists(analysisPath)) {
@@ -254,11 +351,58 @@ const collectRunUnsafe = (runDir, reportsDir) => {
   const reportHtml = path.join(reportsDir, `${runId}.html`);
   const reportMd = path.join(reportsDir, `${runId}.md`);
   const cleanDbDir = path.join(runDir, "clean-db");
-  const mediaStats = countManifest(manifestPath);
-  const mediaBytes = dirSize(mediaDir);
-  const cleanDbBytes = dirSize(cleanDbDir);
-  const runBytes = dirSize(runDir);
-  const scanCoverage = collectScanCoverage(runDir);
+  const fingerprint = diskFingerprint(runDir);
+  const cached = readDiskStats(runDir, fingerprint);
+  let mediaStats;
+  let mediaBytes;
+  let cleanDbBytes;
+  let runBytes;
+  let mtimeMs;
+  let scanCoverage;
+  if (cached !== null) {
+    mediaStats = {
+      refs: cached.mediaRefs,
+      copied: cached.copiedMedia,
+      missing: cached.missingMedia,
+      urlOnly: cached.urlOnlyMedia,
+    };
+    mediaBytes = cached.mediaBytes;
+    cleanDbBytes = cached.cleanDbBytes;
+    runBytes = cached.runBytes;
+    mtimeMs = cached.mtimeMs;
+    scanCoverage = cached.scanCoverage;
+  } else {
+    mediaStats = countManifest(manifestPath);
+    try {
+      mtimeMs = fs.statSync(analysisPath).mtimeMs;
+    } catch {
+      mtimeMs = 0;
+    }
+    scanCoverage = collectScanCoverage(runDir);
+    if (options.includeDisk === false) {
+      mediaBytes = 0;
+      cleanDbBytes = 0;
+      runBytes = 0;
+    } else {
+      mediaBytes = dirSize(mediaDir);
+      cleanDbBytes = dirSize(cleanDbDir);
+      runBytes = dirSize(runDir);
+      writeDiskStats(runDir, {
+        schema: DISK_STATS_SCHEMA,
+        version: DISK_STATS_VERSION,
+        fingerprint,
+        mediaBytes,
+        cleanDbBytes,
+        runBytes,
+        mtimeMs,
+        mediaRefs: mediaStats.refs,
+        copiedMedia: mediaStats.copied,
+        missingMedia: mediaStats.missing,
+        urlOnlyMedia: mediaStats.urlOnly,
+        scanCoverage,
+      });
+    }
+  }
   const aiCoverage = collectAiCoverage(runDir, analysis, digest);
 
   return {
@@ -284,7 +428,13 @@ const collectRunUnsafe = (runDir, reportsDir) => {
     copiedMedia: mediaStats.copied,
     missingMedia: mediaStats.missing,
     urlOnlyMedia: mediaStats.urlOnly,
-    llmStatus: (digest ? digest.llmGroups > 0 : analysis.llmSummary) ? "done" : "not-used",
+    llmStatus: (digest ? digest.llmGroups > 0 : analysis.llmSummary)
+      ? "done"
+      : aiCoverage.status === "failed"
+        ? "failed"
+        : aiCoverage.status === "not-used"
+          ? "not-used"
+          : "unknown",
     llmModel: digest ? `${digest.llmGroups}/${digest.groupCount} 群 LLM` : analysis.llmSummary?.provider?.model ?? "",
     mediaBytes,
     cleanDbBytes,
@@ -293,11 +443,11 @@ const collectRunUnsafe = (runDir, reportsDir) => {
     scanCoverage,
     aiCoverage,
     createdMs: parseRunTimestamp(runId),
-    mtimeMs: latestMtime(runDir),
+    mtimeMs,
   };
 };
 
-const collectRuns = (runsDir, reportsDir) => {
+const collectRuns = (runsDir, reportsDir, options) => {
   if (!pathExists(runsDir)) {
     return [];
   }
@@ -305,7 +455,7 @@ const collectRuns = (runsDir, reportsDir) => {
   return fs
     .readdirSync(runsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name.startsWith("qq-"))
-    .map((entry) => collectRun(path.join(runsDir, entry.name), reportsDir))
+    .map((entry) => collectRun(path.join(runsDir, entry.name), reportsDir, options))
     .filter((run) => run !== null)
     .sort((left, right) => (right.createdMs ?? right.mtimeMs) - (left.createdMs ?? left.mtimeMs));
 };
@@ -317,6 +467,8 @@ module.exports = {
   parseRunTimestamp,
   collectRun,
   collectRuns,
+  readExportCoverageMeta,
+  diskStatsPath,
   collectScanCoverage,
   collectAiCoverage,
 };

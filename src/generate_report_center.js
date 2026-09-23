@@ -47,7 +47,7 @@ const renderRows = (runs) =>
             <span>media ${escapeHtml(formatBytes(run.mediaBytes))}${run.hasCleanDb ? `, clean-db ${escapeHtml(formatBytes(run.cleanDbBytes))}` : ""}</span>
           </td>
           <td>
-            <span class="status ${escapeHtml(run.llmStatus)}">${run.llmStatus === "done" ? "LLM done" : "Local only"}</span>
+            <span class="status ${escapeHtml(run.llmStatus)}">${run.llmStatus === "done" ? "LLM done" : run.llmStatus === "failed" ? "LLM failed" : run.llmStatus === "unknown" ? "无法判断" : "Local only"}</span>
             <span>${escapeHtml(run.llmModel || "No model")}</span>
           </td>
           <td class="actions">
@@ -115,6 +115,8 @@ const writeHtml = (runs, config, outputHtml) => {
     .status { color: var(--muted); }
     .status.done { color: var(--ok); }
     .status.not-used { color: var(--warn); }
+    .status.unknown { color: var(--warn); }
+    .status.failed { color: var(--risk); }
     .badge { display: inline-block; font-style: normal; font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; margin-right: 4px; vertical-align: 1px; }
     .actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .button { display: inline-flex; align-items: center; justify-content: center; min-width: 58px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); text-decoration: none; background: #fff; font-size: 12px; }
@@ -151,7 +153,9 @@ const writeHtml = (runs, config, outputHtml) => {
         <select id="llm-filter">
           <option value="all">全部 LLM 状态</option>
           <option value="done">LLM done</option>
+          <option value="failed">LLM failed</option>
           <option value="not-used">Local only</option>
+          <option value="unknown">无法判断</option>
         </select>
         <select id="media-filter">
           <option value="all">全部媒体</option>
@@ -191,8 +195,7 @@ const writeHtml = (runs, config, outputHtml) => {
       </section>
       <section class="panel">
         <h2>清理建议</h2>
-        <p>默认新任务会清理 clean-db。旧任务可双击清理按钮移除临时数据库副本。</p>
-        <p class="path">powershell -File scripts\\cleanup_generated_data.ps1</p>
+        <p>运行产物和报告可以在控制台「设置 → 存储」页查看占用并清理。</p>
       </section>
     </aside>
   </main>

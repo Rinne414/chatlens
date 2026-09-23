@@ -210,3 +210,54 @@ test("message ingestion keeps old history instead of applying a retention cutoff
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test("ingest records per-group coverage when groupStarts is present", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-summary-group-starts-"));
+  const db = messageStore.openStore(path.join(tempDir, "messages.db"));
+  try {
+    messageStore.ingestExport(db, {
+      groupIds: ["1", "2"],
+      groupNames: { 1: "A", 2: "B" },
+      startUnix: 100,
+      endUnix: 500,
+      coveredFromUnix: 100,
+      groupStarts: { 1: 100, 2: 400 },
+      messages: [],
+      mediaMessages: [],
+    }, "split-run");
+
+    assert.deepEqual(messageStore.getCoverage(db, "1"), [{ startUnix: 100, endUnix: 500 }]);
+    assert.deepEqual(messageStore.getCoverage(db, "2"), [{ startUnix: 400, endUnix: 500 }]);
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("advanceLocalReadMarks moves each group's cursor to its newest stored message", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-summary-advance-read-"));
+  const db = messageStore.openStore(path.join(tempDir, "messages.db"));
+  try {
+    messageStore.ingestExport(db, {
+      groupIds: ["1"],
+      groupNames: { 1: "A" },
+      startUnix: 10,
+      endUnix: 50,
+      coveredFromUnix: 10,
+      messages: [
+        { groupId: "1", rowId: "1", sentAt: 20, senderName: "A", senderUin: "1", text: "old" },
+        { groupId: "1", rowId: "2", sentAt: 40, senderName: "A", senderUin: "1", text: "new" },
+      ],
+      mediaMessages: [],
+    }, "read-run");
+    messageStore.setReadMark(db, "1", 20, "1");
+    const result = messageStore.advanceLocalReadMarks(db, ["1", "9"]);
+    assert.equal(result.advanced, 1);
+    const mark = messageStore.getReadMark(db, "1");
+    assert.equal(mark.sentAt, 40);
+    assert.equal(mark.rowId, "2");
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

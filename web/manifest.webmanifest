@@ -1,0 +1,16 @@
+{
+  "name": "QQ 群消息简报",
+  "short_name": "群简报",
+  "description": "不开 QQ 也能看完群消息：后台自动整理的群聊简报（本地只读）。",
+  "lang": "zh-Hans",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f5f2",
+  "theme_color": "#1565c0",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

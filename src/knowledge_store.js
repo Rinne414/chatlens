@@ -322,9 +322,42 @@ const normalizeRequestAnswer = (request) => {
   return { answerKind, answerText, answerMedia };
 };
 
+// Chat-sourced prompts (kkt answers) outlive QQ-stripped metadata. They must
+// become the searchable `images.prompt` when they are more complete than what
+// was parsed from the file, otherwise the library cannot find the text people
+// actually pasted in the group.
+const applyChatPrompt = (db, { hash, prompt }) => {
+  const text = String(prompt ?? "").trim();
+  if (hash === null || hash === undefined || hash === "" || text === "") {
+    return { applied: false, reason: "empty" };
+  }
+  const row = db.prepare("SELECT prompt, negative_prompt, checkpoint FROM images WHERE hash = ?").get(hash);
+  if (row === undefined) {
+    return { applied: false, reason: "missing" };
+  }
+  const current = String(row.prompt ?? "").trim();
+  if (current !== "" && text.length <= current.length) {
+    return { applied: false, reason: "kept-metadata" };
+  }
+
+  db.prepare("UPDATE images SET prompt = ? WHERE hash = ?").run(text, hash);
+  db.prepare("DELETE FROM image_tags WHERE hash = ? AND source = 'prompt'").run(hash);
+  const insertTag = db.prepare("INSERT OR IGNORE INTO image_tags (hash, tag, source) VALUES (?, ?, 'prompt')");
+  for (const tag of tagsFromPrompt(text)) {
+    insertTag.run(hash, tag);
+  }
+  const loras = db.prepare("SELECT lora_name AS name FROM image_loras WHERE hash = ?").all(hash);
+  db.prepare("DELETE FROM images_fts WHERE hash = ?").run(hash);
+  db.prepare(`
+    INSERT INTO images_fts (hash, prompt, negative_prompt, checkpoint, loras)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(hash, text, row.negative_prompt ?? "", row.checkpoint ?? "", loras.map((lora) => lora.name).join(" "));
+  return { applied: true, reason: current === "" ? "filled" : "replaced" };
+};
+
 const recordPromptRequest = (db, request) => {
   const answer = normalizeRequestAnswer(request);
-  return db.prepare(`
+  const result = db.prepare(`
     INSERT INTO prompt_requests (
       group_id, ask_row_id, ask_sent_at, group_name, intent, rule, asker, ask_text,
       image_hash, image_owner, image_sent_at, target_via, confidence,
@@ -372,6 +405,13 @@ const recordPromptRequest = (db, request) => {
     answerSentAt: request.answerSentAt ?? 0,
     recordedAt: request.recordedAt ?? 0,
   });
+  const stored = db.prepare(
+    "SELECT image_hash AS imageHash, answer_text AS answerText, answer_kind AS answerKind FROM prompt_requests WHERE group_id = ? AND ask_row_id = ?",
+  ).get(String(request.groupId), String(request.askRowId));
+  if (stored !== undefined && stored.answerKind === "text") {
+    applyChatPrompt(db, { hash: stored.imageHash, prompt: stored.answerText });
+  }
+  return result;
 };
 
 // A file is re-parsed when its bytes changed or the parser was upgraded, so a
@@ -444,6 +484,7 @@ module.exports = {
   recordSighting,
   attachMediaObject,
   recordPromptRequest,
+  applyChatPrompt,
   markScanned,
   loadScanState,
   isUnchanged,

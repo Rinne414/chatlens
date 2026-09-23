@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
+const { readSecretSync } = require("./secrets");
 
 const MAX_MESSAGES = 600;
 const MAX_CHARS = 60000;
@@ -98,10 +99,8 @@ const normalizeResult = (raw) => ({
 
 const main = async () => {
   const args = parseArgs(process.argv);
-  const apiKey = process.env[args.apiKeyEnv];
-  if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
-    throw new Error(`Missing API key in env ${args.apiKeyEnv}`);
-  }
+  const fromEnv = String(process.env[args.apiKeyEnv] ?? "").trim();
+  const apiKey = fromEnv.length > 0 ? fromEnv : readSecretSync("llmKey").trim();
 
   const input = JSON.parse(fs.readFileSync(args.inputJson, "utf8"));
   if (!Array.isArray(input.messages) || input.messages.length === 0) {

@@ -199,7 +199,7 @@ const normalizeOriginalReplyMedia = (mediaRefs) => {
 
 // How long after the ask an answer is still considered a reply to it.
 const ANSWER_WINDOW_SECONDS = 30 * 60;
-const ORIGINAL_ANSWER_WINDOW_SECONDS = 2 * 60;
+const ORIGINAL_ANSWER_WINDOW_SECONDS = 30 * 60;
 
 const sameSender = (left, right) =>
   String(left ?? "") !== "" && String(left ?? "") === String(right ?? "");

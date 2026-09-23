@@ -163,7 +163,7 @@ const loadCoverageRanges = (toolRoot) => {
   }
   const db = new Database(storePath, { readonly: true, fileMustExist: true });
   try {
-    return db.prepare("SELECT start_unix AS startUnix, end_unix AS endUnix FROM scan_ranges ORDER BY start_unix").all();
+    return db.prepare("SELECT group_id AS groupId, start_unix AS startUnix, end_unix AS endUnix FROM scan_ranges ORDER BY start_unix").all();
   } catch {
     return [];
   } finally {
@@ -173,6 +173,24 @@ const loadCoverageRanges = (toolRoot) => {
 
 const isInsideCoverage = (ranges, unixSeconds) =>
   unixSeconds > 0 && ranges.some((range) => unixSeconds >= range.startUnix && unixSeconds <= range.endUnix);
+
+const coveringGroupCount = (ranges, unixSeconds) => {
+  if (!(unixSeconds > 0)) {
+    return 0;
+  }
+  const groups = new Set();
+  for (const range of ranges) {
+    if (unixSeconds >= range.startUnix && unixSeconds <= range.endUnix) {
+      if (range.groupId) {
+        groups.add(String(range.groupId));
+      }
+    }
+  }
+  if (groups.size > 0) {
+    return groups.size;
+  }
+  return isInsideCoverage(ranges, unixSeconds) ? 1 : 0;
+};
 
 const attributionReason = (row, ranges, hasSighting) => {
   if (hasSighting) {
@@ -250,6 +268,7 @@ const decorateImage = (db, row, capabilities, ranges = [], { full = false } = {}
     hasFile: (!fileMissing && row.file_path !== "") || hasObject,
     fileMissing,
     attributionReason: attributionReason(row, ranges, sightings.length > 0),
+    coverageGroupCount: coveringGroupCount(ranges, row.file_mtime),
     params: parseParams(row.params_json),
     loras,
     sightings,
@@ -580,9 +599,7 @@ const collectForExport = (toolRoot, options = {}) => {
         items.push({
           // full: a truncated prompt in an exported sidecar would be silent data loss.
           ...decorateImage(db, row, capabilities, ranges, { full: true }),
-          filePath: row.file_missing !== 1 && row.file_path !== ""
-            ? row.file_path
-            : row.object_path,
+          filePath: originalPathFor(row) ?? "",
         });
       }
     }
@@ -723,10 +740,34 @@ const imageByHash = (toolRoot, hash) => {
   }
 };
 
-// Resolves a hash to its on-disk cache path so the server can stream the file.
-// Returns null when the row is unknown or the original is gone; the caller must
-// not fall back to guessing a path.
-const imageFilePath = (toolRoot, hash) => {
+const isExistingFile = (filePath) => {
+  if (typeof filePath !== "string" || filePath === "") {
+    return false;
+  }
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+};
+
+// Harvest records a Thumb path when Ori is gone. Those bytes are QQ's re-encode
+// and must not be treated as the original (export, detail view, hash verify).
+const isThumbCachePath = (filePath) =>
+  String(filePath ?? "").split(/[/\\]/u).some((part) => part.toLowerCase() === "thumb");
+
+const originalPathFor = (row) => {
+  if (isExistingFile(row.object_path)) {
+    return row.object_path;
+  }
+  const cachePath = row.file_path ?? "";
+  if (row.file_missing === 1 || cachePath === "" || isThumbCachePath(cachePath)) {
+    return null;
+  }
+  return cachePath;
+};
+
+const loadImageFileRow = (toolRoot, hash) => {
   if (!/^[a-f0-9]{32}$/u.test(String(hash ?? ""))) {
     return null;
   }
@@ -736,51 +777,31 @@ const imageFilePath = (toolRoot, hash) => {
   }
   try {
     const capabilities = probeCapabilities(db);
-    const row = db.prepare(`
+    return db.prepare(`
       SELECT file_path,
              ${capabilities.fileMissing ? "file_missing" : "0 AS file_missing"},
              ${capabilities.objectPath ? "object_path" : "'' AS object_path"}
       FROM images WHERE hash = ?
-    `).get(hash);
-    if (row === undefined) {
-      return null;
-    }
-    if (row.file_missing !== 1 && row.file_path !== "") {
-      if (fs.existsSync(row.file_path) || row.object_path === "") {
-        return row.file_path;
-      }
-    }
-    return row.object_path !== "" && fs.existsSync(row.object_path) ? row.object_path : null;
+    `).get(hash) ?? null;
   } finally {
     db.close();
   }
 };
 
-// Grid cards must NOT be served the original: measured on real data, 60
-// full-resolution cards cost 127 MB of transfer and ~850 MB of decoded bitmap
-// (width*height*4), which is what made the page lag.
-//
-// QQ already keeps its own reduced copies beside each original, in a sibling
-// Thumb directory, named <md5>_<variant>. The smallest variant is ~8x smaller
-// than the original, so the grid uses it and the detail view keeps the original.
-// Returns null when no thumbnail exists, letting the caller fall back.
-const thumbnailFilePath = (toolRoot, hash) => {
-  const original = imageFilePath(toolRoot, hash);
-  if (original === null) {
-    return null;
+const thumbDirFor = (filePath) => {
+  if (isThumbCachePath(filePath)) {
+    return path.dirname(filePath);
   }
-  const objectRootCheck = path.relative(path.resolve(mediaObjectDir(toolRoot)), path.resolve(original));
-  if (!objectRootCheck.startsWith("..") && !path.isAbsolute(objectRootCheck)) {
-    return null;
-  }
-  const thumbDir = path.join(path.dirname(path.dirname(original)), "Thumb");
+  return path.join(path.dirname(path.dirname(filePath)), "Thumb");
+};
+
+const smallestThumbIn = (thumbDir, hash) => {
   let names;
   try {
     names = fs.readdirSync(thumbDir);
   } catch {
     return null;
   }
-
   const candidates = [];
   for (const name of names) {
     if (!name.toLowerCase().startsWith(hash)) {
@@ -799,9 +820,49 @@ const thumbnailFilePath = (toolRoot, hash) => {
   if (candidates.length === 0) {
     return null;
   }
-  // Smallest wins: the grid only needs enough pixels for a 132-320px card.
   candidates.sort((left, right) => left.size - right.size);
   return candidates[0].full;
+};
+
+// Resolves a hash to the original bytes (durable object, then Ori cache).
+// Returns null when the row is unknown, the original is gone, or only a Thumb
+// remains; the caller must not fall back to guessing a path.
+const imageFilePath = (toolRoot, hash) => {
+  const row = loadImageFileRow(toolRoot, hash);
+  return row === null ? null : originalPathFor(row);
+};
+
+// Grid cards must NOT be served the original: measured on real data, 60
+// full-resolution cards cost 127 MB of transfer and ~850 MB of decoded bitmap
+// (width*height*4), which is what made the page lag.
+//
+// QQ already keeps its own reduced copies beside each original, in a sibling
+// Thumb directory, named <md5>_<variant>. The smallest variant is ~8x smaller
+// than the original, so the grid uses it and the detail view keeps the original.
+// When the original lives in media-objects, thumbs are still resolved from the
+// recorded cache path. Returns null when no thumbnail exists, letting the
+// caller fall back.
+const thumbnailFilePath = (toolRoot, hash) => {
+  const row = loadImageFileRow(toolRoot, hash);
+  if (row === null) {
+    return null;
+  }
+  const cachePath = row.file_missing === 1 ? "" : String(row.file_path ?? "");
+  if (cachePath !== "") {
+    const fromCache = smallestThumbIn(thumbDirFor(cachePath), hash);
+    if (fromCache !== null) {
+      return fromCache;
+    }
+  }
+  const original = originalPathFor(row);
+  if (original === null) {
+    return null;
+  }
+  const objectRootCheck = path.relative(path.resolve(mediaObjectDir(toolRoot)), path.resolve(original));
+  if (!objectRootCheck.startsWith("..") && !path.isAbsolute(objectRootCheck)) {
+    return null;
+  }
+  return smallestThumbIn(thumbDirFor(original), hash);
 };
 
 const promptRequests = (toolRoot, { onlyAnswered = false, limit } = {}) => {
@@ -914,8 +975,8 @@ const overview = (toolRoot) => {
              ${capabilities.fileMissing ? "i.file_missing" : "0 AS file_missing"},
              ${capabilities.objectPath ? "i.object_path" : "'' AS object_path"},
              EXISTS (SELECT 1 FROM sightings s WHERE s.hash = i.hash) AS has_sighting
-      FROM images i WHERE i.generator <> @placeholder
-    `).all({ placeholder: PLACEHOLDER_GENERATOR });
+      FROM images i
+    `).all();
 
     const reasons = { attributed: 0, evicted: 0, unavailable: 0, "outside-coverage": 0, "not-in-messages": 0 };
     for (const row of reasonRows) {

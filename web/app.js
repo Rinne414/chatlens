@@ -64,12 +64,24 @@ const api = async (path, options = {}) => {
 
 const app = {
   state: null,
-  view: "run",
+  view: "brief",
   runMode: "watchlist",
   range: { type: "hours", hours: 24 },
+  paste: {
+    start: "",
+    end: "",
+    match: null,
+    error: null,
+    loading: false,
+  },
   rangeInitialized: false,
   runNotice: "",
   runNoticeTone: "info",
+  unreadHint: null,
+  catchup: null,
+  catchupError: null,
+  catchupEmpty: false,
+  readerOrigin: { view: "run" },
   runGroups: {
     selected: [],
     query: "",
@@ -134,6 +146,14 @@ const app = {
     mode: localStorage.getItem("cc-mediamode") ?? "detail",
     selecting: false,
     selected: new Set(),
+    pickFilter: "all",
+    picks: {
+      hashes: new Set(),
+      paths: new Set(),
+      saving: false,
+      error: null,
+      result: null,
+    },
     fromUnix: null,
     toUnix: null,
     viewerPath: null,
@@ -156,6 +176,7 @@ const app = {
   knowledgeTab: {
     surface: "images",
     query: "",
+    libraryScope: localStorage.getItem("cc-knowledge-scope") || "prompt",
     generator: "",
     groupId: "",
     sender: "",
@@ -186,8 +207,8 @@ const app = {
   },
 };
 
-const VIEW_TITLES = { run: "运行", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
-const NAV_ICONS = { run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
+const VIEW_TITLES = { brief: "简报", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
+const NAV_ICONS = { brief: "📰", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
 const KIND_ICONS = { image: "📷", video: "🎬", sticker: "😃", face: "😃", emoji: "😃", audio: "🎵", file: "📎" };
 const KIND_LABELS = { image: "图片", video: "视频", sticker: "表情", face: "表情", emoji: "表情", audio: "语音", file: "文件" };
 
@@ -286,10 +307,14 @@ const hktToUnix = (text) => {
 
 /* ---------- navigation ---------- */
 
+// Views reached from a page rather than the rail highlight their parent entry.
+const NAV_PARENT = { run: "brief", reader: "brief", history: "settings", watchlist: "settings", storage: "settings" };
+
 const showView = (name) => {
   app.view = name;
+  const navName = NAV_PARENT[name] ?? name;
   for (const button of document.querySelectorAll("#nav button")) {
-    button.classList.toggle("active", button.dataset.view === name);
+    button.classList.toggle("active", button.dataset.view === navName);
   }
   for (const view of document.querySelectorAll(".view")) {
     view.hidden = view.id !== `view-${name}`;
@@ -308,6 +333,8 @@ const openPath = (targetPath) => async () => {
 /* ---------- run view ---------- */
 
 const RANGE_PRESETS = [
+  { label: "本工具未查看", type: "sinceRead" },
+  { label: "从 QQ 粘贴", type: "paste" },
   { label: "自上次记录", type: "sinceStore" },
   { label: "最近 6 小时", type: "hours", hours: 6 },
   { label: "最近 24 小时", type: "hours", hours: 24 },
@@ -1301,6 +1328,377 @@ const renderRunTimeline = () => {
     el("div", { class: "timeline-preview", id: "timeline-preview", "aria-live": "polite" }, renderTimelinePreview()));
 };
 
+const unviewedCount = () => {
+  const targets = new Set(runTargetGroups().map((group) => group.groupId));
+  return (app.state?.watchHealth ?? [])
+    .filter((entry) => targets.has(entry.groupId))
+    .reduce((total, entry) => total + (entry.localUnviewedCount ?? 0), 0);
+};
+
+const unviewedButtonLabel = () => {
+  const count = unviewedCount();
+  if (count <= 0) {
+    return "摘要我还没看过的";
+  }
+  return `摘要我还没看过的（${count > 99 ? "99+" : count}）`;
+};
+
+const unreadHintNote = () => {
+  const hint = app.unreadHint;
+  if (hint === null || hint === undefined || hint.available !== true) {
+    return null;
+  }
+  return el("p", { class: "card-sub", "data-testid": "qq-unread-hint" },
+    `QQ 会话列表红点约 ${hint.totalUnread} 条，仅作提示，不是总结起点。`);
+};
+
+const syncPasteFields = () => {
+  const start = $("#paste-start");
+  const end = $("#paste-end");
+  if (start) {
+    app.paste.start = start.value;
+  }
+  if (end) {
+    app.paste.end = end.value;
+  }
+};
+
+const matchPasteCursor = async () => {
+  syncPasteFields();
+  app.paste.loading = true;
+  app.paste.error = null;
+  app.paste.match = null;
+  renderRunView();
+  try {
+    const preferred = app.runMode === "groups"
+      ? app.runGroups.selected
+      : (app.state?.watchlist ?? []).map((entry) => entry.groupId);
+    const result = await api("/api/paste-cursor", {
+      method: "POST",
+      body: JSON.stringify({
+        startPaste: app.paste.start,
+        endPaste: app.paste.end,
+        groupIds: preferred,
+      }),
+    });
+    app.paste.match = result;
+    app.paste.error = result.ok === true ? null : (result.error ?? "对不上。");
+  } catch (error) {
+    app.paste.match = null;
+    app.paste.error = error.message;
+  } finally {
+    app.paste.loading = false;
+    renderRunView();
+  }
+};
+
+const renderPasteMatch = () => {
+  const match = app.paste.match;
+  if (app.paste.error) {
+    return el("p", { class: "notice risk", "data-testid": "paste-error" }, app.paste.error);
+  }
+  if (match?.ok !== true) {
+    return null;
+  }
+  const start = match.startMessage;
+  const end = match.endMessage;
+  const until = match.endHkt === "" ? "现在" : `${end?.speaker ?? ""} · ${match.endHkt.slice(0, 16)}`;
+  return el("div", { class: "paste-match", "data-testid": "paste-match" },
+    el("p", { class: "paste-match-label" }, match.label),
+    el("p", { class: "card-sub", style: "margin:0" },
+      `起点（含）：${start.name || start.groupId} · ${start.speaker} · ${match.startHkt.slice(0, 16)} · ${start.text || "（媒体）"}`),
+    el("p", { class: "card-sub", style: "margin:6px 0 0" },
+      `终点：${until}`));
+};
+
+const renderPasteRow = () => {
+  if (app.range.type !== "paste") {
+    return null;
+  }
+  return el("div", { class: "paste-panel", "data-testid": "paste-panel" },
+    el("p", { class: "card-sub" },
+      "在 QQ 里复制你看到的那几条（带昵称和时间），贴到这里。当作阅读游标：从对上的第一则开始总结到现在，或到下面的终点。不改 QQ 已读，也不往 QQ 里塞按钮。"),
+    el("label", { class: "paste-label", for: "paste-start" }, "起点（必填）"),
+    el("textarea", {
+      id: "paste-start",
+      "data-testid": "paste-start",
+      placeholder: "小明 2026/8/24 13:45:01\n今晚还开吗",
+      oninput: (event) => {
+        app.paste.start = event.target.value;
+        app.paste.match = null;
+      },
+    }, app.paste.start),
+    el("label", { class: "paste-label", for: "paste-end" }, "终点（选填，留空 = 到现在）"),
+    el("textarea", {
+      id: "paste-end",
+      "data-testid": "paste-end",
+      placeholder: "再贴一条当作结束；留空则总结到现在",
+      oninput: (event) => {
+        app.paste.end = event.target.value;
+        app.paste.match = null;
+      },
+    }, app.paste.end),
+    el("div", { class: "row", style: "margin-top:10px" },
+      el("button", {
+        class: "btn",
+        "data-testid": "paste-match-btn",
+        disabled: app.paste.loading,
+        onclick: matchPasteCursor,
+      }, app.paste.loading ? "正在对…" : "对上本地记录")),
+    renderPasteMatch());
+};
+
+const startUnviewedRun = async () => {
+  app.range = { type: "sinceRead" };
+  renderRunView();
+  await startRun();
+};
+
+const consumeAutostart = () => {
+  const params = new URLSearchParams(window.location.search);
+  if ((params.get("run") ?? "").toLowerCase() !== "unviewed") {
+    return false;
+  }
+  history.replaceState({}, "", window.location.pathname);
+  return true;
+};
+
+const loadCatchup = async (runId) => {
+  app.catchupError = null;
+  app.catchupEmpty = false;
+  if (!runId) {
+    app.catchup = null;
+    return;
+  }
+  try {
+    const detail = await api(`/api/run-detail?id=${encodeURIComponent(runId)}`);
+    app.catchup = detail.catchup ?? null;
+    app.catchupEmpty = app.catchup === null;
+  } catch (error) {
+    app.catchup = null;
+    app.catchupError = error.message;
+  }
+};
+
+const catchupHktSpan = (start, end) => {
+  const from = String(start ?? "").trim();
+  const to = String(end ?? "").trim();
+  if (from === "" || to === "" || from === "N/A" || to === "N/A") {
+    return "";
+  }
+  return `${from.slice(0, 16)} — ${to.slice(0, 16)}`;
+};
+
+// Requested scan window and first/last message times are different facts;
+// empty runs still have a scan window even when firstHkt is missing.
+const catchupWindow = (card) => {
+  const scan = card.scan;
+  const requested = scan !== null && scan !== undefined
+    && Number.isFinite(scan.requestedStartUnix)
+    && Number.isFinite(scan.requestedEndUnix)
+    ? catchupHktSpan(unixToHkt(scan.requestedStartUnix), unixToHkt(scan.requestedEndUnix))
+    : "";
+  const messages = catchupHktSpan(card.firstHkt, card.lastHkt);
+  if (requested !== "" && messages !== "" && requested !== messages) {
+    return `扫描 ${requested} · 消息 ${messages}`;
+  }
+  if (requested !== "") {
+    return messages === "" ? `扫描 ${requested} · 无消息范围` : `扫描 ${requested}`;
+  }
+  if (messages !== "") {
+    return `消息 ${messages}`;
+  }
+  return "";
+};
+
+const catchupScanNote = (scan) => {
+  if (scan === null || scan === undefined) {
+    return null;
+  }
+  if (scan.status === "complete") {
+    return { status: "complete", text: "" };
+  }
+  if (scan.status === "partial") {
+    const pct = Math.round((Number(scan.coverageRatio) || 0) * 100);
+    const missing = Number.isFinite(scan.missingSeconds) && scan.missingSeconds > 0
+      ? `，仍有 ${formatDuration(scan.missingSeconds)} 没有扫描记录`
+      : "";
+    return {
+      status: "partial",
+      text: `扫描只覆盖了 ${pct}%${missing}，不能当作已经补上看过的全部消息。`,
+    };
+  }
+  if (scan.status === "none") {
+    return { status: "none", text: "这次没有有效扫描，不能当作已经补上看过的消息。" };
+  }
+  return { status: "unknown", text: "旧报告没有扫描覆盖记录，不能据此断言没有漏消息。" };
+};
+
+const catchupAiNote = (ai) => {
+  if (ai === null || ai === undefined) {
+    return null;
+  }
+  if (ai.status === "complete") {
+    return { status: "complete", text: "" };
+  }
+  if (ai.status === "partial") {
+    const included = Number.isFinite(ai.includedMessages) ? ai.includedMessages : null;
+    const total = Number.isFinite(ai.totalMessages) ? ai.totalMessages : null;
+    const seen = included !== null && total !== null
+      ? `只处理了 ${included}/${total} 条文本`
+      : "没有覆盖全部文本";
+    return {
+      status: "partial",
+      text: `AI 摘要${seen}，不能当作已经看过这个范围的全部消息。`,
+    };
+  }
+  if (ai.status === "unknown") {
+    return { status: "unknown", text: "旧报告没有保存 AI 输入覆盖，不能判断遗漏了多少文本。" };
+  }
+  return { status: ai.status, text: "" };
+};
+
+const catchupLocalNote = (group, card) => {
+  if (group.source === "failed" || group.llmFailed === true) {
+    return "LLM 失败，已改用本地分组";
+  }
+  if (group.source !== "local" && group.fromLocal !== true) {
+    return "";
+  }
+  if (group.llmUnused === true || card.llmMode === "unused") {
+    return "本地分组（未使用 LLM）";
+  }
+  if (card.llmMode === "failed") {
+    return "LLM 失败，已改用本地分组";
+  }
+  return "本地分组（无法判断是否使用过 LLM）";
+};
+
+const catchupEmptyGroupsNote = (card) => {
+  const count = Number(card.emptyGroupCount);
+  if (!Number.isFinite(count) || count <= 0) {
+    return "";
+  }
+  const status = card.scan?.status;
+  if (status === "partial") {
+    return `其余 ${count} 个群没有看到消息，但扫描并不完整。`;
+  }
+  if (status === "unknown") {
+    return `其余 ${count} 个群没有展示内容，无法判断是否漏了消息。`;
+  }
+  if (status === "none") {
+    return `其余 ${count} 个群没有有效扫描。`;
+  }
+  if (status === "complete") {
+    return `其余 ${count} 个群这段没有消息。`;
+  }
+  return `其余 ${count} 个群没有可展示的内容。`;
+};
+
+const catchupRepeatsHeadline = (card, group, single) => {
+  if (!single) {
+    return false;
+  }
+  if (group.summary && (card.headline === group.summary || card.headline === `${group.name}：${group.summary}`)) {
+    return true;
+  }
+  return group.summary === ""
+    && (group.topics ?? []).length > 0
+    && card.headline === `${group.name}：${group.topics.join(" · ")}`;
+};
+
+const renderCatchupCard = () => {
+  if (app.catchupError) {
+    return el("div", { class: "card catchup-card", "data-testid": "run-catchup" },
+      el("h2", {}, "刚才错过的"),
+      el("div", { class: "notice risk", "data-testid": "run-catchup-error" },
+        `无法加载上次总结：${app.catchupError}`));
+  }
+  const card = app.catchup;
+  if (card === null || card === undefined) {
+    if (!app.catchupEmpty) {
+      return null;
+    }
+    return el("div", { class: "card catchup-card", "data-testid": "run-catchup" },
+      el("h2", {}, "刚才错过的"),
+      el("p", { class: "empty", "data-testid": "run-catchup-empty" },
+        "这次总结没有可展示的内容。范围内可能没有消息。"));
+  }
+  const shownGroups = card.groups ?? [];
+  const single = shownGroups.length === 1;
+  const scanNote = catchupScanNote(card.scan);
+  const aiNote = catchupAiNote(card.ai);
+  const meta = [
+    catchupWindow(card),
+    `${card.textMessages} 条文本 · ${card.mediaMessages} 条媒体`,
+    card.openActionCount > 0 ? `${card.openActionCount} 件未办` : "",
+    card.riskCount > 0 ? `${card.riskCount} 个风险` : "",
+    scanNote?.status === "complete" ? "扫描完整" : "",
+    aiNote?.status === "complete" ? "AI 输入完整" : "",
+  ].filter(Boolean).join(" · ");
+  return el("div", { class: "card catchup-card", "data-testid": "run-catchup" },
+    el("h2", {}, "刚才错过的"),
+    scanNote !== null && scanNote.text !== ""
+      ? el("div", {
+        class: `notice ${scanNote.status === "none" ? "risk" : "warn"}`,
+        "data-testid": "run-catchup-scan",
+      }, scanNote.text)
+      : null,
+    aiNote !== null && aiNote.text !== ""
+      ? el("div", {
+        class: "notice warn",
+        "data-testid": "run-catchup-ai",
+      }, aiNote.text)
+      : null,
+    el("p", { class: "catchup-headline" }, card.headline),
+    el("p", { class: "card-sub" }, meta),
+    ...shownGroups.map((group) => {
+      const note = catchupLocalNote(group, card);
+      const skipSummary = catchupRepeatsHeadline(card, group, single);
+      const emptyNote = group.source === "empty" && !group.summary && (group.topics ?? []).length === 0
+        ? (group.textMessages + group.mediaMessages > 0 ? "这段没有归纳出主题。" : "这段没有消息。")
+        : "";
+      return el("section", { class: "catchup-group" },
+        el("h3", {}, group.name),
+        note ? el("p", { class: "card-sub" }, note) : null,
+        skipSummary ? null : (group.summary ? el("p", {}, group.summary) : null),
+        emptyNote && emptyNote !== card.headline ? el("p", { class: "empty" }, emptyNote) : null,
+        (group.topics ?? []).length > 0
+          ? el("p", { class: "card-sub" }, group.topics.join(" · "))
+          : null,
+        (group.openActions ?? []).length === 0
+          ? null
+          : el("ul", { class: "catchup-list" },
+            group.openActions.map((action) =>
+              el("li", {}, action.owner ? `${action.owner}：${action.task}` : action.task))),
+        group.moreOpenActions > 0
+          ? el("p", { class: "card-sub" }, `还有 ${group.moreOpenActions} 件未办，见完整报告`)
+          : null,
+        (group.risks ?? []).length === 0
+          ? null
+          : el("ul", { class: "catchup-list risk" },
+            group.risks.map((risk) => el("li", {}, risk.risk))),
+        group.moreRisks > 0
+          ? el("p", { class: "card-sub" }, `还有 ${group.moreRisks} 个风险，见完整报告`)
+          : null);
+    }),
+    card.hiddenGroupCount > 0
+      ? el("p", { class: "card-sub" }, `还有 ${card.hiddenGroupCount} 个群见完整报告`)
+      : null,
+    shownGroups.length > 0 && catchupEmptyGroupsNote(card) !== ""
+      ? el("p", { class: "card-sub", "data-testid": "run-catchup-empty-groups" }, catchupEmptyGroupsNote(card))
+      : null,
+    el("div", { class: "row" },
+      el("button", {
+        class: "btn",
+        onclick: () => {
+          if (card.runId) {
+            openReader(card.runId, { view: "run" });
+          }
+        },
+      }, "打开完整报告")));
+};
+
 const renderRunView = () => {
   const watchlist = app.state?.watchlist ?? [];
   const defaults = app.state?.runDefaults ?? {};
@@ -1347,26 +1745,47 @@ const renderRunView = () => {
     el("h2", {}, "运行一次总结"),
     el("p", { class: "card-sub" },
       `LLM ${defaults.useLlm ? "开启" : "关闭"} · 媒体导出 ${defaults.exportMedia ? "开启" : "关闭"}（默认值在 config\\defaults.json）`),
+    el("p", { class: "card-sub" },
+      "「摘要我还没看过的」用的是本工具消息页的已读位置，不是 QQ 红点。只在 QQ 里读过的群会改用最近 N 小时。不知道 QQ 看到哪了，就用「从 QQ 粘贴」。控制台开着时可用 Ctrl+Alt+U，或开始菜单「QQ摘要-未查看」。"),
+    unreadHintNote(),
     el("div", { class: "row", style: "margin-bottom:14px" },
       modeChip("watchlist", `关注群 (${watchlist.length})`),
       modeChip("groups", "指定群号")),
     targetRow,
     presetChips,
     customRow,
+    renderPasteRow(),
     el("div", { class: "row" },
-      el("button", { class: "btn primary", onclick: startRun }, "立即总结"),
+      el("button", {
+        class: "btn primary",
+        "data-testid": "run-unviewed",
+        onclick: startUnviewedRun,
+      }, unviewedButtonLabel()),
+      el("button", { class: "btn", onclick: startRun }, "按所选范围总结"),
       el("span", { id: "run-error", class: `run-feedback ${app.runNoticeTone}` }, app.runNotice)));
 
   const jobCard = el("div", { class: "card", id: "job-card", hidden: app.job === null },
     el("h2", {}, "任务状态"),
     el("div", { id: "job-body" }));
 
-  setChildren($("#view-run"), runCard, renderRunTimeline(), jobCard);
+  setChildren($("#view-run"), runCard, renderCatchupCard(), renderRunTimeline(), jobCard);
   renderJobPanel();
   loadRunTimeline();
 };
 
 const collectRunRequest = () => {
+  if (app.range.type === "paste") {
+    syncPasteFields();
+    const match = app.paste.match;
+    if (match?.ok !== true) {
+      throw new Error("请先把粘贴的消息对上本地记录。");
+    }
+    return {
+      mode: "groups",
+      groupIds: match.groupIds,
+      range: { type: "custom", start: match.startHkt, end: match.endHkt ?? "" },
+    };
+  }
   const range = { ...app.range };
   if (range.type === "custom") {
     range.start = $("#start-input").value.trim();
@@ -1442,7 +1861,7 @@ const renderJobPanel = () => {
           onclick: () => {
             const runId = (job.result.runDir ?? "").split("\\").pop();
             if (runId) {
-              openReader(runId);
+              openReader(runId, { view: "run" });
             }
           },
         }, "阅读报告"),
@@ -1527,6 +1946,11 @@ const pollJobOnce = async () => {
     app.msg.mediaRowMap = null;
     app.msg.mediaMapAt = 0;
     await loadState();
+    const runDir = snapshot.job.result?.runDir ?? "";
+    const runId = runDir.split(/[/\\]/u).pop();
+    if (snapshot.job.type === "summary" && runId) {
+      await loadCatchup(runId);
+    }
     renderCurrentView();
   }
 };
@@ -1607,6 +2031,12 @@ const renderHistoryView = () => {
     if (coverage?.status === "not-used") {
       return "未使用 AI";
     }
+    if (coverage?.status === "failed") {
+      return "AI 失败";
+    }
+    if (coverage?.status === "indeterminate") {
+      return "无法判断 AI";
+    }
     if (coverage?.status === "complete") {
       return `AI ${coverage.includedMessages}/${coverage.totalMessages}`;
     }
@@ -1670,13 +2100,13 @@ const renderHistoryView = () => {
           el("p", {}, run.summary),
           el("div", { class: "report-status-row" },
             el("span", { class: `report-status ${run.scanCoverage?.status ?? "unknown"}` }, coverageText(run.scanCoverage)),
-            el("span", { class: `report-status ${run.aiCoverage?.status ?? "not-used"}` }, aiText(run.aiCoverage)),
+            el("span", { class: `report-status ${run.aiCoverage?.status ?? "indeterminate"}` }, aiText(run.aiCoverage)),
             run.firstMessageHkt === "N/A" ? el("span", { class: "report-status unknown" }, "无消息范围") : null,
             duplicateRunIds.has(run.runId) ? el("span", { class: "report-status duplicate" }, "可能重复") : null),
           el("div", { class: "meta-line", style: "margin-top:8px" },
-            `文本 ${run.textMessages} · 媒体 ${run.copiedMedia}/${run.mediaRefs} · ${run.llmStatus === "done" ? run.llmModel || "LLM" : "仅本地分组"}`)),
+            `文本 ${run.textMessages} · 媒体 ${run.copiedMedia}/${run.mediaRefs} · ${run.llmStatus === "done" ? run.llmModel || "LLM" : run.llmStatus === "failed" ? "LLM 失败" : run.llmStatus === "not-used" ? "仅本地分组" : "无法判断 LLM"}`)),
         el("div", { class: "actions" },
-          el("button", { class: "btn small", onclick: () => openReader(run.runId) }, "阅读"),
+          el("button", { class: "btn small", onclick: () => openReader(run.runId, { view: "history" }) }, "阅读"),
           run.hasReportHtml ? el("button", { class: "btn small", onclick: openPath(run.reportHtml) }, "HTML") : null,
           el("button", { class: "btn small", onclick: openPath(run.runDir) }, "文件夹")))));
 };
@@ -1786,6 +2216,11 @@ const renderWatchlistView = () => {
 
 const loadState = async () => {
   app.state = await api("/api/state");
+  try {
+    app.unreadHint = await api("/api/unread-hint");
+  } catch {
+    app.unreadHint = null;
+  }
   if (!app.rangeInitialized) {
     const defaultHours = Number(app.state.runDefaults?.sinceHours);
     if (Number.isInteger(defaultHours) && defaultHours > 0) {
@@ -1796,7 +2231,9 @@ const loadState = async () => {
 };
 
 const renderCurrentView = () => {
-  if (app.view === "run") {
+  if (app.view === "brief") {
+    renderBriefView();
+  } else if (app.view === "run") {
     renderRunView();
   } else if (app.view === "history") {
     renderHistoryView();
@@ -1817,6 +2254,10 @@ const renderCurrentView = () => {
 };
 
 const openView = (name) => {
+  if (name === "brief") {
+    openBriefView();
+    return;
+  }
   if (name === "messages") {
     openMessagesView();
     return;
@@ -1851,15 +2292,19 @@ const boot = async () => {
     renderRunView();
   });
 
+  const startUnviewed = consumeAutostart();
+  // Installable app (PWA): the worker only passes requests through, so the
+  // per-boot token in index.html is never served stale from a cache.
+  navigator.serviceWorker?.register("/sw.js").catch(() => {});
+
   try {
     await loadState();
   } catch (error) {
-    setChildren($("#view-run"), 
+    setChildren($("#view-brief"),
       el("div", { class: "card" }, el("div", { class: "notice risk" }, `无法连接控制台服务: ${error.message}`)));
     return;
   }
 
-  renderRunView();
   try {
     await pollJobOnce();
     if (app.job?.status === "running") {
@@ -1868,6 +2313,15 @@ const boot = async () => {
   } catch {
     /* no active job yet */
   }
+
+  if (startUnviewed) {
+    showView("run");
+    renderRunView();
+    await startUnviewedRun();
+    return;
+  }
+  // The briefing was prepared in the background: open straight onto it.
+  await openBriefView();
 };
 
 boot();

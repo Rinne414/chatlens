@@ -2,21 +2,43 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
 const state = require("./toolkit_state");
 const jobs = require("./run_jobs");
 const settings = require("./settings_ops");
 const storage = require("./storage_ops");
-const scheduler = require("./scheduler_ops");
+const background = require("./background");
+const briefing = require("./briefing_ops");
+const desktop = require("./desktop_ops");
 const update = require("./update_ops");
 const knowledge = require("./knowledge_ops");
 const knowledgeExport = require("../knowledge_export");
+const platform = require("../platform");
+const { parseAutostart, withAutostart } = require("../autostart");
+const { ensureInstanceId, acquireServerLock, releaseServerLock } = require("../instance");
+const packageInfo = require("../../package.json");
 
 const BASE_PORT = 8321;
 const MAX_PORT_ATTEMPTS = 10;
 const MAX_BODY_BYTES = 64 * 1024;
 
 const token = crypto.randomBytes(16).toString("hex");
+const tokenBuffer = Buffer.from(token);
+const instance = ensureInstanceId(state.toolRoot);
+
+// Everything the console loads is same-origin, except QQ avatars (https CDN).
+// Inline style attributes are used by the DOM builder, inline scripts never.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' blob:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+].join("; ");
 const webDir = path.join(state.toolRoot, "web");
 
 const MIME_TYPES = {
@@ -45,6 +67,7 @@ const MIME_TYPES = {
   ".amr": "audio/amr",
   ".silk": "application/octet-stream",
   ".pdf": "application/pdf",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
 const sendJson = (response, statusCode, payload) => {
@@ -90,7 +113,15 @@ const isLocalHost = (request) => {
   return host.startsWith("127.0.0.1:") || host.startsWith("localhost:") || host === "127.0.0.1" || host === "localhost";
 };
 
-const isAuthorized = (request) => request.headers["x-cc-token"] === token;
+// Constant-time comparison: the token is the only gate on /api/*.
+const isAuthorized = (request) => {
+  const header = request.headers["x-cc-token"];
+  if (typeof header !== "string") {
+    return false;
+  }
+  const candidate = Buffer.from(header);
+  return candidate.length === tokenBuffer.length && crypto.timingSafeEqual(candidate, tokenBuffer);
+};
 
 const serveStaticFile = (response, filePath, fallbackType) => {
   // fallbackType lets run-media with unusual/absent extensions download
@@ -175,10 +206,7 @@ const launchExplorer = (targetPath) => {
   if (!fs.existsSync(targetPath)) {
     throw new Error(`Path does not exist: ${targetPath}`);
   }
-
-  const child = spawn("explorer.exe", [path.resolve(targetPath)], { windowsHide: true, detached: true, stdio: "ignore" });
-  child.on("error", (error) => console.error(`explorer.exe failed: ${error.message}`));
-  child.unref();
+  platform.openPath(targetPath);
 };
 
 const openLocalPath = (targetPath) => {
@@ -232,6 +260,25 @@ const handleApi = async (request, response, url) => {
 
     if (request.method === "GET" && url.pathname === "/api/store-overview") {
       sendJson(response, 200, state.getStoreOverview());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/paste-cursor") {
+      sendJson(response, 200, state.resolvePasteCursor(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/unread-hint") {
+      const filePath = path.join(state.toolRoot, "store", "qq-unread-hint.json");
+      if (!fs.existsSync(filePath)) {
+        sendJson(response, 200, { available: false, reason: "not-probed" });
+        return;
+      }
+      try {
+        sendJson(response, 200, JSON.parse(fs.readFileSync(filePath, "utf8")));
+      } catch (error) {
+        sendJson(response, 200, { available: false, reason: error.message });
+      }
       return;
     }
 
@@ -386,6 +433,23 @@ const handleApi = async (request, response, url) => {
       const result = state.exportMediaSelection(body.paths, body.folder ?? null);
       if (body.openFolder === true) {
         openLocalPath(result.folder);
+      }
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/picks") {
+      sendJson(response, 200, state.listGalleryPicks());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/picks/save") {
+      const body = await readBody(request);
+      const result = state.saveGalleryPicks(body.paths);
+      if (body.openFolder === true && result.folders.length === 1) {
+        openLocalPath(result.folders[0]);
+      } else if (body.openFolder === true && result.folders.length > 1) {
+        openLocalPath(path.join(state.loadConfig().reportsDir, "picks"));
       }
       sendJson(response, 200, result);
       return;
@@ -561,23 +625,48 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/api/schedule") {
-      sendJson(response, 200, await scheduler.getScheduleStatus());
+    if (request.method === "GET" && url.pathname === "/api/briefing") {
+      sendJson(response, 200, briefing.getBriefing());
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/api/schedule") {
+    if (request.method === "POST" && url.pathname === "/api/briefing/seen") {
+      const result = briefing.markSeen(await readBody(request));
+      background.runNow({ force: false });
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/background") {
+      sendJson(response, 200, { ...background.getStatus(), desktop: desktop.getDesktopStatus() });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/background") {
+      sendJson(response, 200, { settings: background.saveSettings(await readBody(request)) });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/background/run-now") {
       const body = await readBody(request);
-      if (body.enabled === false) {
-        sendJson(response, 200, await scheduler.disableSchedule());
-      } else {
-        sendJson(response, 200, await scheduler.enableSchedule(body));
-      }
+      sendJson(response, 200, background.runNow({ force: body.force !== false }));
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/api/schedule/run-now") {
-      sendJson(response, 200, await scheduler.runScheduleNow());
+    if (request.method === "POST" && url.pathname === "/api/desktop/shortcut") {
+      sendJson(response, 200, await desktop.ensureAppShortcut());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/desktop/autostart") {
+      const body = await readBody(request);
+      sendJson(response, 200, await desktop.setAutostart(body.enabled === true));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/shutdown") {
+      sendJson(response, 200, { stopping: true });
+      shutdown();
       return;
     }
 
@@ -592,6 +681,8 @@ const handleRequest = (request, response) => {
   try {
     response.setHeader("x-frame-options", "DENY");
     response.setHeader("x-content-type-options", "nosniff");
+    response.setHeader("content-security-policy", CONTENT_SECURITY_POLICY);
+    response.setHeader("referrer-policy", "no-referrer");
 
     if (!isLocalHost(request)) {
       sendError(response, 403, "Forbidden host");
@@ -599,6 +690,12 @@ const handleRequest = (request, response) => {
     }
 
     const url = new URL(request.url, "http://127.0.0.1");
+
+    // Unauthenticated liveness probe for the launcher: no data, no paths.
+    if (url.pathname === "/healthz") {
+      sendJson(response, 200, { app: "chatlens", version: packageInfo.version, instance });
+      return;
+    }
 
     if (url.pathname.startsWith("/api/")) {
       handleApi(request, response, url).catch(() => {
@@ -625,7 +722,12 @@ const handleRequest = (request, response) => {
       return;
     }
 
-    if (/^\/[\w-]+\.(?:css|js)$/u.test(url.pathname)) {
+    if (/^\/[\w-]+\.(?:css|js|webmanifest)$/u.test(url.pathname)) {
+      serveStaticFile(response, path.join(webDir, url.pathname.slice(1)));
+      return;
+    }
+
+    if (/^\/icons\/[\w-]+\.png$/u.test(url.pathname)) {
       serveStaticFile(response, path.join(webDir, url.pathname.slice(1)));
       return;
     }
@@ -659,11 +761,15 @@ const handleRequest = (request, response) => {
   }
 };
 
-const openBrowser = (url) => {
-  const child = spawn("cmd.exe", ["/c", "start", "", url], { windowsHide: true, detached: true, stdio: "ignore" });
-  child.on("error", (error) => console.error(`Failed to open browser: ${error.message}`));
-  child.unref();
-};
+let httpServer = null;
+
+function shutdown() {
+  background.stop();
+  releaseServerLock(state.toolRoot);
+  // Let the HTTP response flush before exiting.
+  setTimeout(() => process.exit(0), 300).unref();
+  httpServer?.close();
+}
 
 const listen = (port, attempt) => {
   const server = http.createServer(handleRequest);
@@ -676,13 +782,71 @@ const listen = (port, attempt) => {
     process.exit(1);
   });
   server.listen(port, "127.0.0.1", () => {
+    httpServer = server;
     const url = `http://127.0.0.1:${port}/`;
     console.log(`QQ 摘要控制台已启动: ${url}`);
-    console.log("关闭此窗口即可停止控制台。");
+    background.start({ url, afterTick: briefing.afterTick });
+    desktop.removeLegacyScheduledTask()
+      .then((removed) => {
+        if (removed) {
+          console.log("已移除旧版的 Windows 定时任务（后台刷新已取代它）。");
+        }
+      })
+      .catch((error) => console.error(`legacy task cleanup failed: ${error.message}`));
+    // First start: put the app in the Start menu / app launcher so it can be
+    // reopened without finding the install folder.
+    if (!desktop.getDesktopStatus().appShortcut) {
+      desktop.ensureAppShortcut().catch((error) => console.error(`app shortcut failed: ${error.message}`));
+    }
+    const autostartFlag = process.argv.find((arg) => arg.startsWith("--autostart="));
+    const autostart = autostartFlag === undefined ? null : parseAutostart(`run=${autostartFlag.slice("--autostart=".length)}`);
     if (!process.argv.includes("--no-open")) {
-      openBrowser(url);
+      platform.openUrl(withAutostart(url, autostart));
     }
   });
 };
 
-listen(BASE_PORT, 0);
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+process.on("exit", () => releaseServerLock(state.toolRoot));
+
+// Is a console of THIS install already answering? (Distinguishes a live
+// console from an unrelated process that reused the lock holder's pid.)
+const probeOwnConsole = (port) =>
+  new Promise((resolve) => {
+    const request = http.get({ host: "127.0.0.1", port, path: "/healthz", timeout: 800 }, (response) => {
+      let body = "";
+      response.on("data", (chunk) => { body += chunk; });
+      response.on("end", () => {
+        try {
+          resolve(JSON.parse(body).instance === instance);
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    request.on("timeout", () => request.destroy());
+    request.on("error", () => resolve(false));
+  });
+
+const ownConsoleRunning = async () => {
+  for (let port = BASE_PORT; port < BASE_PORT + MAX_PORT_ATTEMPTS; port += 1) {
+    if (await probeOwnConsole(port)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+acquireServerLock(state.toolRoot, ownConsoleRunning)
+  .then((acquired) => {
+    if (!acquired) {
+      console.log("这个安装的控制台已经在运行，本次不再重复启动。");
+      process.exit(0);
+    }
+    listen(BASE_PORT, 0);
+  })
+  .catch((error) => {
+    console.error(`Control center failed to start: ${error.message}`);
+    process.exit(1);
+  });

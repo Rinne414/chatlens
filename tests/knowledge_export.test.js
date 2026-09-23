@@ -90,10 +90,19 @@ test("falls back to the model name when the sender is unknown", () => {
 
 // --- prompt selection ------------------------------------------------------
 
-test("prefers the image's own metadata prompt", () => {
-  const result = promptFor({ prompt: "from metadata", promptRequests: [{ answerText: "from chat" }] });
+test("prefers metadata when it is at least as complete as the chat answer", () => {
+  const result = promptFor({ prompt: "from metadata, longer", promptRequests: [{ answerText: "short" }] });
 
-  assert.deepEqual(result, { text: "from metadata", source: "metadata" });
+  assert.deepEqual(result, { text: "from metadata, longer", source: "metadata" });
+});
+
+test("prefers a longer chat answer over short or truncated metadata", () => {
+  const result = promptFor({
+    prompt: "1girl",
+    promptRequests: [{ answerText: "masterpiece, 1girl, solo, long hair" }],
+  });
+
+  assert.deepEqual(result, { text: "masterpiece, 1girl, solo, long hair", source: "chat" });
 });
 
 test("falls back to a chat answer when metadata has no prompt", () => {

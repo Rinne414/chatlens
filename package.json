@@ -1,23 +1,20 @@
 {
   "name": "qqnt-readonly-summary-toolkit",
-  "version": "0.0.7",
-  "description": "Read-only QQNT message export helpers for local summarization.",
+  "version": "0.0.8",
+  "description": "Read-only QQNT group chat briefing: background refresh, AI summaries, local web console (Windows and Linux).",
   "private": true,
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "prepare-clean-dbs": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare_clean_dbs.ps1",
-    "summarize-group": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/summarize_group.ps1",
-    "summarize-groups": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/summarize_groups.ps1",
-    "list-groups": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/list_groups.ps1",
-    "export-media": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export_media_files.ps1",
-    "save-key": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/save_key.ps1",
-    "save-key-from-candidates": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/save_key_from_candidates.ps1",
-    "scan-qq-memory-keys": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/scan_qq_memory_keys.ps1",
-    "save-llm-key": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/save_llm_key.ps1",
-    "report-center": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/open_report_center.ps1",
-    "cleanup-generated": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleanup_generated_data.ps1",
-    "one-click": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/interactive_summary.ps1",
+    "start": "node src/launcher.js",
     "control-center": "node src/server/control_center.js",
+    "summarize": "node src/pipeline/summary_run.js",
+    "refresh": "node src/pipeline/refresh_run.js",
+    "list-groups": "node src/pipeline/group_list_run.js",
+    "harvest-existing": "node src/harvest_existing_runs.js",
+    "icons": "node scripts/make_icons.js",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
