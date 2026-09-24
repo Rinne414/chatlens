@@ -3,7 +3,9 @@
 // Group pictures recorded from message bodies (see picture_elements.js) and
 // what the tool has fetched for each, in the message store (messages.db).
 //
-// pictures:      one row per picture per message (stickers are not stored).
+// pictures:      one row per picture per message; sticker = 1 for stickers,
+//                which only ever get a thumbnail (never an AI check, preview
+//                or kept original).
 //                row_id matches the media row in `messages` (m<rowId>).
 // picture_files: one row per md5: which copies exist under store/pictures/
 //                (thumb = Tencent's spec 198: 300px; preview = its spec 720, which is up
@@ -35,6 +37,7 @@ const SCHEMA = [
     format INTEGER NOT NULL DEFAULT 0,
     sent_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL DEFAULT 0,
+    sticker INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (group_id, row_id, seq)
   )`,
   "CREATE INDEX IF NOT EXISTS idx_pictures_md5 ON pictures(md5)",
@@ -62,10 +65,14 @@ const ensurePictureSchema = (db) => {
   for (const statement of SCHEMA) {
     db.prepare(statement).run();
   }
-  // Added after the table was first created by a pre-release run.
-  const columns = db.prepare("PRAGMA table_info(picture_files)").all().map((column) => column.name);
-  if (!columns.includes("evicted")) {
+  // Columns added after the tables first shipped.
+  const fileColumns = db.prepare("PRAGMA table_info(picture_files)").all().map((column) => column.name);
+  if (!fileColumns.includes("evicted")) {
     db.prepare("ALTER TABLE picture_files ADD COLUMN evicted INTEGER NOT NULL DEFAULT 0").run();
+  }
+  const pictureColumns = db.prepare("PRAGMA table_info(pictures)").all().map((column) => column.name);
+  if (!pictureColumns.includes("sticker")) {
+    db.prepare("ALTER TABLE pictures ADD COLUMN sticker INTEGER NOT NULL DEFAULT 0").run();
   }
   return db;
 };
@@ -82,8 +89,8 @@ const picturePath = (storeDir, kind, md5, ext) => {
 
 const ingestPictures = (db, rows) => {
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO pictures (group_id, row_id, seq, md5, file_id, legacy_path, size, width, height, format, sent_at, expires_at)
-    VALUES (@groupId, @rowId, @seq, @md5, @fileId, @legacyPath, @size, @width, @height, @format, @sentAt, @expiresAt)
+    INSERT OR IGNORE INTO pictures (group_id, row_id, seq, md5, file_id, legacy_path, size, width, height, format, sent_at, expires_at, sticker)
+    VALUES (@groupId, @rowId, @seq, @md5, @fileId, @legacyPath, @size, @width, @height, @format, @sentAt, @expiresAt, @sticker)
   `);
   let inserted = 0;
   for (const row of rows) {
@@ -101,6 +108,7 @@ const ingestPictures = (db, rows) => {
       sentAt: row.sentAt,
       // Older bodies carry no expiry; upload + 31 days is what Tencent applies.
       expiresAt: row.expiresAt > 0 ? row.expiresAt : row.sentAt + REMOTE_LIFETIME_SECONDS,
+      sticker: row.sticker === true ? 1 : 0,
     }).changes;
   }
   return inserted;
@@ -184,7 +192,7 @@ const needingPreviews = (db, { now, limit }) =>
 
 // Big enough to be a generated image; measured: no smaller file carried a
 // prompt. PNG (1001) from 256 KB, JPG/WebP (1000/1002) from 512 KB.
-const PROBE_WHERE = `COALESCE(f.probe, '') = '' AND (
+const PROBE_WHERE = `COALESCE(f.probe, '') = '' AND p.sticker = 0 AND (
   (p.format = 1001 AND p.size >= 262144) OR (p.format IN (1000, 1002) AND p.size >= 524288))`;
 
 // Closest to expiry first: those are the ones about to be lost.
@@ -199,7 +207,7 @@ const needingKeep = (db, { now, limit, groupIds }) => {
   return liveCandidates(db, {
     now,
     limit,
-    where: `COALESCE(f.kept, 0) = 0 AND p.md5 IN (SELECT md5 FROM pictures WHERE group_id IN (${placeholders}))`,
+    where: `COALESCE(f.kept, 0) = 0 AND p.sticker = 0 AND p.md5 IN (SELECT md5 FROM pictures WHERE group_id IN (${placeholders}))`,
     order: "expiresAt ASC",
     params: Object.fromEntries(groupIds.map((groupId, index) => [`g${index}`, String(groupId)])),
   });
@@ -211,7 +219,7 @@ const picturesForRows = (db, groupId, rowIds) => {
     return new Map();
   }
   const rows = db.prepare(`
-    SELECT p.row_id AS rowId, p.seq, p.md5, p.width, p.height, p.size, p.format, p.expires_at AS expiresAt,
+    SELECT p.row_id AS rowId, p.seq, p.md5, p.width, p.height, p.size, p.format, p.expires_at AS expiresAt, p.sticker,
            COALESCE(f.thumb, '') <> '' AS hasThumb, COALESCE(f.kept, 0) AS kept, COALESCE(f.gone, 0) AS gone,
            COALESCE(f.probe, '') AS probe
     FROM pictures p LEFT JOIN picture_files f ON f.md5 = p.md5

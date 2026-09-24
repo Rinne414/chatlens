@@ -9,7 +9,7 @@
 
 const fs = require("node:fs");
 const Database = require("better-sqlite3-multiple-ciphers");
-const { extractPictures, isSticker } = require("./picture_elements");
+const { messagePictures } = require("./picture_elements");
 
 // Walked newest-first through the (group, msg_seq) index; msg_seq follows
 // sent_at within a group, so a long run of older rows ends the group.
@@ -51,7 +51,7 @@ const exportPictures = ({ db, groupIds, fromUnix, toUnix }) => {
         if (!Buffer.isBuffer(row.body)) {
           continue;
         }
-        const pictures = extractPictures(row.body).filter((picture) => !isSticker(picture));
+        const pictures = messagePictures(row.body);
         if (pictures.length > 0) {
           items.push({ groupId, rowId: String(row.row_id), sentAt, pictures });
         }

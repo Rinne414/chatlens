@@ -472,6 +472,38 @@ const remotePictureNode = (picture) =>
     },
   });
 
+const GIF_FORMAT = 2000;
+
+// Stickers show Tencent's small copy (~17 KB, a still frame); a click loads
+// the original, which is the animated one.
+const remoteStickerNode = (picture) =>
+  el("img", {
+    class: "bubble-sticker",
+    src: pictureUrl(picture.md5, "thumb"),
+    loading: "lazy",
+    alt: "表情",
+    title: picture.format === GIF_FORMAT ? "点击播放" : "",
+    onclick: (event) => {
+      event.stopPropagation();
+      const img = event.currentTarget;
+      if (img.dataset.state === undefined) {
+        img.dataset.state = "original";
+        img.src = pictureUrl(picture.md5, "original");
+      }
+    },
+    onerror: (event) => {
+      const img = event.currentTarget;
+      if (img.dataset.state === "original") {
+        img.dataset.state = "failed";
+        img.src = pictureUrl(picture.md5, "thumb");
+        return;
+      }
+      img.replaceWith(el("span", { class: "bubble-sticker missing" }, "😃 表情"));
+    },
+  });
+
+const isStickerFile = (kind) => kind === "sticker" || kind === "emoji" || kind === "face";
+
 const chatMessageNode = (item, index, inSelection, mediaFiles) => {
   const isUnread = app.msg.dividerAt !== null && item.sentAt > app.msg.dividerAt;
   const imageFiles = mediaFiles.filter((file) => isImageFile(file.kind));
@@ -495,7 +527,7 @@ const chatMessageNode = (item, index, inSelection, mediaFiles) => {
   const body = showImage
     ? imageFiles.slice(0, 9).map((file) =>
       el("img", {
-        class: "bubble-img",
+        class: isStickerFile(file.kind) ? "bubble-sticker" : "bubble-img",
         src: file.webPath,
         loading: "lazy",
         alt: "图片",
@@ -505,7 +537,7 @@ const chatMessageNode = (item, index, inSelection, mediaFiles) => {
         },
       }))
     : showRemote
-      ? remotePictures.slice(0, 9).map(remotePictureNode)
+      ? remotePictures.slice(0, 9).map((picture) => (picture.sticker ? remoteStickerNode(picture) : remotePictureNode(picture)))
       : displayText(item);
   return el("div", {
     class: classes.join(" "),

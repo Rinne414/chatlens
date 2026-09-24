@@ -1074,6 +1074,9 @@ html[data-theme="dark"] .brand-mark { color: #fff; }
 
 /* multi-image bubbles: stack every image of one message */
 .bubble.has-img .bubble-img + .bubble-img { margin-top: 4px; }
+.bubble-sticker { display: block; max-width: 140px; max-height: 140px; border-radius: 6px; cursor: pointer; }
+.bubble.has-img .bubble-sticker + .bubble-sticker, .bubble.has-img .bubble-img + .bubble-sticker, .bubble.has-img .bubble-sticker + .bubble-img { margin-top: 4px; }
+.bubble-sticker.missing { display: inline-block; padding: 6px 10px; border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 13px; cursor: default; }
 .bubble-img.missing {
   display: grid;
   place-items: center;

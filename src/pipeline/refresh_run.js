@@ -16,6 +16,7 @@ const { loadConfig } = require("../server/toolkit_state");
 const messageStore = require("../message_store");
 const { ensureBriefingSchema, getState, setState } = require("../briefing_store");
 const { REMOTE_LIFETIME_SECONDS, ingestPictures } = require("../picture_store");
+const { REPAIR_STATE_KEY } = require("../repair_picture_text");
 const engine = require("../briefing_engine");
 const { createClient, setUsageRecorder } = require("../llm_summarizer");
 const { ensureUsageSchema, recordUsage, todaySpend } = require("../llm_usage");
@@ -65,7 +66,8 @@ const groupStartsFor = (groupIds, now) => {
 // Pictures of the last 31 days (what Tencent still serves) for groups whose
 // history was stored before the picture table existed, or that were added to
 // the watchlist since. Done once per group.
-const PICTURE_BACKFILL_KEY = "pictures_backfill";
+// v2: stickers are recorded too (the first backfill left them out).
+const PICTURE_BACKFILL_KEY = "pictures_backfill_v2";
 
 const pictureBackfillGroups = (groupIds) => {
   const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
@@ -85,14 +87,25 @@ const ingestPictureBackfill = (filePath, groupIds) => {
     let inserted = 0;
     db.transaction(() => {
       for (const item of data.items) {
-        inserted += ingestPictures(db, item.pictures.map((picture, seq) => ({
-          ...picture, groupId: item.groupId, rowId: `m${item.rowId}`, seq, sentAt: item.sentAt,
+        inserted += ingestPictures(db, item.pictures.map((picture, index) => ({
+          ...picture, groupId: item.groupId, rowId: `m${item.rowId}`, seq: picture.seq ?? index, sentAt: item.sentAt,
         })));
       }
       const done = getState(db, PICTURE_BACKFILL_KEY, null)?.groups ?? [];
       setState(db, PICTURE_BACKFILL_KEY, { groups: [...new Set([...done, ...groupIds.filter((groupId) => !failed.has(groupId))])] });
     })();
     return inserted;
+  } finally {
+    db.close();
+  }
+};
+
+// Rows stored before v0.0.14 carry picture leftovers as text; repaired once
+// (src/repair_picture_text.js, which records when it is done).
+const pictureTextRepairDone = () => {
+  const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
+  try {
+    return getState(db, REPAIR_STATE_KEY, null) !== null;
   } finally {
     db.close();
   }
@@ -180,6 +193,8 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   const analysisDir = path.join(workDir, "analysis");
   const picturesPath = path.join(workDir, "pictures.json");
   const backfillGroups = pictureBackfillGroups(groupIds);
+  const repairText = !pictureTextRepairDone();
+  let textRepair = null;
   common.writeJson(startsPath, starts);
   const env = { NTQQ_DB_KEY: readSecretSync("ntqqKey"), QQ_GROUP_STARTS_JSON: startsPath };
   const scanLimit = Number(config.defaultScanLimit) > 0 ? Number(config.defaultScanLimit) : 1000000;
@@ -207,6 +222,11 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
         { env },
         "导出消息失败",
       ));
+      if (repairText) {
+        const repair = await timed("textRepair", () => common.runNodeScript("repair_picture_text.js", [mirror.messageDb, common.storeDbPath], { env }));
+        const line = repair.stdout.split(/\r?\n/u).find((item) => item.startsWith("repairResult="));
+        textRepair = line === undefined ? { failed: true } : JSON.parse(line.slice("repairResult=".length));
+      }
       if (backfillGroups.length > 0) {
         await timed("pictureBackfill", () => common.runNodeScript("export_pictures.js", [
           mirror.messageDb, backfillGroups.join(","), now - REMOTE_LIFETIME_SECONDS, now, picturesPath,
@@ -249,6 +269,7 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
     groups: groupIds.length,
     inserted,
     picturesBackfilled,
+    textRepair,
     mirrorMs,
     elapsedMs: Date.now() - startedAt,
     timings,

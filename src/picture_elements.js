@@ -157,4 +157,23 @@ const extractPictures = (body) => {
 
 const isSticker = (picture) => picture.subType !== null && picture.subType !== 0;
 
-module.exports = { extractPictures, isSticker, decodeFields };
+// Stickers are numbered from here so a real picture keeps the seq it had
+// before stickers were recorded (seq is part of the pictures primary key).
+const STICKER_SEQ_BASE = 1000;
+
+// The pictures of one message as stored: real pictures seq 0..n, stickers
+// flagged and numbered from STICKER_SEQ_BASE.
+const messagePictures = (body) => {
+  const all = extractPictures(body);
+  const plain = all.filter((picture) => !isSticker(picture)).map((picture, index) => ({ ...picture, sticker: false, seq: index }));
+  const stickers = all.filter(isSticker).map((picture, index) => ({ ...picture, sticker: true, seq: STICKER_SEQ_BASE + index }));
+  return [...plain, ...stickers];
+};
+
+// True for one element message of type picture (stickers included).
+const isPictureElement = (buf) => {
+  const fields = decodeFields(buf);
+  return fields !== null && numberField(fields, ELEMENT_TYPE_FIELD) === PICTURE_ELEMENT;
+};
+
+module.exports = { STICKER_SEQ_BASE, extractPictures, messagePictures, isSticker, isPictureElement, decodeFields };

@@ -72,9 +72,6 @@ const openStore = (storePath) => {
 const getSpeaker = (message) =>
   message.senderName || message.memberName || String(message.senderUin ?? "") || "Unknown";
 
-// Body snippets come from raw protobuf bytes: mojibake soup with the odd real caption.
-// Keep only segments that random bytes almost never produce (Han runs, real words, numbers);
-// if too little survives, treat the whole snippet as noise.
 // Regular text messages are real text, but @-mentions leave stray replacement chars behind.
 const lightCleanText = (raw) =>
   String(raw ?? "")
@@ -82,36 +79,21 @@ const lightCleanText = (raw) =>
     .replace(/ {2,}/gu, " ")
     .trim();
 
-const looksLikeWord = (token) => {
-  if (!/^[A-Za-z'-]+$/u.test(token)) {
-    return true;
-  }
-  if (token.length > 14 || !/[aeiou]/iu.test(token)) {
-    return false;
-  }
-  let caseSwitches = 0;
-  for (let index = 1; index < token.length; index += 1) {
-    if (/[A-Z]/u.test(token[index - 1]) !== /[A-Z]/u.test(token[index])) {
-      caseSwitches += 1;
-    }
-  }
-  return caseSwitches <= 2;
-};
+const HASH_NAMED = /^\{?[0-9A-Fa-f-]{32,38}\}?\.[A-Za-z0-9]{2,5}$/u;
 
-const sanitizeSnippet = (raw) => {
-  const stripped = String(raw ?? "").replace(/[\u{FFFD}\u{0000}-\u{001F}\u{007F}-\u{00A0}]/gu, " ");
-  const segments = (stripped.match(/[一-鿿]{2,}[，。！？、：；]?|[A-Za-z][A-Za-z'-]{2,}|\d{2,}/gu) ?? []).filter(looksLikeWord);
-  const text = segments.join(" ").trim().slice(0, 120);
-  return text.length >= 4 ? text : "";
-};
-
+// Kinds from the text refs plus the message's own picture elements. The only
+// text a media row keeps is a real file or video name: a picture's caption
+// is the message's own text row, a hash-named file says nothing, and the rest
+// of a media body is protobuf noise (it used to show up as
+// "📷 [图片] 9481467651131 40 ...").
 const mediaText = (message) => {
-  const refKinds = (message.mediaRefs ?? []).map((ref) => ref.kind);
-  const kinds = [...new Set((message.pictures ?? []).length > 0 ? [...refKinds, "image"] : refKinds)].join(",");
-  const fileName = (message.mediaRefs ?? []).map((ref) => ref.fileName).find((name) => typeof name === "string" && name.length > 0);
-  const snippet = sanitizeSnippet(message.bodySnippet);
-  const text = snippet.length >= 2 ? snippet : fileName ?? "";
-  return { kinds, text };
+  const kinds = [...new Set([
+    ...(message.mediaRefs ?? []).map((ref) => ref.kind),
+    ...(message.pictures ?? []).map((picture) => (picture.sticker ? "sticker" : "image")),
+  ])].join(",");
+  const fileName = (message.mediaRefs ?? []).find((ref) =>
+    (ref.kind === "file" || ref.kind === "video") && typeof ref.fileName === "string" && !HASH_NAMED.test(ref.fileName))?.fileName ?? "";
+  return { kinds, text: fileName };
 };
 
 const ingestExport = (db, exportData, runId) => {
@@ -171,11 +153,11 @@ const ingestExport = (db, exportData, runId) => {
 
     for (const message of exportData.mediaMessages ?? []) {
       const media = mediaText(message);
-      ingestPictures(db, (message.pictures ?? []).map((picture, seq) => ({
+      ingestPictures(db, (message.pictures ?? []).map((picture, index) => ({
         ...picture,
         groupId: String(message.groupId),
         rowId: `m${message.rowId}`,
-        seq,
+        seq: picture.seq ?? index,
         sentAt: message.sentAt,
       })));
       inserted += insertMessage.run({
@@ -760,8 +742,8 @@ module.exports = {
   getSelfIdentity,
   getMentions,
   openStore,
-  sanitizeSnippet,
   lightCleanText,
+  mediaText,
   ingestExport,
   queryMessages,
   getCoverage,

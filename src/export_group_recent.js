@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const Database = require("better-sqlite3-multiple-ciphers");
 const { parseMessageMeta } = require("./message_meta");
-const { extractPictures, isSticker } = require("./picture_elements");
+const { extractPictures, messagePictures, isPictureElement } = require("./picture_elements");
 
 const sqlQuote = (value) => `'${value.replaceAll("'", "''")}'`;
 
@@ -251,6 +251,12 @@ const extractProtobufText = (hex) => {
     if (fields === null) {
       return;
     }
+    // A picture or sticker element's strings are its file name, summary
+    // ("[动画表情]"), host and URL parameters - never message text. Skipping
+    // the element also drops a picture quoted inside a reply.
+    if (depth > 0 && isPictureElement(buf)) {
+      return;
+    }
     for (const field of fields) {
       if (field.wireType !== 2) {
         continue;
@@ -272,7 +278,12 @@ const extractProtobufText = (hex) => {
 
 const getMessageText = (hex) => {
   const extracted = extractProtobufText(hex);
-  return extracted.length > 0 ? extracted : getMessageTextLegacy(hex);
+  if (extracted.length > 0) {
+    return extracted;
+  }
+  // A picture- or sticker-only message has no text; the legacy byte scanner
+  // would read noise out of its md5 bytes.
+  return extractPictures(hex).length > 0 ? "" : getMessageTextLegacy(hex);
 };
 
 const getBodyText = (hex) => {
@@ -322,6 +333,13 @@ const pushUniqueMediaRef = (refs, seen, ref) => {
     seen.add(key);
     refs.push(ref);
   }
+};
+
+// A file-token ref of a picture that the message's own elements say is a
+// sticker is a sticker, not an image (people repost stickers all the time).
+const labelStickerRefs = (refs, pictures) => {
+  const stickerMd5s = new Set(pictures.filter((picture) => picture.sticker).map((picture) => picture.md5));
+  return refs.map((ref) => (ref.kind === "image" && stickerMd5s.has(ref.hash) ? { ...ref, kind: "sticker" } : ref));
 };
 
 const extractMediaRefs = (hex) => {
@@ -386,13 +404,6 @@ const extractMediaRefs = (hex) => {
 
   return refs;
 };
-
-const getBodySnippet = (hex) =>
-  getBodyText(hex)
-    .replace(/[^\p{L}\p{N}\p{P}\p{S}\s._:/\\-]+/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, 220);
 
 const fetchGroupMemberNames = (groupInfoDatabasePath, key, groupId) => {
   const db = openDatabase(groupInfoDatabasePath, key);
@@ -562,14 +573,13 @@ const exportMessages = (args, key) => {
             });
           }
 
-          const mediaRefs = extractMediaRefs(row.body_hex);
-          // Structured picture facts (md5, size, where Tencent serves it).
-          // Stickers are left out; a quoted picture is never included.
-          const pictures = extractPictures(row.body_hex).filter((picture) => !isSticker(picture));
+          // Structured picture facts (md5, size, where Tencent serves it);
+          // stickers are flagged, a quoted picture is never included.
+          const pictures = messagePictures(row.body_hex);
+          const mediaRefs = labelStickerRefs(extractMediaRefs(row.body_hex), pictures);
           if (mediaRefs.length > 0 || pictures.length > 0) {
             mediaMessages.push({
               ...messageBase,
-              bodySnippet: getBodySnippet(row.body_hex),
               mediaRefs,
               pictures,
             });
@@ -592,7 +602,7 @@ const exportMessages = (args, key) => {
     const earliestOwnerByHash = new Map();
     for (const media of mediaMessages) {
       for (const ref of media.mediaRefs) {
-        if (ref.kind === "emoji" || ref.hash === null) {
+        if (ref.kind === "emoji" || ref.kind === "sticker" || ref.hash === null) {
           continue;
         }
         const hashKey = `${media.groupId}|${ref.hash}`;
@@ -614,8 +624,11 @@ const exportMessages = (args, key) => {
     const dedupedMediaMessages = [];
     for (const media of mediaMessages) {
       const quotedImageHashes = [];
+      // The message's own picture elements (a quoted picture is nested in the
+      // reply, never among them): a ref to one of those is a repost, not a quote.
+      const ownMd5s = new Set(media.pictures.map((picture) => picture.md5));
       const keptRefs = media.mediaRefs.filter((ref) => {
-        if (ref.kind === "emoji" || ref.hash === null) {
+        if (ref.kind === "emoji" || ref.kind === "sticker" || ref.hash === null || ownMd5s.has(ref.hash)) {
           return true;
         }
         const owner = earliestOwnerByHash.get(`${media.groupId}|${ref.hash}`);
@@ -712,4 +725,8 @@ const main = () => {
   );
 };
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { getMessageText, extractMediaRefs, labelStickerRefs };
