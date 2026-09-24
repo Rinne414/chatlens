@@ -224,7 +224,7 @@ const CATEGORY_LABELS = { aiImages: "AI 图", askedImages: "被求过的图", im
 const STATUS_LABELS = { original: "原文件", compressed: "非原图（压缩版）", thumb: "只有缩略图", remote: "QQ 服务器下载" };
 
 // UTF-8 BOM so Excel opens the Chinese columns correctly.
-const indexCsv = (ledgerItems) => `﻿${[
+const indexCsv = (ledgerItems) => `\uFEFF${[
   CSV_HEADER,
   ...ledgerItems
     .sort((left, right) => left.sentAt - right.sentAt)

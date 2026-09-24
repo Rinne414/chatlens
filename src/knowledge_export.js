@@ -171,7 +171,7 @@ const csvCell = (value) => {
 const csvFrom = (records) => {
   const header = CSV_COLUMNS.join(",");
   const rows = records.map((record) => CSV_COLUMNS.map((column) => csvCell(record[column])).join(","));
-  return `﻿${[header, ...rows].join("\r\n")}\r\n`;
+  return `\uFEFF${[header, ...rows].join("\r\n")}\r\n`;
 };
 
 const md5File = (filePath) => {

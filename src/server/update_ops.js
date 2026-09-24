@@ -259,15 +259,37 @@ const LINUX_UPDATER_SCRIPT = [
   "",
 ].join("\n");
 
+// Windows: PowerShell started with Node's detached:true (DETACHED_PROCESS)
+// never runs at all, and a plain child is torn down with the server. `cmd /c
+// start` gives the updater its own console that outlives the server —
+// verified in a launcher -> detached server -> updater chain, paths with
+// spaces and CJK. cmd would expand %VAR% inside the paths, so those refuse.
+// Pure (exported for tests): cmd.exe arguments that start the updater.
+const windowsUpdaterArgs = ({ scriptPath, archivePath, installDir, serverPid }) => {
+  const quoted = (value) => `"${value}"`;
+  const command = [
+    "powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
+    "-File", quoted(scriptPath), "-ZipPath", quoted(archivePath), "-InstallDir", quoted(installDir), "-ServerPid", String(serverPid),
+  ].join(" ");
+  return ["/d", "/s", "/c", `"start "" /min ${command}"`];
+};
+
+const startWindowsUpdater = (scriptPath, archivePath) =>
+  spawn("cmd.exe", windowsUpdaterArgs({ scriptPath, archivePath, installDir: state.toolRoot, serverPid: process.pid }), {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+  });
+
+const WINDOWS_UNSAFE_PATH = /[%"]/u;
+
 const spawnUpdater = (updateDir, archivePath) => {
   if (platform.isWindows) {
     // BOM so Windows PowerShell 5.1 reads the Chinese log strings correctly.
     const scriptPath = path.join(updateDir, "apply_update.ps1");
     fs.writeFileSync(scriptPath, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(updaterScriptText(), "utf8")]));
-    return spawn("powershell.exe", [
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
-      "-ZipPath", archivePath, "-InstallDir", state.toolRoot, "-ServerPid", String(process.pid),
-    ], { detached: true, stdio: "ignore", windowsHide: true });
+    return startWindowsUpdater(scriptPath, archivePath);
   }
   const scriptPath = path.join(updateDir, "apply_update.sh");
   fs.writeFileSync(scriptPath, LINUX_UPDATER_SCRIPT, { mode: 0o755 });
@@ -287,6 +309,9 @@ const assertIdle = () => {
 
 const applyUpdate = async () => {
   assertIdle();
+  if (platform.isWindows && WINDOWS_UNSAFE_PATH.test(state.toolRoot)) {
+    throw new Error("安装路径里含有 % 或引号，无法自动更新。请到 GitHub 发布页手动下载新版。");
+  }
 
   const info = await checkUpdate();
   if (!info.hasUpdate) {
@@ -316,11 +341,13 @@ const applyUpdate = async () => {
   // refresh starts between now and exit.
   assertIdle();
   background.stop();
-  spawnUpdater(updateDir, archivePath).unref();
+  const updater = spawnUpdater(updateDir, archivePath);
+  updater.on("error", (error) => console.error(`updater failed to start: ${error.message}`));
+  updater.unref();
 
   // Let the HTTP response flush, then exit so the updater can swap files.
   setTimeout(() => process.exit(0), 800);
   return { updating: true, targetVersion: info.latestVersion };
 };
 
-module.exports = { checkUpdate, applyUpdate, pickAssetFor, isNewerVersion };
+module.exports = { checkUpdate, applyUpdate, pickAssetFor, isNewerVersion, windowsUpdaterArgs };
