@@ -85,7 +85,7 @@ const HASH_NAMED = /^\{?[0-9A-Fa-f-]{32,38}\}?\.[A-Za-z0-9]{2,5}$/u;
 // text a media row keeps is a real file or video name: a picture's caption
 // is the message's own text row, a hash-named file says nothing, and the rest
 // of a media body is protobuf noise (it used to show up as
-// "📷 [图片] 9481467651131 40 ...").
+// "[图片] 9481467651131 40 ...").
 const mediaText = (message) => {
   const kinds = [...new Set([
     ...(message.mediaRefs ?? []).map((ref) => ref.kind),
