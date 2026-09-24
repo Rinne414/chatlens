@@ -451,7 +451,7 @@ const renderUpdateCard = () => {
     el("h2", {}, "关于与更新"),
     el("p", { class: "card-sub" },
       `当前版本 v${currentVersion} · 项目主页 `,
-      el("a", { href: "https://github.com/peter119lee/chatlens", target: "_blank", rel: "noopener" }, "GitHub"),
+      el("a", { href: "https://github.com/Rinne414/chatlens", target: "_blank", rel: "noopener" }, "GitHub"),
       "。检查更新会访问 GitHub 获取最新发布版本；一键更新会下载对应安装包并自动重启控制台，你的配置、密钥和数据不受影响。"),
     el("div", { class: "row" }, checkButton, applyButton, msg),
     notesBlock);

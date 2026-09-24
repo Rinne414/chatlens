@@ -36,7 +36,7 @@
 
 ## 安装
 
-从 [Releases](https://github.com/peter119lee/chatlens/releases) 下载：
+从 [Releases](https://github.com/Rinne414/chatlens/releases) 下载：
 
 - Windows：`chatlens-vX.Y.Z-win-x64.zip`，解压后双击 `Start-QQ-Console.cmd`。
 - Linux：`chatlens-vX.Y.Z-linux-x64.tar.gz`，`tar -xzf` 解压后运行 `./start.sh`。
@@ -46,7 +46,7 @@
 或从源码运行：
 
 ```sh
-git clone https://github.com/peter119lee/chatlens
+git clone https://github.com/Rinne414/chatlens
 cd chatlens
 npm install
 npm start          # Windows 也可以双击 Start-QQ-Console.cmd，Linux 也可以 ./start.sh
@@ -81,6 +81,15 @@ npm start          # Windows 也可以双击 Start-QQ-Console.cmd，Linux 也可
 - 控制台只监听 `127.0.0.1`，每次启动生成随机访问令牌，拒绝非本机 Host。
 - 会联网的只有：头像和「本机缺原图时补下载群图片」（腾讯公开 CDN，按 md5 校验；备份页里默认不开）、你配置的 LLM 服务（开启 AI 总结时发送消息文本）、「检查更新」（GitHub）。
 - 备份文件夹由你选择，工具只往里面写，不会写进 QQ 自己的目录，也从不删除 QQ 里的任何东西。
+- 「一键更新」只安装作者签过名的版本：每个发布都附带安装包的 SHA256 清单和 Ed25519 签名，程序用随附的公钥（`update-signing-public.pem`）校验签名和文件哈希，任何一项不对就拒绝安装，并提示到发布页手动下载。就算 GitHub 账号被盗，别人也发不出能被自动安装的更新。
+
+## 发布新版本（维护者）
+
+一键更新只认签过名的版本，所以发布时多一步签名：
+
+1. 第一次（每台电脑一次）：`node scripts/make_update_key.js` 生成签名钥匙。私钥加密保存在本机（Windows DPAPI / Linux 钥匙圈），不需要密码；桌面上会留一份备份，请移到 U 盘或网盘私人文件夹。换电脑后用 `node scripts/make_update_key.js --restore <备份文件>` 还原。
+2. 每次发布：把安装包放进 `dist/` 后运行 `node scripts/sign_release.js dist <版本号>`，把生成的 `chatlens-v<版本号>-SHA256SUMS.txt` 和 `.sig` 与安装包一起上传。
+3. 私钥弄丢了：已安装的程序会拒绝之后的自动更新，用户手动下载一次新版即可；然后重新生成钥匙，新公钥随新版发布。
 
 ## 免责声明
 

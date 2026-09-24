@@ -7,12 +7,17 @@ const jobs = require("./run_jobs");
 const background = require("./background");
 const platform = require("../platform");
 const packageInfo = require("../../package.json");
+const signature = require("../update_signature");
 
-const GITHUB_REPO = "peter119lee/chatlens";
+const GITHUB_REPO = "Rinne414/chatlens";
 const USER_AGENT = `ChatLens/${packageInfo.version} (update-check)`;
 const REQUEST_TIMEOUT_MS = 30000;
 const MAX_REDIRECTS = 5;
 const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024;
+const MAX_TEXT_ASSET_BYTES = 64 * 1024;
+// The key every update must be signed with (scripts/make_update_key.js). An
+// install without this file (older source checkouts) updates unverified.
+const PUBLIC_KEY_FILE = "update-signing-public.pem";
 
 const httpRequest = (url, { asStream = false, redirectsLeft = MAX_REDIRECTS } = {}) =>
   new Promise((resolve, reject) => {
@@ -125,6 +130,42 @@ const pickAssetFor = (assets, { windows, bundle }) => {
 };
 
 const pickAsset = (assets) => pickAssetFor(assets, { windows: platform.isWindows, bundle: isBundleInstall() });
+
+const readPublicKey = () => {
+  try {
+    // The override exists for automated tests only.
+    return fs.readFileSync(process.env.CHATLENS_SIGNING_PUBLIC || path.join(state.toolRoot, PUBLIC_KEY_FILE), "utf8");
+  } catch {
+    return null;
+  }
+};
+
+const downloadText = async (url) => {
+  const response = await httpRequest(url, { asStream: true });
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of response) {
+    bytes += chunk.length;
+    if (bytes > MAX_TEXT_ASSET_BYTES) {
+      response.destroy();
+      throw new Error("签名清单大小异常。");
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+};
+
+const unsignedError = (htmlUrl, reason) =>
+  new Error(`${reason} 为安全起见没有自动安装。如果确认是作者发布的版本，请到发布页手动下载：${htmlUrl}`);
+
+// Fetches the signed checksum list, or refuses the update.
+const fetchSignedSums = async (info) => {
+  const found = signature.findSignatureAssets(info.assets);
+  if (found === null) {
+    throw unsignedError(info.htmlUrl, "这个新版本没有附带签名。");
+  }
+  return { sumsText: await downloadText(found.sums.downloadUrl), signature: await downloadText(found.sig.downloadUrl) };
+};
 
 const downloadToFile = async (url, destination) => {
   const response = await httpRequest(url, { asStream: true });
@@ -256,10 +297,21 @@ const applyUpdate = async () => {
     throw new Error("最新版本没有适用于本安装方式的安装包，请到 GitHub 发布页手动下载。");
   }
 
+  const publicKeyPem = readPublicKey();
+  const signed = publicKeyPem === null ? null : await fetchSignedSums(info);
+
   const updateDir = path.join(state.toolRoot, "dist", "update");
   fs.mkdirSync(updateDir, { recursive: true });
   const archivePath = path.join(updateDir, path.basename(asset.name));
   await downloadToFile(asset.downloadUrl, archivePath);
+  if (signed !== null) {
+    try {
+      signature.verifyArchive({ archivePath, archiveName: asset.name, ...signed, publicKeyPem, version: info.latestVersion });
+    } catch (error) {
+      fs.rmSync(archivePath, { force: true });
+      throw unsignedError(info.htmlUrl, error.message);
+    }
+  }
   // The download took a while: re-check, and stop the scheduler so no new
   // refresh starts between now and exit.
   assertIdle();

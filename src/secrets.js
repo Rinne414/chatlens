@@ -16,6 +16,8 @@ const platform = require("./platform");
 const SECRETS = {
   ntqqKey: { windowsFile: "ntqq-db-key.dpapi", file: "ntqq-db-key.secret", label: "QQ 数据库密钥" },
   llmKey: { windowsFile: "deepseek-api-key.dpapi", file: "llm-api-key.secret", label: "LLM API key" },
+  // Maintainer-only: signs release checksums (scripts/make_update_key.js).
+  updateSigningKey: { windowsFile: "update-signing-key.dpapi", file: "update-signing-key.secret", label: "更新签名私钥" },
 };
 
 const SECRET_TOOL_ATTRS = (name) => ["application", "chatlens", "name", name];
