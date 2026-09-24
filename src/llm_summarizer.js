@@ -97,6 +97,56 @@ const requestJsonWithRetry = async (url, apiKey, payload) => {
   throw lastError;
 };
 
+// Every call's reported token usage goes to this hook (llm_usage.js). Set by
+// the entry script; absent in tests.
+let usageRecorder = null;
+const setUsageRecorder = (recorder) => {
+  usageRecorder = typeof recorder === "function" ? recorder : null;
+};
+
+const reportUsage = (client, responseBody, meta) => {
+  if (usageRecorder === null || responseBody?.usage === undefined) {
+    return;
+  }
+  usageRecorder({
+    at: Math.floor(Date.now() / 1000),
+    purpose: meta.purpose,
+    model: client.model,
+    host: client.url.host,
+    usage: responseBody.usage,
+    messages: meta.messages ?? 0,
+  });
+};
+
+// Provider quirks. DeepSeek's thinking switch is its own extension; Gemini's
+// OpenAI layer takes reasoning_effort (unknown fields are ignored there, but
+// other providers may reject them, so each extra goes only where it belongs).
+const providerExtras = (url) => {
+  if (/(^|\.)deepseek\.com$/iu.test(url.hostname)) {
+    return { thinking: { type: "disabled" } };
+  }
+  if (url.hostname === "generativelanguage.googleapis.com") {
+    return { reasoning_effort: "minimal" };
+  }
+  return {};
+};
+
+// Some OpenAI-compatible providers ignore response_format and wrap the JSON
+// in a Markdown fence or add a sentence around it.
+const parseJsonContent = (content) => {
+  try {
+    return JSON.parse(content);
+  } catch (firstError) {
+    const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/iu);
+    const candidate = fenced !== null ? fenced[1] : content.slice(content.indexOf("{"), content.lastIndexOf("}") + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      throw firstError;
+    }
+  }
+};
+
 const extractAssistantContent = (responseBody) => {
   const finishReason = responseBody?.choices?.[0]?.finish_reason;
   if (finishReason === "length") {
@@ -109,7 +159,8 @@ const extractAssistantContent = (responseBody) => {
   return content;
 };
 
-const callLlm = async ({ url, apiKey, model }, prompt, maxTokens) => {
+const callLlm = async (client, prompt, maxTokens, meta = { purpose: "other" }) => {
+  const { url, apiKey, model } = client;
   const payload = {
     model,
     messages: [
@@ -118,12 +169,14 @@ const callLlm = async ({ url, apiKey, model }, prompt, maxTokens) => {
     ],
     response_format: { type: "json_object" },
     max_tokens: maxTokens,
-    thinking: { type: "disabled" },
     temperature: 0.2,
     stream: false,
+    ...providerExtras(url),
   };
   const responseBody = await requestJsonWithRetry(url, apiKey, payload);
-  return JSON.parse(extractAssistantContent(responseBody));
+  // Billed even when the answer is unusable (e.g. truncated), so record first.
+  reportUsage(client, responseBody, meta);
+  return parseJsonContent(extractAssistantContent(responseBody));
 };
 
 /* ---------- prompts ---------- */
@@ -601,21 +654,91 @@ const deterministicMerge = (partials) => {
 /* ---------- orchestration ---------- */
 
 // Summarize one chunk of formatted lines (the "map" step).
-const summarizeLines = async (client, analysis, lines, partMeta) =>
-  callLlm(client, buildMapPrompt(analysis, lines, partMeta), partMeta === undefined ? SINGLE_MAX_TOKENS : MAP_MAX_TOKENS);
+const summarizeLines = async (client, analysis, lines, partMeta, purpose = "map") =>
+  callLlm(client, buildMapPrompt(analysis, lines, partMeta), partMeta === undefined ? SINGLE_MAX_TOKENS : MAP_MAX_TOKENS, { purpose, messages: lines.length });
 
 // Merge already-produced partials. Validated HERE so a reduce that returns
 // malformed JSON also falls back to the deterministic merge.
-const reducePartials = async (client, analysis, partials, provider) => {
+const reducePartials = async (client, analysis, partials, provider, purpose = "reduce") => {
   if (partials.length === 1) {
     return { summary: normalizeLlmSummary(partials[0], provider), mode: "single" };
   }
   try {
-    const raw = await callLlm(client, buildReducePrompt(analysis, partials), REDUCE_MAX_TOKENS);
+    const raw = await callLlm(client, buildReducePrompt(analysis, partials), REDUCE_MAX_TOKENS, { purpose });
     return { summary: normalizeLlmSummary(raw, provider), mode: "mapreduce" };
   } catch (error) {
     console.warn(`llm reduce failed, using deterministic merge: ${error.message}`);
     return { summary: normalizeLlmSummary(deterministicMerge(partials), provider), mode: "mapreduce-local-merge" };
+  }
+};
+
+/* ---------- the background briefing's merge ---------- */
+
+const BRIEF_MERGE_MAX_TOKENS = 1500;
+const BRIEF_MERGE_TOPICS = 6;
+const BRIEF_NEW_THINGS = 20;
+
+const BRIEF_MERGE_SCHEMA = {
+  summary: "string",
+  topics: [{ title: "string", summary: "string", importance: "high | medium | low", messageCountEstimate: "number" }],
+};
+
+const buildBriefMergePrompt = (analysis, partials) => ({
+  system: [
+    "你是一个 QQ 群聊摘要合并器。",
+    "输入是同一个群按时间先后切分的多段摘要，请写出这一整段时间的总览。",
+    "输出必须是合法 JSON，不要使用 Markdown，不要输出额外解释。",
+  ].join("\n"),
+  user: JSON.stringify(
+    {
+      task: `把同一个群的多段摘要合并成总览：一段 summary 和最多 ${BRIEF_MERGE_TOPICS} 个话题。`,
+      rules: [
+        "summary 用 2-4 句概括整段时间最值得知道的内容，不要逐段复述。",
+        `topics 最多 ${BRIEF_MERGE_TOPICS} 个：同一话题在多段出现时合并成一个，按热度和重要性排序；每个 topic 的 summary 1-2 句。`,
+        "messageCountEstimate 汇总各段的估计值。",
+      ],
+      outputSchema: BRIEF_MERGE_SCHEMA,
+      context: {
+        timeRange: { firstMessageHkt: analysis?.firstMessageHkt ?? null, lastMessageHkt: analysis?.lastMessageHkt ?? null },
+        parsedTextMessages: analysis?.parsedTextMessages ?? null,
+        totalParts: partials.length,
+      },
+      partials: partials.map((partial) => ({
+        summary: text(partial.summary),
+        topics: arrayOf(partial.topics).slice(0, 8).map((topic) => ({
+          title: topic?.title,
+          summary: topic?.summary,
+          importance: topic?.importance,
+          messageCountEstimate: topic?.messageCountEstimate,
+        })),
+      })),
+    },
+    null,
+    2,
+  ),
+});
+
+// The always-on briefing re-merges every group through the day, so its merge
+// must be cheap. Only the prose (overview + ranked topics) comes from the
+// model; new things, Q&A, timeline and links are merged locally from the
+// already-paid-for chunk summaries. Measured: ~5k output tokens -> under 1k.
+const mergeBriefPartials = async (client, analysis, partials, provider, purpose = "reduce") => {
+  if (partials.length === 1) {
+    return { summary: normalizeLlmSummary(partials[0], provider), mode: "single" };
+  }
+  const local = {
+    ...deterministicMerge(partials),
+    // Newest first: in a long window the latest finds matter most.
+    newThings: dedupeAcross([...partials].reverse(), (partial) => normalizeNewThings(partial.newThings), (item) => mergeKey(item.link ?? item.name))
+      .slice(0, BRIEF_NEW_THINGS),
+  };
+  try {
+    const raw = await callLlm(client, buildBriefMergePrompt(analysis, partials), BRIEF_MERGE_MAX_TOKENS, { purpose });
+    const topics = arrayOf(raw.topics).slice(0, BRIEF_MERGE_TOPICS).map((topic) => ({ ...topic, details: [], evidence: [] }));
+    return { summary: normalizeLlmSummary({ ...local, summary: raw.summary, topics }, provider), mode: "brief-merge" };
+  } catch (error) {
+    console.warn(`llm brief merge failed, using deterministic merge: ${error.message}`);
+    return { summary: normalizeLlmSummary(local, provider), mode: "mapreduce-local-merge" };
   }
 };
 
@@ -624,7 +747,7 @@ const summarizeMessages = async (client, analysis, messages, { maxMessages, maxC
   const { chunks, capped } = buildChunks(messages, maxMessages, maxChars);
   if (chunks.length <= 1) {
     const lines = chunks[0] ?? [];
-    const raw = await summarizeLines(client, analysis, lines);
+    const raw = await summarizeLines(client, analysis, lines, undefined, "manual");
     const summary = normalizeLlmSummary(raw, { ...provider, messageLines: lines.length });
     return { summary, coverage: { totalTextMessages: messages.length, includedTextMessages: lines.length, chunks: 1, mode: "single", capped } };
   }
@@ -634,7 +757,7 @@ const summarizeMessages = async (client, analysis, messages, { maxMessages, maxC
   let includedMessages = 0;
   for (let index = 0; index < chunks.length; index += 1) {
     try {
-      partials.push(await summarizeLines(client, analysis, chunks[index], { part: index + 1, total: chunks.length }));
+      partials.push(await summarizeLines(client, analysis, chunks[index], { part: index + 1, total: chunks.length }, "manual"));
       includedMessages += chunks[index].length;
       console.log(`llm map chunk ${index + 1}/${chunks.length} ok`);
     } catch (error) {
@@ -644,7 +767,7 @@ const summarizeMessages = async (client, analysis, messages, { maxMessages, maxC
   if (partials.length === 0) {
     throw new Error("All map chunks failed; no partial summary was produced.");
   }
-  const { summary, mode } = await reducePartials(client, analysis, partials, { ...provider, messageLines: includedMessages });
+  const { summary, mode } = await reducePartials(client, analysis, partials, { ...provider, messageLines: includedMessages }, "manual");
   return {
     summary,
     coverage: {
@@ -662,6 +785,9 @@ const createClient = ({ baseUrl, apiKey, model }) => ({ url: getChatCompletionsU
 
 module.exports = {
   MAX_CHUNKS,
+  setUsageRecorder,
+  providerExtras,
+  parseJsonContent,
   OUTPUT_SCHEMA,
   createClient,
   callLlm,
@@ -676,5 +802,6 @@ module.exports = {
   deterministicMerge,
   summarizeLines,
   reducePartials,
+  mergeBriefPartials,
   summarizeMessages,
 };

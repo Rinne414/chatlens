@@ -1,7 +1,10 @@
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
+const path = require("node:path");
 const { readSecretSync } = require("./secrets");
+const { createStoreRecorder } = require("./llm_usage");
+const { parseJsonContent, providerExtras } = require("./llm_summarizer");
 
 const MAX_MESSAGES = 600;
 const MAX_CHARS = 60000;
@@ -107,7 +110,8 @@ const main = async () => {
     throw new Error("Input has no messages to summarize");
   }
 
-  const response = await requestJson(getChatCompletionsUrl(args.baseUrl), apiKey, {
+  const url = getChatCompletionsUrl(args.baseUrl);
+  const response = await requestJson(url, apiKey, {
     model: args.model,
     messages: [
       { role: "system", content: "你是精炼的群聊摘要助手，只输出合法 JSON。" },
@@ -116,14 +120,25 @@ const main = async () => {
     response_format: { type: "json_object" },
     temperature: 0.3,
     max_tokens: 2048,
+    ...providerExtras(url),
   });
+  if (response.usage !== undefined) {
+    createStoreRecorder(path.resolve(__dirname, ".."))({
+      at: Math.floor(Date.now() / 1000),
+      purpose: "quick",
+      model: args.model,
+      host: url.host,
+      usage: response.usage,
+      messages: input.messages.length,
+    });
+  }
 
   const content = response.choices?.[0]?.message?.content;
   if (typeof content !== "string") {
     throw new Error("LLM response missing message content");
   }
 
-  const result = normalizeResult(JSON.parse(content));
+  const result = normalizeResult(parseJsonContent(content));
   result.model = args.model;
   result.messageCount = input.messages.length;
   fs.writeFileSync(args.outputJson, `${JSON.stringify(result, null, 2)}\n`, "utf8");

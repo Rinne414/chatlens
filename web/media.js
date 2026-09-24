@@ -121,7 +121,7 @@ const mediaFilteredItems = () => filterGalleryItemsByPickStatus(
   filterGalleryItems(app.mediaTab.data?.items ?? [], galleryFilters({})),
   gallerySavedIdentities(),
   app.mediaTab.pickFilter,
-);
+).filter((item) => aigcMatchesFilter(item, app.mediaTab.aigcFilter));
 
 const selectedMediaItems = () => {
   const byPath = new Map((app.mediaTab.data?.items ?? []).map((item) => [item.webPath, item]));
@@ -257,6 +257,10 @@ const openMediaView = async (forceRefresh) => {
     replaceMediaTab({ rangeState: { error: error.message }, rangeStateKey: galleryRangeKey() });
   }
   renderMediaView();
+  // AIGC badges arrive after the first paint; the gallery never waits on them.
+  if (await loadGalleryBadges(app.mediaTab.data?.items ?? []) && app.view === "media") {
+    renderMediaView();
+  }
 };
 
 const openGalleryRange = async ({ groupId, fromUnix, toUnix }) => {
@@ -625,6 +629,14 @@ const renderGalleryControls = (allItems, filtered) => {
       galleryOption("all", "全部图片", tab.pickFilter),
       galleryOption("unsaved", "未保存", tab.pickFilter),
       galleryOption("saved", "已精选", tab.pickFilter))),
+      el("label", { title: "按咒语库的记录筛选：图里带生成参数、群里有人求过、有人回了咒语或原图" }, el("span", {}, "AI 图"), el("select", {
+        "data-testid": "gallery-aigc-filter",
+        onchange: (event) => {
+          replaceMediaTab({ aigcFilter: event.target.value, renderedCount: MEDIA_RENDER_BATCH });
+          renderMediaView();
+        },
+      },
+      AIGC_GALLERY_FILTERS.map((option) => galleryOption(option.value, option.label, tab.aigcFilter ?? "all")))),
       el("label", {}, el("span", {}, "开始"), el("input", {
         type: "datetime-local",
         value: Number.isFinite(tab.fromUnix) ? unixToHkt(tab.fromUnix).slice(0, 16).replace(" ", "T") : "",
@@ -680,13 +692,22 @@ const renderGalleryPickBox = (item) => {
   }));
 };
 
+// With an AI-图 filter on, the pictures that matched lead the rail.
+const eventRailItems = (event) => {
+  const filter = app.mediaTab.aigcFilter ?? "all";
+  return filter === "all"
+    ? event.items
+    : [...event.items.filter((item) => aigcMatchesFilter(item, filter)), ...event.items.filter((item) => !aigcMatchesFilter(item, filter))];
+};
+
 const renderEventMediaRail = (event) => el("div", { class: "gallery-event-media" },
-  event.items.slice(0, 6).map((item) => el("div", { class: "gallery-event-thumb-wrap" },
+  eventRailItems(event).slice(0, 6).map((item) => el("div", { class: "gallery-event-thumb-wrap" },
     el("button", {
       class: "gallery-event-thumb",
       "aria-label": `查看 ${item.speaker} 在 ${item.hkt.slice(0, 16)} 的媒体`,
       onclick: () => openGalleryViewer(item, event),
     }, mediaThumb(item, "lazy")),
+    aigcBadgeRow(item),
     renderGalleryPickBox(item))),
   event.items.length > 6 ? el("span", { class: "gallery-event-more" }, `+${event.items.length - 6}`) : null);
 
@@ -779,7 +800,7 @@ const mediaItemNode = (item, mode, event) => {
     dataset: { mediaPath: item.webPath },
     "data-testid": "gallery-item",
     onclick: () => app.mediaTab.selecting ? toggleMediaPick(item) : openGalleryViewer(item, event),
-  }, mediaThumb(item, "lazy"), renderGalleryPickBox(item), caption);
+  }, mediaThumb(item, "lazy"), aigcBadgeRow(item), renderGalleryPickBox(item), caption);
 };
 
 const renderGalleryFiles = (shown, events) => {
@@ -1008,6 +1029,13 @@ const renderGalleryViewer = (shown, events) => {
                 onclick: () => toggleMediaPick(item),
               }, picked ? "移出精选" : "加入精选");
             })(),
+            aigcBadgeOf(item) === null
+              ? null
+              : el("button", {
+                  class: "btn small primary",
+                  title: "在咒语库里看这张图的咒语、参数、谁求过、相关图",
+                  onclick: () => openKnowledgeDetailByHash(aigcHashOf(item)).catch((error) => alert(error.message)),
+                }, "咒语 / 参数"),
             el("button", { class: "btn small", onclick: () => openMessageContextForMedia(item) }, "原消息"),
             el("button", { class: "btn small", onclick: () => window.open(item.webPath, "_blank", "noopener") }, "打开原文件")))),
       event === null ? null : renderGalleryStory(event))));

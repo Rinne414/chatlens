@@ -14,7 +14,7 @@
 
 const store = require("./briefing_store");
 const { formatHkt } = require("./unviewed_range");
-const { formatMessageLine, normalizeLlmSummary, summarizeLines, reducePartials } = require("./llm_summarizer");
+const { formatMessageLine, normalizeLlmSummary, summarizeLines, mergeBriefPartials } = require("./llm_summarizer");
 
 const HOUR = 3600;
 const DEFAULTS = {
@@ -29,6 +29,10 @@ const DEFAULTS = {
   firstWindowSeconds: 24 * HOUR,
   maxLookbackSeconds: 7 * 24 * HOUR,
   maxReduceChunks: 24,
+  // A group's brief is re-merged at most this often (a new chunk otherwise
+  // triggers a merge every time); "现在就总结" (force) and a missing brief
+  // bypass it.
+  reduceIntervalSeconds: 7200,
   mapConcurrency: 3,
   maxMapPerRun: 40,
   dailyLlmCallLimit: 400,
@@ -36,6 +40,37 @@ const DEFAULTS = {
 
 const BRIEFING_SINCE_KEY = "briefing_since";
 const BUDGET_KEY = "llm_budget";
+const PAUSE_KEY = "ai_paused_until";
+
+// Pause state: 0/absent = running, -1 = paused until resumed, else unix time.
+const pauseStatus = (db, now) => {
+  const until = Number(store.getState(db, PAUSE_KEY, 0)) || 0;
+  if (until === -1) {
+    return { paused: true, until: null };
+  }
+  return until > now ? { paused: true, until } : { paused: false, until: null };
+};
+
+const setPause = (db, { now, minutes }) => {
+  const value = minutes === -1 ? -1 : minutes > 0 ? now + Math.round(minutes * 60) : 0;
+  store.setState(db, PAUSE_KEY, value);
+  return pauseStatus(db, now);
+};
+
+// One gate for every LLM call the briefing makes: pause, the hard daily call
+// cap, and the optional daily money budget (`spendCheck` from the caller).
+const allowSpend = (db, now, options) => {
+  if (pauseStatus(db, now).paused) {
+    return "paused";
+  }
+  if (typeof options.spendCheck === "function") {
+    const reason = options.spendCheck();
+    if (reason) {
+      return reason;
+    }
+  }
+  return takeBudget(db, now, options.dailyLlmCallLimit) ? null : "call-limit";
+};
 
 const toLine = (message) => formatMessageLine({ ...message, hkt: formatHkt(message.sentAt) });
 
@@ -151,10 +186,12 @@ const runLimited = async (items, concurrency, worker) => {
 const mapPendingChunks = async (db, client, { now, log = () => {}, ...overrides } = {}) => {
   const options = { ...DEFAULTS, ...overrides };
   const chunks = store.chunksToSummarize(db, options.maxMapPerRun);
-  const outcome = { done: 0, failed: 0, skippedForBudget: 0 };
+  const outcome = { done: 0, failed: 0, skippedForBudget: 0, blockedBy: null };
   await runLimited(chunks, options.mapConcurrency, async (chunk) => {
-    if (!takeBudget(db, now, options.dailyLlmCallLimit)) {
+    const blocked = allowSpend(db, now, options);
+    if (blocked !== null) {
       outcome.skippedForBudget += 1;
+      outcome.blockedBy = blocked;
       return;
     }
     const messages = store.chunkMessages(db, chunk);
@@ -184,10 +221,10 @@ const mapPendingChunks = async (db, client, { now, log = () => {}, ...overrides 
   return outcome;
 };
 
-const reduceBriefs = async (db, client, groupIds, { now, log = () => {}, ...overrides } = {}) => {
+const reduceBriefs = async (db, client, groupIds, { now, force = false, log = () => {}, ...overrides } = {}) => {
   const options = { ...DEFAULTS, ...overrides };
   const windowStart = briefingSince(db, now);
-  const outcome = { updated: 0, unchanged: 0, cleared: 0, skippedForBudget: 0 };
+  const outcome = { updated: 0, unchanged: 0, cleared: 0, deferred: 0, skippedForBudget: 0, blockedBy: null };
   for (const groupId of groupIds) {
     const all = store.doneChunksInWindow(db, groupId, windowStart);
     if (all.length === 0) {
@@ -204,9 +241,19 @@ const reduceBriefs = async (db, client, groupIds, { now, log = () => {}, ...over
       outcome.unchanged += 1;
       continue;
     }
-    if (chunks.length > 1 && !takeBudget(db, now, options.dailyLlmCallLimit)) {
-      outcome.skippedForBudget += 1;
+    const recentlyMerged = existing !== null && existing.windowStart === windowStart
+      && now - existing.updatedAt < options.reduceIntervalSeconds;
+    if (recentlyMerged && !force) {
+      outcome.deferred += 1;
       continue;
+    }
+    if (chunks.length > 1) {
+      const blocked = allowSpend(db, now, options);
+      if (blocked !== null) {
+        outcome.skippedForBudget += 1;
+        outcome.blockedBy = blocked;
+        continue;
+      }
     }
     const partials = chunks.map((chunk) => JSON.parse(chunk.partialJson));
     const messages = chunks.reduce((total, chunk) => total + chunk.messageCount, 0);
@@ -217,7 +264,7 @@ const reduceBriefs = async (db, client, groupIds, { now, log = () => {}, ...over
     };
     let reduced;
     try {
-      reduced = await reducePartials(client, context, partials, { model: client.model });
+      reduced = await mergeBriefPartials(client, context, partials, { model: client.model });
     } catch (error) {
       // One group's bad data must not stop the other groups' briefs.
       log(`briefing reduce failed group=${groupId}: ${error.message.slice(0, 200)}`);
@@ -227,6 +274,7 @@ const reduceBriefs = async (db, client, groupIds, { now, log = () => {}, ...over
     store.saveGroupBrief(db, groupId, {
       windowStart,
       chunkKey,
+      updatedAt: now,
       summary: {
         ...summary,
         coverage: {
@@ -247,6 +295,8 @@ const reduceBriefs = async (db, client, groupIds, { now, log = () => {}, ...over
 
 module.exports = {
   DEFAULTS,
+  pauseStatus,
+  setPause,
   planChunks,
   briefingSince,
   markBriefingSeen,

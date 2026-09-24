@@ -85,11 +85,7 @@ const briefOpenGroup = (group) => openMessagesView({
 
 const briefOpenImage = async (image) => {
   try {
-    const full = await api(`/api/knowledge/image?hash=${encodeURIComponent(image.hash)}`);
-    showView("knowledge");
-    ensureKnowledgeLoaded();
-    replaceKnowledgeTab({ detail: full, detailLoading: false });
-    renderKnowledgeView();
+    await openKnowledgeDetailByHash(image.hash);
   } catch {
     briefOpenChatAt(image.groupId, image.groupName, image.sentAt, null);
   }
@@ -241,7 +237,30 @@ const briefStatusLine = (data) => {
     pieces.push(` · ${data.totals.failedChunks} 段总结失败`);
     tone = "warn";
   }
+  const pause = data.status?.pause;
+  if (pause?.paused) {
+    pieces.push(
+      pause.until === null ? " · AI 整理已暂停" : ` · AI 整理暂停到 ${unixToHkt(pause.until).slice(11, 16)}`,
+      " ",
+      el("button", { class: "linklike", disabled: briefState.busy, onclick: briefResumeAi }, "恢复"));
+    tone = tone === "ok" ? "warn" : tone;
+  }
   return el("p", { class: `brief-status ${tone}` }, pieces);
+};
+
+// Jumps to 回顾 with the query: "哪天聊过这个" straight from the front page.
+const briefSearchForm = () => {
+  const input = el("input", { type: "search", class: "brief-search-input", placeholder: "搜往日话题：哪天聊过…", "aria-label": "搜索往日话题" });
+  return el("form", {
+    class: "brief-search",
+    role: "search",
+    onsubmit: (event) => {
+      event.preventDefault();
+      if (input.value.trim().length > 0) {
+        openReviewView({ query: input.value });
+      }
+    },
+  }, input, el("button", { class: "btn", type: "submit" }, "搜索"));
 };
 
 const briefMasthead = (data) => {
@@ -265,7 +284,8 @@ const briefMasthead = (data) => {
         ? el("button", { class: "btn", disabled: briefState.busy || data.status?.background?.running, onclick: briefRunNow }, "⚡ 现在就总结")
         : null,
       total > 0 ? el("button", { class: "btn", disabled: briefState.busy, onclick: briefMarkSeen }, "✓ 看完了") : null,
-      el("button", { class: "btn ghost", onclick: () => openView("run") }, "自定义时间范围…")),
+      el("button", { class: "btn ghost", onclick: () => openView("run") }, "自定义时间范围…"),
+      briefSearchForm()),
     briefState.notice ? el("p", { class: "brief-notice" }, briefState.notice) : null);
 };
 
@@ -309,7 +329,7 @@ const briefNewThing = (item) =>
     el("div", {},
       el("div", { class: "brief-thing-name" },
         item.name,
-        item.link ? el("a", { href: item.link, target: "_blank", rel: "noopener noreferrer", class: "brief-link", title: item.link }, "↗") : null),
+        safeHref(item.link) ? el("a", { href: safeHref(item.link), target: "_blank", rel: "noopener noreferrer", class: "brief-link", title: item.link }, "↗") : null),
       el("p", {}, item.detail),
       el("span", { class: "brief-meta" }, [item.groupName, item.speaker].filter(Boolean).join(" · "))));
 
@@ -422,6 +442,25 @@ const briefGroups = (data) => {
       : null);
 };
 
+const briefResumeAi = async () => {
+  briefState.busy = true;
+  renderBriefView();
+  try {
+    await api("/api/ai/pause", { method: "POST", body: JSON.stringify({ minutes: 0 }) });
+    briefState.notice = "AI 整理已恢复，下一次后台刷新会接着总结。";
+  } catch (error) {
+    briefState.notice = error.message;
+  }
+  briefState.busy = false;
+  await loadBriefing();
+  renderBriefView();
+};
+
+const briefSpend = (costs) => {
+  const entries = Object.entries(costs ?? {}).filter(([, amount]) => amount > 0);
+  return entries.length === 0 ? null : entries.map(([currency, amount]) => `${currency === "USD" ? "$" : "¥"}${amount.toFixed(2)}`).join(" + ");
+};
+
 const briefFooter = (data) => {
   const background = data.status?.background ?? {};
   const settingsOf = background.settings ?? {};
@@ -431,8 +470,9 @@ const briefFooter = (data) => {
       ? "后台刷新已关闭"
       : `后台每 ${settingsOf.intervalMinutes ?? 15} 分钟自动收消息`,
     budget ? ` · 今天 AI 调用 ${budget.used}/${budget.limit}` : "",
+    briefSpend(data.status?.spendToday) ? `，约 ${briefSpend(data.status.spendToday)}` : "",
     " · ",
-    el("button", { class: "linklike", onclick: () => openView("settings") }, "后台与通知设置"));
+    el("button", { class: "linklike", onclick: () => openView("settings") }, "AI 用量与后台设置"));
 };
 
 const renderBriefView = () => {
@@ -454,11 +494,14 @@ const renderBriefView = () => {
     problem !== null && data.totals.textMessages === 0
       ? briefSetupCard(problem)
       : [
-          briefMasthead(data),
-          briefMentions(data),
-          briefHighlights(data),
-          briefImages(data),
-          briefGroups(data),
+          // On wide screens the per-group list becomes a right-hand column
+          // (brief.css); on narrow ones it simply follows the main column.
+          el("div", { class: "brief-main" },
+            briefMasthead(data),
+            briefMentions(data),
+            briefHighlights(data),
+            briefImages(data)),
+          el("aside", { class: "brief-side" }, briefGroups(data)),
           briefFooter(data),
         ]));
 };

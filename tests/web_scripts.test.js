@@ -27,7 +27,7 @@ const makeNode = (tag) => ({
   tagName: String(tag).toUpperCase(),
   children: [],
   dataset: {},
-  style: {},
+  style: { setProperty() {}, removeProperty() {} },
   attributes: {},
   isConnected: true,
   classList: {

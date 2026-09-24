@@ -411,6 +411,8 @@ const buildConditions = (query, capabilities) => {
     answer: capabilities.promptRequests
       ? `EXISTS (SELECT 1 FROM prompt_requests x WHERE x.image_hash = i.hash AND ${answeredRequestCondition(capabilities, "x.")})`
       : "1 = 0",
+    request: capabilities.promptRequests ? "EXISTS (SELECT 1 FROM prompt_requests x WHERE x.image_hash = i.hash)" : "1 = 0",
+    params: `i.generator <> '${PLACEHOLDER_GENERATOR}'`,
   };
   for (const [flag, wanted] of Object.entries(query.flags)) {
     const condition = flagConditions[flag];

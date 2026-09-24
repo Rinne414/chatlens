@@ -43,12 +43,24 @@ const unsummarizedCount = (db, groupId, fromUnix) => {
 
 const withGroup = (group) => (item) => ({ ...item, groupId: group.groupId, groupName: group.name });
 
+// Round-robin across groups, so one busy group cannot fill every slot.
+const interleave = (lists) => {
+  const result = [];
+  for (let index = 0; lists.some((list) => index < list.length); index += 1) {
+    for (const list of lists) {
+      if (index < list.length) {
+        result.push(list[index]);
+      }
+    }
+  }
+  return result;
+};
+
 const crossGroupHighlights = (groups) => {
   const briefed = groups.filter((group) => group.brief !== null);
-  const newThings = briefed.flatMap((group) => (group.brief.newThings ?? []).map(withGroup(group)));
-  const qa = briefed
-    .flatMap((group) => (group.brief.qa ?? []).map(withGroup(group)))
-    .sort((left, right) => Number(right.resolved) - Number(left.resolved));
+  const newThings = interleave(briefed.map((group) => (group.brief.newThings ?? []).map(withGroup(group))));
+  const qaOf = (resolved) => interleave(briefed.map((group) => (group.brief.qa ?? []).filter((item) => Boolean(item.resolved) === resolved).map(withGroup(group))));
+  const qa = [...qaOf(true), ...qaOf(false)];
   const hotTopics = briefed
     .flatMap((group) => (group.brief.topics ?? []).map(withGroup(group)))
     .filter((topic) => topic.importance !== "low")
@@ -155,4 +167,4 @@ const buildBriefing = ({ db, knowledgeDbPath, watchlist, nowUnix, extraSelfUins 
   };
 };
 
-module.exports = { buildBriefing, crossGroupHighlights };
+module.exports = { buildBriefing, crossGroupHighlights, interleave };

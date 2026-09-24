@@ -9,6 +9,10 @@ const storage = require("./storage_ops");
 const background = require("./background");
 const briefing = require("./briefing_ops");
 const desktop = require("./desktop_ops");
+const llmOps = require("./llm_ops");
+const reviewOps = require("./review_ops");
+const knowledgeAigc = require("./knowledge_aigc");
+const backupOps = require("./backup_ops");
 const update = require("./update_ops");
 const knowledge = require("./knowledge_ops");
 const knowledgeExport = require("../knowledge_export");
@@ -111,6 +115,15 @@ const readBody = (request) =>
 const isLocalHost = (request) => {
   const host = String(request.headers.host ?? "").toLowerCase();
   return host.startsWith("127.0.0.1:") || host.startsWith("localhost:") || host === "127.0.0.1" || host === "localhost";
+};
+
+// /runs/ and /knowledge-file cannot carry the token (<img>/<video> sources),
+// so any web page the user has open could otherwise embed them and probe which
+// pictures exist. Browsers label such requests; only our own pages and direct
+// navigation get through.
+const isCrossSite = (request) => {
+  const site = request.headers["sec-fetch-site"];
+  return site === "cross-site" || site === "same-site";
 };
 
 // Constant-time comparison: the token is the only gate on /api/*.
@@ -418,6 +431,17 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/knowledge/badges") {
+      const body = await readBody(request);
+      sendJson(response, 200, knowledgeAigc.badgesFor(state.toolRoot, body.hashes));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/knowledge/related") {
+      sendJson(response, 200, knowledgeAigc.relatedImages(state.toolRoot, url.searchParams.get("hash")));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/knowledge/image") {
       const image = knowledge.imageByHash(state.toolRoot, url.searchParams.get("hash"));
       if (image === null) {
@@ -526,6 +550,33 @@ const handleApi = async (request, response, url) => {
       const body = await readBody(request);
       const groupSets = state.updateGroupSets({ save: body.save, remove: body.remove });
       sendJson(response, 200, { groupSets });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/backup/setup") {
+      sendJson(response, 200, backupOps.getSetup());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/backup/start") {
+      sendJson(response, 200, backupOps.start(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/backup/report") {
+      sendJson(response, 200, { report: backupOps.readReport() });
+      return;
+    }
+
+    // Opens the folder of the last backup; the path comes from the tool's own
+    // report, never from the request.
+    if (request.method === "POST" && url.pathname === "/api/backup/open-folder") {
+      const target = backupOps.readReport()?.targetDir ?? null;
+      if (target === null || !fs.existsSync(target)) {
+        throw new Error("备份文件夹还不存在，先保存一次。");
+      }
+      launchExplorer(target);
+      sendJson(response, 200, { opened: true });
       return;
     }
 
@@ -653,6 +704,46 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/review/calendar") {
+      sendJson(response, 200, reviewOps.getCalendar({ from: url.searchParams.get("from"), to: url.searchParams.get("to") }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/review/day") {
+      sendJson(response, 200, reviewOps.getDay({ day: url.searchParams.get("day") }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/review/backfill") {
+      sendJson(response, 200, reviewOps.backfill(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/review/search") {
+      sendJson(response, 200, reviewOps.search({ q: url.searchParams.get("q") }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/llm/usage") {
+      sendJson(response, 200, llmOps.getUsage({ days: url.searchParams.get("days") }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/llm/providers") {
+      sendJson(response, 200, llmOps.getProviders());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/llm/prices") {
+      sendJson(response, 200, llmOps.savePrices(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/ai/pause") {
+      sendJson(response, 200, llmOps.setPause(await readBody(request)));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/desktop/shortcut") {
       sendJson(response, 200, await desktop.ensureAppShortcut());
       return;
@@ -732,6 +823,11 @@ const handleRequest = (request, response) => {
       return;
     }
 
+    if ((url.pathname.startsWith("/runs/") || url.pathname === "/knowledge-file") && isCrossSite(request)) {
+      sendError(response, 403, "Forbidden");
+      return;
+    }
+
     if (url.pathname.startsWith("/runs/")) {
       serveRunsFile(response, url.pathname);
       return;
@@ -739,8 +835,8 @@ const handleRequest = (request, response) => {
 
     // Alongside /runs/ rather than behind the API token, because <img src> and
     // <video src> cannot send the x-cc-token header. Same protection as /runs/:
-    // the server binds to 127.0.0.1 only, and the path is resolved from a
-    // store-held md5 that must live under the configured nt_data directory.
+    // local Host only, cross-site requests refused (above), and the path is
+    // resolved from a store-held md5 that must live under nt_data.
     if (url.pathname === "/knowledge-file") {
       serveKnowledgeImage(response, url.searchParams.get("hash"), {
         thumb: url.searchParams.get("thumb") === "1",

@@ -56,10 +56,10 @@ const FIELDS = [
     key: "has",
     kind: "flag",
     // `has:` and `no:` are two spellings of one tri-state, so they share targets.
-    values: ["prompt", "lora", "file", "answer", "sender", "negative"],
+    values: ["prompt", "lora", "file", "answer", "sender", "negative", "request", "params"],
     aliases: ["有"],
   },
-  { key: "no", kind: "flag", negated: true, values: ["prompt", "lora", "file", "answer", "sender", "negative"], aliases: ["没有", "沒有", "無"] },
+  { key: "no", kind: "flag", negated: true, values: ["prompt", "lora", "file", "answer", "sender", "negative", "request", "params"], aliases: ["没有", "沒有", "無"] },
 ];
 
 const EXCLUDABLE_KINDS = new Set(["list"]);
@@ -286,6 +286,8 @@ const SYNTAX_ROWS = [
   { syntax: "has:answer", meaning: "已有文字或媒体回复（prompt / lora / file / answer / sender / negative）" },
   { syntax: "has:prompt", meaning: "图上有咒语（含群里 kkt 回填的）" },
   { syntax: "has:sender", meaning: "对得上发图人" },
+  { syntax: "has:request", meaning: "有人在群里求过这张图的咒语或原图" },
+  { syntax: "has:params", meaning: "原图里带生成参数（不只是群里回的咒语）" },
   { syntax: "no:file", meaning: "本地没有可用原图" },
 ];
 

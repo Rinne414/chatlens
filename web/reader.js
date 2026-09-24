@@ -292,7 +292,7 @@ const openReader = async (runId, origin) => {
             el("span", { class: "gtag" }, `[${item.groupName}]`),
             el("span", { class: "who" }, `${BRIEF_KIND_LABELS[item.kind] ?? "新东西"} · ${item.name}`),
             item.detail,
-            item.link ? el("a", { class: "ev", href: item.link, target: "_blank", rel: "noopener noreferrer" }, item.link) : null))))
+            safeHref(item.link) ? el("a", { class: "ev", href: safeHref(item.link), target: "_blank", rel: "noopener noreferrer" }, item.link) : item.link ?? null))))
     : null;
 
   const qaItems = mergedItems(detail.groups, (group) => group.llmSummary?.qa);

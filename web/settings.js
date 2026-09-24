@@ -22,7 +22,8 @@ const openSettingsView = async () => {
     return;
   }
   renderSettingsView();
-  await refreshBackgroundStatus();
+  await Promise.all([refreshBackgroundStatus(), loadAiUsage()]);
+  renderSettingsView();
 };
 
 const refreshBackgroundStatus = async () => {
@@ -301,8 +302,19 @@ const renderSettingsView = () => {
         },
       }, model)));
 
+  const pickPreset = (preset) => {
+    draftPatch({ baseUrl: preset.baseUrl, model: preset.models[0] ?? "" });
+    settingsState.models = preset.models;
+    settingsState.llmNotice = {
+      text: `已填入 ${preset.name}。${preset.models.length === 0 ? "保存 key 后点「获取模型列表」选一个模型，" : ""}确认无误后点「保存 LLM 配置」。`,
+      isError: false,
+    };
+    renderSettingsView();
+  };
+
   const llmCard = el("div", { class: "card" },
     el("h2", {}, "AI 总结（LLM）"),
+    renderProviderPresets(pickPreset),
     el("div", { class: "row" },
       urlInput,
       modelInput,
@@ -362,9 +374,9 @@ const renderSettingsView = () => {
     el("ul", { style: "margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9" },
       el("li", {}, "只读：工具复制数据库文件后离线解析，从不写 QQ 的任何文件，也不使用 QQ 登录协议。"),
       el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。"),
-      el("li", {}, "外部流量仅两处：头像走 QQ 公开 CDN；开启 AI 总结时消息文本会发送到你配置的 LLM 服务。")));
+      el("li", {}, "外部流量：头像，以及本机缺原图时补下载群图片（按 md5 校验），走 QQ 公开 CDN；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；「检查更新」访问 GitHub。")));
 
-  setChildren($("#view-settings"), readinessCard, renderMoreLinks(), pathsCard, keysCard, llmCard, backgroundCard, updateCard, aboutCard);
+  setChildren($("#view-settings"), readinessCard, renderMoreLinks(), pathsCard, keysCard, llmCard, renderAiUsageCard(), backgroundCard, updateCard, aboutCard);
 };
 
 /* --- check & update card --- */
@@ -517,7 +529,7 @@ const renderBackgroundCard = () => {
   return el("div", { class: "card" },
     el("h2", {}, "后台与通知"),
     el("p", { class: "card-sub" },
-      "控制台开着时（窗口可以关掉），会每隔一段时间自动收新消息、攒够一段就交给 AI 总结。你打开「简报」时内容已经准备好。每条消息只总结一次，费用和每天手动跑一次差不多；另有每日调用上限兜底。"),
+      "控制台开着时（窗口可以关掉），会每隔一段时间自动收新消息、攒够一段就交给 AI 总结。你打开「简报」时内容已经准备好。每条消息只总结一次；各群的总览最多每 2 小时重写一次。实际花了多少看下面的「AI 用量与费用」，也可以随时暂停或设每日预算。"),
     backgroundStatusLine(background),
     el("div", { class: "bg-grid" },
       backgroundToggle("自动刷新", "关闭后只有手动总结", current.enabled, (value) => saveBackgroundSetting({ enabled: value })),

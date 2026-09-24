@@ -16,7 +16,9 @@ const { loadConfig } = require("../server/toolkit_state");
 const messageStore = require("../message_store");
 const { ensureBriefingSchema } = require("../briefing_store");
 const engine = require("../briefing_engine");
-const { createClient } = require("../llm_summarizer");
+const { createClient, setUsageRecorder } = require("../llm_summarizer");
+const { ensureUsageSchema, recordUsage, todaySpend } = require("../llm_usage");
+const { priceTable } = require("../llm_pricing");
 const { readSecretSync, hasSecret } = require("../secrets");
 const { lowerOwnPriority } = require("../platform");
 const { resolveLlmOptions } = require("./llm_options");
@@ -62,6 +64,18 @@ const groupStartsFor = (groupIds, now) => {
 const briefingEnabled = (config, values) =>
   values["no-llm"] !== true && config.background?.autoSummarize !== false && hasSecret("llmKey");
 
+// Optional daily money budget from 设置 (config.background.dailyBudget):
+// once today's estimated spend reaches it, the briefing stops calling the LLM.
+const moneyBudgetCheck = (db, config, now) => {
+  const budget = config.background?.dailyBudget;
+  const amount = Number(budget?.amount);
+  if (!Number.isFinite(amount) || amount <= 0 || !["CNY", "USD"].includes(budget?.currency)) {
+    return undefined;
+  }
+  const prices = priceTable(config);
+  return () => (todaySpend(db, { nowUnix: now, prices, currency: budget.currency }) >= amount ? "money-budget" : null);
+};
+
 const runBriefing = async ({ config, groupIds, now, force }) => {
   let llm;
   try {
@@ -70,15 +84,30 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
     common.warn(`跳过自动总结：${error.message}`);
     return { skipped: "llm-not-configured" };
   }
-  const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
+  const db = ensureUsageSchema(ensureBriefingSchema(messageStore.openStore(common.storeDbPath)));
+  setUsageRecorder((entry) => {
+    try {
+      recordUsage(db, entry);
+    } catch (error) {
+      common.warn(`AI 用量未能记录：${error.message}`);
+    }
+  });
   try {
     const client = createClient(llm);
-    const created = engine.closeChunks(db, groupIds, { now, force });
+    const intervalMinutes = Number(config.background?.reduceIntervalMinutes);
+    const tailWaitMinutes = Number(config.background?.tailWaitMinutes);
+    const gate = {
+      ...(Number.isFinite(tailWaitMinutes) && tailWaitMinutes >= 60 ? { tailMaxAgeSeconds: tailWaitMinutes * 60 } : {}),
+      spendCheck: moneyBudgetCheck(db, config, now),
+      ...(Number.isFinite(intervalMinutes) && intervalMinutes >= 0 ? { reduceIntervalSeconds: intervalMinutes * 60 } : {}),
+    };
+    const created = engine.closeChunks(db, groupIds, { now, force, ...gate });
     common.progress(`briefing-chunks:${created}`);
-    const map = await engine.mapPendingChunks(db, client, { now, log: common.info });
-    const reduce = await engine.reduceBriefs(db, client, groupIds, { now, log: common.info });
-    return { chunksCreated: created, map, reduce, budget: engine.budgetStatus(db, now) };
+    const map = await engine.mapPendingChunks(db, client, { now, log: common.info, ...gate });
+    const reduce = await engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate });
+    return { chunksCreated: created, map, reduce, budget: engine.budgetStatus(db, now), pause: engine.pauseStatus(db, now) };
   } finally {
+    setUsageRecorder(null);
     db.close();
   }
 };

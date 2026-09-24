@@ -1,0 +1,66 @@
+/* ---- AIGC layer: gallery badges, 咒语库 quick filters, and the detail view
+   (original on the left, prompt / params / who asked / related on the right). ---- */
+
+/* badges sit on the thumbnail's top-left corner */
+.media-item, .gallery-event-thumb-wrap { position: relative; }
+.gallery-event-thumb-wrap .aigc-badges { top: 3px; left: 3px; gap: 2px; }
+.gallery-event-thumb-wrap .aigc-badge { font-size: 9.5px; padding: 0 4px; }
+.aigc-badges { position: absolute; top: 6px; left: 6px; z-index: 2; display: flex; flex-wrap: wrap; gap: 4px; max-width: calc(100% - 12px); pointer-events: none; }
+.aigc-badge {
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.6;
+  color: #fff;
+  background: rgba(20, 24, 30, .78);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  backdrop-filter: blur(2px);
+}
+.aigc-badge.params { background: rgba(15, 124, 90, .92); }
+.aigc-badge.asked { background: rgba(154, 91, 0, .92); }
+.aigc-badge.answered { background: rgba(91, 75, 181, .92); }
+
+/* 咒语库 quick filters */
+.aigc-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.aigc-filter-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+
+/* detail: one column by default, two side by side on wide screens */
+.kb-overlay-body { display: grid; gap: 14px; min-width: 0; }
+.kb-overlay-media { min-width: 0; }
+.kb-overlay-media a { display: block; cursor: zoom-in; }
+.kb-overlay-info { display: grid; gap: 12px; align-content: start; min-width: 0; }
+
+@media (min-width: 1100px) {
+  .kb-overlay-panel { width: min(1480px, 100%); }
+  .kb-overlay-body { grid-template-columns: minmax(0, 1.15fr) minmax(360px, 1fr); align-items: start; }
+  .kb-overlay-media { position: sticky; top: 0; }
+  .kb-overlay-image { max-height: calc(78vh / var(--zoom)); }
+  .kb-overlay-info { max-height: calc(78vh / var(--zoom)); overflow-y: auto; padding-right: 4px; }
+}
+
+.aigc-asks ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 8px; }
+.aigc-asks li { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); display: grid; gap: 4px; }
+.aigc-ask-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; }
+.aigc-asks .kb-ask { margin: 0; font-size: 12.5px; }
+
+.aigc-related-wrap { display: grid; gap: 10px; }
+.aigc-related-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; margin-top: 6px; }
+.aigc-related-item {
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color var(--dur), transform var(--dur);
+}
+.aigc-related-item:hover { border-color: var(--accent); transform: translateY(-1px); }
+.aigc-related-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.aigc-related-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  .aigc-related-item { transition: none; }
+  .aigc-related-item:hover { transform: none; }
+}

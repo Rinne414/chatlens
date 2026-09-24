@@ -37,6 +37,13 @@ const GROUP_LIST_STAGES = [
   { key: "list", label: "读取群列表" },
 ];
 
+const BACKUP_STAGES = [
+  { key: "copy", label: "复制数据库副本" },
+  { key: "export", label: "导出消息" },
+  { key: "media", label: "在电脑 QQ 缓存里找文件" },
+  { key: "report", label: "保存与报告" },
+];
+
 const COVERAGE_REPAIR_STAGES = [
   { key: "copy", label: "复制一次数据库副本" },
   { key: "repair", label: "分块写入覆盖记录" },
@@ -86,6 +93,7 @@ const RESULT_KEYS = new Set([
   "repairMatchedMessages",
   "repairMatchedMedia",
   "repairIngestCandidates",
+  "backupReport",
 ]);
 
 const applyLine = (job, line) => {
@@ -608,6 +616,9 @@ const startCoverageRepairJob = ({ batches }) => {
 const startGroupListJob = () =>
   spawnJob("group-list", "刷新群列表", [pipelineScript("group_list_run.js")], GROUP_LIST_STAGES, []);
 
+const startBackupJob = ({ requestPath, mode }) =>
+  spawnJob("backup", mode === "save" ? "备份到电脑" : "扫描备份范围", [pipelineScript("backup_run.js"), requestPath], BACKUP_STAGES, []);
+
 /* ---------- quick selection summary (separate lightweight slot) ---------- */
 
 let quickJob = null;
@@ -756,6 +767,7 @@ module.exports = {
   startSummaryJob,
   startCoverageRepairJob,
   startGroupListJob,
+  startBackupJob,
   cancelJob,
   jobSnapshot,
   isJobRunning,

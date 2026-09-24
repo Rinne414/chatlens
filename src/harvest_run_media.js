@@ -34,6 +34,7 @@ const {
   isUnchanged,
 } = require("./knowledge_store");
 const { persistOriginalsForHashes, buildOriIndex } = require("./media_object_store");
+const { repairExifPrompts } = require("./knowledge_repair");
 
 const parseArgs = (argv) => {
   if (argv.length < 5) {
@@ -188,6 +189,11 @@ const harvestRunMedia = ({ mediaMessagesJson, ntDataDir, storePath, exportJson =
   }
 
   const db = openKnowledgeStore(storePath);
+  // No-op after the first run on a library parsed before PARSER_VERSION 3.
+  const repaired = repairExifPrompts(db);
+  if (repaired.checked > 0) {
+    process.stdout.write(`exif-repair checked=${repaired.checked} recovered=${repaired.recovered} stripped=${repaired.stripped}\n`);
+  }
   const oriIndex = buildOriIndex(ntDataDir);
   const thumbIndex = buildThumbIndex(ntDataDir, hashesFromThisRun(refs, requests));
   const scanState = loadScanState(db, PARSER_VERSION);

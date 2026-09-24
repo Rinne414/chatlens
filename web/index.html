@@ -11,6 +11,9 @@
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="stylesheet" href="/app.css">
   <link rel="stylesheet" href="/brief.css">
+  <link rel="stylesheet" href="/review.css">
+  <link rel="stylesheet" href="/aigc.css">
+  <link rel="stylesheet" href="/backup.css">
 </head>
 <body>
   <div class="shell">
@@ -21,14 +24,27 @@
       </div>
       <nav id="nav">
         <button data-view="brief" class="active">简报</button>
+        <button data-view="review">回顾</button>
         <button data-view="messages">消息</button>
         <button data-view="media">画廊</button>
         <button data-view="knowledge">咒语库</button>
+        <button data-view="backup">备份</button>
         <button data-view="settings">设置</button>
       </nav>
       <div class="rail-foot">
         <div class="settings-row">
           <button id="theme-toggle" class="btn small">🌙 夜间模式</button>
+          <label class="zoom-control">字号
+            <select id="zoom-select" aria-label="界面大小">
+              <option value="auto">自动</option>
+              <option value="1">100%</option>
+              <option value="1.15">115%</option>
+              <option value="1.3">130%</option>
+              <option value="1.5">150%</option>
+              <option value="1.75">175%</option>
+              <option value="2">200%</option>
+            </select>
+          </label>
         </div>
         <p>只读本地 QQNT 数据库副本。<br>不发消息，不动原始数据。</p>
       </div>
@@ -39,6 +55,7 @@
         <button id="job-pill" class="job-pill idle" hidden></button>
       </header>
       <div id="view-brief" class="view"></div>
+      <div id="view-review" class="view" hidden></div>
       <div id="view-run" class="view" hidden></div>
       <div id="view-messages" class="view" hidden></div>
       <div id="view-history" class="view" hidden></div>
@@ -47,6 +64,7 @@
       <div id="view-watchlist" class="view" hidden></div>
       <div id="view-reader" class="view" hidden></div>
       <div id="view-storage" class="view" hidden></div>
+      <div id="view-backup" class="view" hidden></div>
       <div id="view-settings" class="view" hidden></div>
     </main>
   </div>
@@ -59,8 +77,12 @@
   <script src="/knowledge_grid_math.js"></script>
   <script src="/knowledge_grid.js"></script>
   <script src="/knowledge.js"></script>
+  <script src="/knowledge_aigc.js"></script>
   <script src="/storage.js"></script>
+  <script src="/ai_usage.js"></script>
   <script src="/settings.js"></script>
   <script src="/brief.js"></script>
+  <script src="/review.js"></script>
+  <script src="/backup.js"></script>
 </body>
 </html>

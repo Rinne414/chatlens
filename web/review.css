@@ -1,0 +1,159 @@
+/* ---- 回顾 — the day's paper beside a calendar, with search across every day.
+   Reuses the 简报 masthead / panels so a past day reads like a past issue. ---- */
+
+.review-page {
+  max-width: 1960px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "search" "error" "side" "main";
+  column-gap: 30px;
+  align-items: start;
+}
+.review-search { grid-area: search; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.review-error { grid-area: error; }
+.review-main { grid-area: main; min-width: 0; }
+.review-side { grid-area: side; min-width: 0; margin-bottom: 22px; }
+
+@media (min-width: 1200px) {
+  .review-page { grid-template-columns: minmax(0, 1fr) 340px; grid-template-areas: "search search" "error error" "main side"; }
+  .review-side { position: sticky; top: 12px; margin-bottom: 0; }
+}
+@media (min-width: 1700px) {
+  .review-page { grid-template-columns: minmax(0, 1fr) 390px; }
+}
+
+/* search */
+.review-search-input, .brief-search-input {
+  flex: 1 1 320px;
+  min-width: 0;
+  font: inherit;
+  font-size: 15px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  transition: border-color var(--dur), box-shadow var(--dur);
+}
+.review-search-input:focus, .brief-search-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.brief-search { display: flex; gap: 6px; flex: 1 1 260px; max-width: 420px; margin-left: auto; }
+.brief-search-input { font-size: 13px; padding: 7px 12px; border-radius: 9px; }
+.brief-search .btn, .review-search .btn { flex: none; white-space: nowrap; }
+
+/* calendar */
+.review-cal { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 10px; }
+.review-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.review-cal-head strong { font-family: var(--serif); font-size: 16px; letter-spacing: .04em; }
+.review-cal-head .btn { min-width: 34px; font-size: 18px; line-height: 1; padding: 4px 8px; }
+.review-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.review-cal-wd { text-align: center; font-size: 11px; color: var(--muted); padding-bottom: 2px; }
+.review-cal-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  aspect-ratio: 1 / 1;
+  min-height: 38px;
+  padding: 5px 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur), background var(--dur), transform var(--dur) var(--ease-out);
+}
+.review-cal-day:not(:disabled):hover { border-color: var(--accent); transform: translateY(-1px); }
+.review-cal-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.review-cal-day.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.review-cal-day.today .review-cal-num { color: var(--accent); font-weight: 800; }
+.review-cal-day.empty { border-style: dashed; background: transparent; color: var(--muted); cursor: default; opacity: .5; }
+.review-cal-num { font-size: 12px; line-height: 1; font-variant-numeric: tabular-nums; }
+.review-cal-ai { position: absolute; top: 4px; right: 4px; font-size: 9px; font-weight: 800; letter-spacing: .03em; color: var(--thing); }
+.review-cal-bar { display: block; height: 4px; border-radius: 2px; background: var(--chart-bar); }
+.review-cal-readout { min-height: 1.5em; margin: 10px 0 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.review-cal-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 11px; color: var(--muted); }
+.review-cal-legend-bar { display: inline-block; width: 22px; height: 4px; border-radius: 2px; background: var(--chart-bar); }
+.review-cal-legend .review-cal-ai { position: static; margin-left: 8px; }
+.review-side > .review-cal + .brief-meta, .review-cal > .brief-meta { margin: 4px 0 2px; line-height: 1.5; }
+
+/* the day's masthead */
+.review-mast-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.review-mast-top .brief-dateline { margin: 0; }
+.review-day-nav { display: flex; gap: 6px; }
+.review-coverage { margin-top: 14px; position: relative; z-index: 1; }
+.review-coverage-bar { display: flex; max-width: 560px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.review-coverage-bar .done { background: var(--chart-bar); }
+/* queued: same hue, hatched, so "排队" never relies on shade alone */
+.review-coverage-bar .queued { background: repeating-linear-gradient(135deg, var(--chart-bar) 0 3px, transparent 3px 6px); }
+.review-coverage-text { margin: 6px 0 0; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.review-backfill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  font-size: 13px;
+}
+.review-day.loading { opacity: .55; transition: opacity var(--dur); }
+
+/* per-group day */
+.review-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 620px), 1fr)); gap: 14px; align-items: start; }
+.review-group { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 12px; }
+.review-group-head { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.review-group-title { display: grid; min-width: 0; }
+.review-group-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-group-title .brief-meta { font-variant-numeric: tabular-nums; }
+.review-group .brief-group-topics { margin: 10px 0 2px; }
+.review-group > .btn.ghost { margin-top: 4px; }
+.review-group-empty { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+.review-timeline { list-style: none; margin: 10px 0 4px; padding: 0; }
+.review-tl + .review-tl { border-top: 1px dashed var(--line); }
+.review-tl .brief-row-button {
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  transition: background var(--dur);
+}
+.review-tl .brief-row-button:hover { background: var(--bg); }
+.review-tl .brief-row-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.review-tl-time { padding-top: 2px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.review-tl-body strong { font-size: 14px; }
+.review-tl-body p { margin: 2px 0 0; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+
+/* search results */
+.review-results-head { margin-bottom: 18px; }
+.review-results-head h2 { margin: 0 0 4px; font-family: var(--serif); font-size: clamp(22px, 1.2vw + 14px, 30px); letter-spacing: .02em; overflow-wrap: anywhere; }
+.review-day-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.review-chip-count { margin-left: 6px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.review-hit-list { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+.review-hit { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 12px 16px; }
+.review-hit + .review-hit { border-top: 1px solid var(--line); }
+.review-hit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.review-hit p { margin: 4px 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.review-hit-day { padding-top: 2px; font-size: 12px; white-space: nowrap; }
+.review-kind { font-size: 11px; font-weight: 700; border-radius: 5px; padding: 1px 7px; background: var(--bg); color: var(--muted); }
+.review-kind.topic { background: var(--topic-soft); color: var(--topic); }
+.review-kind.newThing { background: var(--thing-soft); color: var(--thing); }
+.review-kind.qa { background: var(--qa-soft); color: var(--qa); }
+.review-kind.timeline { background: var(--accent-soft); color: var(--accent); }
+.review-page mark { background: var(--qa-soft); color: inherit; border-radius: 3px; padding: 0 1px; box-shadow: inset 0 -2px 0 var(--qa); }
+
+@media (max-width: 820px) {
+  .review-hit { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .review-tl .brief-row-button { grid-template-columns: 76px minmax(0, 1fr); }
+  .review-group-head { grid-template-columns: 36px minmax(0, 1fr); }
+  .review-group-head .btn { grid-column: 1 / -1; justify-self: start; }
+  .brief-search { max-width: none; margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-cal-day, .review-day.loading { transition: none; }
+  .review-cal-day:not(:disabled):hover { transform: none; }
+}

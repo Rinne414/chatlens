@@ -10,7 +10,9 @@
 
 const { readImageTextChunks } = require("./image_text_chunks");
 
-const PARSER_VERSION = 2;
+// 3: EXIF comments count only as A1111 parameters (with a "Steps:" line) or a
+//    ComfyUI graph; phone/app notes like "oplus_2097152" are not prompts.
+const PARSER_VERSION = 3;
 
 const MAX_PROMPT_CHARS = 20000;
 const MAX_RAW_CHARS = 60000;
@@ -535,6 +537,24 @@ const EMPTY_RESULT = {
   extra: {},
 };
 
+// EXIF comments are written by cameras and apps too: "oplus_2097152",
+// "Screenshot", beauty-filter settings, AIGC-label JSON. Unlike a PNG
+// `parameters` chunk, one only counts as generation data when it is a full
+// A1111 block (its "Steps: ..." line parsed) or an embedded ComfyUI graph.
+const parseExifText = (text) => {
+  if (typeof text !== "string" || text.trim().length === 0) {
+    return null;
+  }
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) {
+    const comfy = parseComfyUi({ prompt: trimmed });
+    const useful = comfy !== null && (comfy.prompt.length > 0 || comfy.loras.length > 0 || comfy.checkpoint.length > 0);
+    return useful ? comfy : null;
+  }
+  const a1111 = parseA1111(trimmed);
+  return Object.keys(a1111.params).length > 0 ? a1111 : null;
+};
+
 // Order matters. Images often carry chunks from more than one tool: a Forge
 // render whose workflow came from ComfyUI keeps BOTH an authoritative
 // `parameters` string and a stale `workflow` graph. The A1111 string is written
@@ -548,12 +568,17 @@ const detectAndParse = (chunks) => {
     }
   }
 
-  const parameters = chunks.parameters ?? chunks.UserComment ?? chunks.ImageDescription;
+  const parameters = chunks.parameters;
   if (typeof parameters === "string" && parameters.trim().length > 0) {
     const a1111 = parseA1111(parameters);
     if (a1111.prompt.length > 0 || Object.keys(a1111.params).length > 0) {
       return a1111;
     }
+  }
+
+  const fromExif = parseExifText(chunks.UserComment) ?? parseExifText(chunks.ImageDescription);
+  if (fromExif !== null) {
+    return fromExif;
   }
 
   if (typeof chunks.prompt === "string" || typeof chunks.workflow === "string") {

@@ -12,6 +12,8 @@ const secrets = require("../secrets");
 const briefingStore = require("../briefing_store");
 const engine = require("../briefing_engine");
 const { buildBriefing } = require("../briefing_view");
+const { summarizeUsage } = require("../llm_usage");
+const { priceTable } = require("../llm_pricing");
 
 const knowledgeDbPath = path.join(state.toolRoot, "store", "knowledge.db");
 
@@ -50,6 +52,8 @@ const briefingNow = () => {
       llmConfigured: llmConfigured(config),
       background: background.getStatus(),
       budget: engine.budgetStatus(db, nowUnix),
+      pause: engine.pauseStatus(db, nowUnix),
+      spendToday: summarizeUsage(db, { nowUnix, days: 1, prices: priceTable(config) }).today.cost,
     },
   });
 };

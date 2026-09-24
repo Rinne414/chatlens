@@ -299,6 +299,7 @@ const openDetail = async (item) => {
     replaceKnowledgeTab({ detailLoading: false });
   }
   renderKnowledgeView();
+  loadKnowledgeRelated(item.hash);
 };
 
 const thumbnail = (item) => {
@@ -794,6 +795,7 @@ const knowledgeFilters = () => {
         }, "清除筛选")
         : null),
     el("div", { class: "kb-control-row" }, libraryScopeToggle(), generatorSelect, groupSelect, senderSelect, sortSelect, densityToggle()),
+    el("div", { class: "kb-control-row" }, knowledgeQuickFilters()),
     searchPreview(),
     syntaxHelpPanel(),
     exportPanel());
@@ -1078,38 +1080,46 @@ const renderKnowledgeDetail = () => {
           onclick: () => stepDetail(1),
         }, "→"),
         el("button", { class: "btn small", onclick: close }, "关闭"))),
-    item.hasFile
-      ? el("img", { class: "kb-overlay-image", src: knowledgeFileUrl(item.hash), alt: "原图" })
-      : el("div", { class: "kb-thumb missing" }, el("span", {}, unavailableImageText(item.fileMissing))),
-    promptBlock(item.prompt, "咒语", { clamp: false }),
-    promptBlock(item.negativePrompt, "负面咒语", { clamp: false }),
-    el("div", { class: "kb-detail-grid" },
-      detailRow("模型", item.checkpoint),
-      detailRow("模型 hash", item.modelHash),
-      detailRow("尺寸", item.width > 0 ? `${item.width}×${item.height}` : ""),
-      detailRow("steps", params.steps),
-      detailRow("CFG", params.cfgScale),
-      detailRow("采样器", params.sampler),
-      detailRow("调度", params.scheduler),
-      detailRow("seed", params.seed),
-      detailRow("重绘幅度", params.denoisingStrength),
-      detailRow("md5", item.hash)),
-    item.loras.length === 0
-      ? null
-      : el("div", { class: "kb-loras" },
-        el("span", { class: "kb-prompt-label" }, `LoRA ×${item.loras.length}`),
-        el("div", { class: "kb-chip-row" },
-          item.loras.map((lora) =>
-            el("span", { class: "kb-chip" }, lora.weight === null ? lora.name : `${lora.name} @${lora.weight}`)))),
-    item.sightings.length === 0
-      ? null
-      : el("div", {},
-        el("span", { class: "kb-prompt-label" }, "群里出现过"),
-        el("ul", { class: "kb-sightings" },
-          item.sightings.map((seen) =>
-            el("li", {}, `${formatUnix(seen.sentAt)} · ${seen.groupName || seen.groupId} · ${seen.speaker}`)))),
-    (item.promptRequests ?? []).map(requestAnswer)));
+    el("div", { class: "kb-overlay-body" },
+      el("div", { class: "kb-overlay-media" },
+        item.hasFile
+          ? el("a", { href: knowledgeFileUrl(item.hash), target: "_blank", rel: "noreferrer", title: "在新窗口看原图（原始文件，参数完整）" },
+            el("img", { class: "kb-overlay-image", src: knowledgeFileUrl(item.hash), alt: "原图" }))
+          : el("div", { class: "kb-thumb missing" }, el("span", {}, unavailableImageText(item.fileMissing)))),
+      el("div", { class: "kb-overlay-info" }, knowledgeDetailInfo(item, params)))));
 };
+
+const knowledgeDetailInfo = (item, params) => [
+  promptBlock(item.prompt, "咒语", { clamp: false }),
+  promptBlock(item.negativePrompt, "负面咒语", { clamp: false }),
+  el("div", { class: "kb-detail-grid" },
+    detailRow("模型", item.checkpoint),
+    detailRow("模型 hash", item.modelHash),
+    detailRow("尺寸", item.width > 0 ? `${item.width}×${item.height}` : ""),
+    detailRow("steps", params.steps),
+    detailRow("CFG", params.cfgScale),
+    detailRow("采样器", params.sampler),
+    detailRow("调度", params.scheduler),
+    detailRow("seed", params.seed),
+    detailRow("重绘幅度", params.denoisingStrength),
+    detailRow("md5", item.hash)),
+  item.loras.length === 0
+    ? null
+    : el("div", { class: "kb-loras" },
+      el("span", { class: "kb-prompt-label" }, `LoRA ×${item.loras.length}`),
+      el("div", { class: "kb-chip-row" },
+        item.loras.map((lora) =>
+          el("span", { class: "kb-chip" }, lora.weight === null ? lora.name : `${lora.name} @${lora.weight}`)))),
+  item.sightings.length === 0
+    ? null
+    : el("div", {},
+      el("span", { class: "kb-prompt-label" }, "群里出现过"),
+      el("ul", { class: "kb-sightings" },
+        item.sightings.map((seen) =>
+          el("li", {}, `${formatUnix(seen.sentAt)} · ${seen.groupName || seen.groupId} · ${seen.speaker}`)))),
+  knowledgeAskList(item),
+  knowledgeRelated(item),
+];
 
 /* ---------- view ---------- */
 

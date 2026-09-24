@@ -1,6 +1,6 @@
 {
   "name": "qqnt-readonly-summary-toolkit",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Read-only QQNT group chat briefing: background refresh, AI summaries, local web console (Windows and Linux).",
   "private": true,
   "type": "commonjs",

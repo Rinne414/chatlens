@@ -133,15 +133,40 @@ const EXIF_TAGS = {
 const EXIF_SUB_IFD_TAG = 0x8769;
 const MAX_IFD_ENTRIES = 512;
 
-// UserComment is prefixed with an 8-byte character code. NovelAI and several
-// exporters write UTF-16 here, following the TIFF byte order rather than the
-// spec's big-endian wording, so honour the container's endianness.
+const asciiShare = (text) => {
+  if (text.length === 0) {
+    return 0;
+  }
+  let ascii = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) < 0x80) {
+      ascii += 1;
+    }
+  }
+  return ascii / text.length;
+};
+
+// Of two readings of the same UTF-16 bytes, the one that is mostly ASCII-range
+// is right: every parameters string and graph is. Ties keep `preferred`.
+const likelierUtf16 = (preferred, other) => (asciiShare(other) > asciiShare(preferred) ? other : preferred);
+
+// Re-reads text that was decoded from UTF-16 with the wrong byte order
+// ("笀∀爀攀" for '{"re'); returns it unchanged when it already reads right.
+const repairUtf16ByteOrder = (text) =>
+  likelierUtf16(text, Buffer.from(text, "utf16le").swap16().toString("utf16le"));
+
+// UserComment is prefixed with an 8-byte character code. NovelAI and most
+// exporters write UTF-16 in the TIFF byte order (not the spec's big-endian),
+// but some (Civitai) always write big-endian, so both orders are tried.
 const decodeUserComment = (buffer, littleEndian) => {
   const code = buffer.subarray(0, 8).toString(LATIN1).replace(/\0+$/u, "");
   const payload = buffer.subarray(8);
   if (code === "UNICODE") {
-    const swapped = littleEndian ? payload : payload.swap16();
-    return swapped.toString("utf16le").replace(/\0+$/u, "");
+    const even = Buffer.from(payload.subarray(0, payload.length - (payload.length % 2)));
+    const asLittle = even.toString("utf16le");
+    const asBig = Buffer.from(even).swap16().toString("utf16le");
+    const text = littleEndian ? likelierUtf16(asLittle, asBig) : likelierUtf16(asBig, asLittle);
+    return text.replace(/\0+$/u, "");
   }
   return payload.toString("utf8").replace(/\0+$/u, "");
 };
@@ -277,7 +302,9 @@ const readImageTextChunks = (filePath) => {
 
 module.exports = {
   readImageTextChunks,
+  repairUtf16ByteOrder,
   // exported for tests
   decodePngTextChunk,
+  decodeUserComment,
   parseExif,
 };

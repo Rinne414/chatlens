@@ -1,7 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { clearLlmError, clearLlmUnused, writeLlmError, writeLlmUnused } = require("./llm_status");
-const { createClient, summarizeMessages } = require("./llm_summarizer");
+const { createClient, summarizeMessages, setUsageRecorder } = require("./llm_summarizer");
+const { createStoreRecorder } = require("./llm_usage");
 const { readSecretSync } = require("./secrets");
 
 // CLI used by the manual summary pipeline: summarizes one analysis dir and
@@ -42,6 +43,7 @@ const resolveApiKey = (apiKeyEnv) => {
 
 const main = async () => {
   const args = parseArgs(process.argv);
+  setUsageRecorder(createStoreRecorder(path.resolve(__dirname, "..")));
   const analysisDir = path.dirname(args.outputJson);
   try {
     const analysis = readJson(args.analysisJson);

@@ -42,6 +42,10 @@ const el = (tag, props = {}, ...children) => {
   return node;
 };
 
+// Links written by the LLM (from chat text) become hrefs only when they are
+// plain http(s) URLs; anything else (javascript:, data:) is shown as text.
+const safeHref = (value) => (typeof value === "string" && /^https?:\/\//iu.test(value.trim()) ? value.trim() : null);
+
 // replaceChildren renders bare null/false as the strings "null"/"false"; always go through this.
 const setChildren = (node, ...children) => {
   node.replaceChildren(...children.flat(Infinity).filter((child) => child !== null && child !== undefined && child !== false));
@@ -207,13 +211,26 @@ const app = {
   },
 };
 
-const VIEW_TITLES = { brief: "简报", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
-const NAV_ICONS = { brief: "📰", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
+const VIEW_TITLES = { brief: "简报", review: "回顾", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
+const NAV_ICONS = { brief: "📰", review: "📅", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
 const KIND_ICONS = { image: "📷", video: "🎬", sticker: "😃", face: "😃", emoji: "😃", audio: "🎵", file: "📎" };
 const KIND_LABELS = { image: "图片", video: "视频", sticker: "表情", face: "表情", emoji: "表情", audio: "语音", file: "文件" };
 
+const ZOOM_CHOICES = new Set(["auto", "1", "1.15", "1.3", "1.5", "1.75", "2"]);
+
+const readZoomChoice = () => {
+  try {
+    const saved = localStorage.getItem("cc-zoom");
+    return ZOOM_CHOICES.has(saved) ? saved : "auto";
+  } catch {
+    return "auto";
+  }
+};
+
 const settings = {
   theme: localStorage.getItem("cc-theme") ?? "light",
+  // "auto" follows the viewport width (see app.css); a number overrides it.
+  zoom: readZoomChoice(),
   // Always on. Kept as a field because it also gates real avatar images, not
   // just nav emoji; the toggle was removed since nobody wants them off.
   icons: true,
@@ -229,6 +246,28 @@ const applySettings = () => {
   if (themeButton !== null) {
     themeButton.textContent = settings.theme === "dark" ? "☀️ 日间模式" : "🌙 夜间模式";
   }
+};
+
+const applyZoom = () => {
+  if (settings.zoom === "auto") {
+    document.documentElement.style.removeProperty("--zoom");
+  } else {
+    document.documentElement.style.setProperty("--zoom", settings.zoom);
+  }
+  const select = $("#zoom-select");
+  if (select !== null) {
+    select.value = settings.zoom;
+  }
+};
+
+const changeZoom = (value) => {
+  settings.zoom = ZOOM_CHOICES.has(value) ? value : "auto";
+  try {
+    localStorage.setItem("cc-zoom", settings.zoom);
+  } catch {
+    // Private windows may refuse storage; the choice still applies now.
+  }
+  applyZoom();
 };
 
 const toggleTheme = () => {
@@ -2233,6 +2272,10 @@ const loadState = async () => {
 const renderCurrentView = () => {
   if (app.view === "brief") {
     renderBriefView();
+  } else if (app.view === "review") {
+    renderReviewView();
+  } else if (app.view === "backup") {
+    renderBackupView();
   } else if (app.view === "run") {
     renderRunView();
   } else if (app.view === "history") {
@@ -2256,6 +2299,14 @@ const renderCurrentView = () => {
 const openView = (name) => {
   if (name === "brief") {
     openBriefView();
+    return;
+  }
+  if (name === "review") {
+    openReviewView();
+    return;
+  }
+  if (name === "backup") {
+    openBackupView();
     return;
   }
   if (name === "messages") {
@@ -2283,6 +2334,8 @@ const boot = async () => {
     button.addEventListener("click", () => openView(button.dataset.view));
   }
   $("#theme-toggle")?.addEventListener("click", toggleTheme);
+  $("#zoom-select")?.addEventListener("change", (event) => changeZoom(event.target.value));
+  applyZoom();
   window.addEventListener("pointerup", () => {
     app.timeline.dragging = false;
   });

@@ -169,13 +169,13 @@ const getGroupBrief = (db, groupId) => {
   }
 };
 
-const saveGroupBrief = (db, groupId, { windowStart, chunkKey, summary }) => {
+const saveGroupBrief = (db, groupId, { windowStart, chunkKey, summary, updatedAt = Math.floor(Date.now() / 1000) }) => {
   db.prepare(`
     INSERT INTO group_briefs (group_id, window_start, chunk_key, summary_json, updated_at)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(group_id) DO UPDATE SET window_start = excluded.window_start, chunk_key = excluded.chunk_key,
       summary_json = excluded.summary_json, updated_at = excluded.updated_at
-  `).run(String(groupId), windowStart, chunkKey, JSON.stringify(summary), Math.floor(Date.now() / 1000));
+  `).run(String(groupId), windowStart, chunkKey, JSON.stringify(summary), updatedAt);
 };
 
 const deleteGroupBrief = (db, groupId) => {

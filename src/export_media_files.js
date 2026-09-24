@@ -509,4 +509,6 @@ module.exports = {
   exportMediaFiles,
   fetchRemoteGroupImage,
   getRemoteGroupImageUrl,
+  buildMediaIndex,
+  findSourcePath,
 };

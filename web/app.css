@@ -20,6 +20,17 @@
   --dur: 160ms;
 }
 
+/* UI scale. Large monitors (a 4K screen at 120-150% is ~2500-3200 CSS px
+   wide) made the 14px interface tiny, so the whole page zooms with the
+   viewport width; 设置 → 界面大小 can override it (inline --zoom on <html>).
+   CSS zoom also scales vh units, hence every "100vh" below is divided by it. */
+:root { --zoom: 1; }
+@media (min-width: 1800px) { :root { --zoom: 1.15; } }
+@media (min-width: 2200px) { :root { --zoom: 1.3; } }
+@media (min-width: 2800px) { :root { --zoom: 1.5; } }
+@media (min-width: 3400px) { :root { --zoom: 1.7; } }
+html { zoom: var(--zoom); }
+
 * { box-sizing: border-box; }
 
 body {
@@ -31,7 +42,7 @@ body {
   line-height: 1.55;
 }
 
-.shell { display: grid; grid-template-columns: 208px minmax(0, 1fr); min-height: 100vh; }
+.shell { display: grid; grid-template-columns: 208px minmax(0, 1fr); min-height: calc(100vh / var(--zoom)); }
 
 /* ---- rail ---- */
 .rail {
@@ -42,7 +53,7 @@ body {
   padding: 20px 14px;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: calc(100vh / var(--zoom));
 }
 .brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 18px; }
 .brand-mark {
@@ -417,7 +428,7 @@ details.topic summary:hover { color: var(--accent); }
 .search-box { width: 100%; margin-bottom: 10px; }
 
 /* ---- messages ---- */
-.msg-list { height: calc(100vh - 250px); min-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px; background: var(--panel); }
+.msg-list { height: calc(100vh / var(--zoom) - 250px); min-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px; background: var(--panel); }
 .msg-row { display: flex; gap: 10px; padding: 5px 2px; font-size: 13px; line-height: 1.5; border-radius: 6px; align-items: baseline; }
 .msg-row:hover { background: var(--bg); }
 .msg-row time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
@@ -564,7 +575,9 @@ details.topic summary:hover { color: var(--accent); }
 }
 .av-sm { width: 30px; height: 30px; border-radius: 9px; font-size: 13px; }
 .av-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.settings-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.settings-row { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.zoom-control { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.zoom-control select { height: 30px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; padding: 0 4px; }
 .system-readiness { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-bottom: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
 .readiness-item { min-width: 0; padding: 10px 12px; border-top: 3px solid var(--warn); background: var(--panel); }
 .readiness-item.ok { border-top-color: var(--ok); }
@@ -728,7 +741,7 @@ details.topic summary:hover { color: var(--accent); }
 .chat-head { position: relative; z-index: 3; }
 .chat-wrap { position: relative; }
 .chat-list {
-  height: calc(100vh - 250px);
+  height: calc(100vh / var(--zoom) - 250px);
   min-height: 340px;
   overflow: auto;
   border: 1px solid var(--line);
@@ -820,7 +833,7 @@ details.topic summary:hover { color: var(--accent); }
   z-index: 60;
   padding: 24px;
 }
-.modal { width: min(640px, 92vw); max-height: 80vh; overflow: auto; margin: 0; box-shadow: 0 18px 60px rgba(0, 0, 0, .3); }
+.modal { width: min(640px, calc(92vw / var(--zoom))); max-height: calc(80vh / var(--zoom)); overflow: auto; margin: 0; box-shadow: 0 18px 60px rgba(0, 0, 0, .3); }
 
 /* ---- media view modes ---- */
 .media-grid.pure { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
@@ -963,7 +976,7 @@ details.topic summary:hover { color: var(--accent); }
   .compare-table > div { grid-template-columns: minmax(90px, 1fr) 72px 72px; }
   .gallery-viewer.with-story { overflow-y: auto; }
   .gallery-viewer.with-story .gallery-viewer-body { display: block; overflow-y: visible; }
-  .gallery-viewer.with-story .gallery-viewer-main { height: 62vh; min-height: 400px; }
+  .gallery-viewer.with-story .gallery-viewer-main { height: calc(62vh / var(--zoom)); min-height: 400px; }
   .gallery-story { overflow: visible; border-top: 1px solid #2b313a; border-left: 0; }
   .gallery-story-head { position: static; }
 }
@@ -1124,10 +1137,10 @@ html[data-theme="dark"] .brand-mark { color: #fff; }
 .kb-answer-file strong { font-size: 11.5px; overflow-wrap: anywhere; }
 
 .kb-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgba(12, 15, 20, .72); }
-.kb-overlay-panel { display: grid; gap: 12px; width: min(760px, 100%); max-height: 90vh; overflow-y: auto; padding: 18px; border-radius: 12px; background: var(--panel); }
+.kb-overlay-panel { display: grid; gap: 12px; width: min(760px, 100%); max-height: calc(90vh / var(--zoom)); overflow-y: auto; padding: 18px; border-radius: 12px; background: var(--panel); }
 .kb-overlay-head { display: flex; align-items: center; justify-content: space-between; }
-.kb-overlay-image { width: 100%; max-height: 60vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
-.kb-overlay .kb-prompt-text { max-height: 36vh; overflow-y: auto; }
+.kb-overlay-image { width: 100%; max-height: calc(60vh / var(--zoom)); object-fit: contain; border-radius: 8px; background: var(--bg); }
+.kb-overlay .kb-prompt-text { max-height: calc(36vh / var(--zoom)); overflow-y: auto; }
 .kb-detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
 .kb-detail-row { display: flex; gap: 8px; font-size: 12px; }
 .kb-detail-label { color: var(--muted); flex: 0 0 74px; }

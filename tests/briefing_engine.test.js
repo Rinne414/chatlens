@@ -68,7 +68,7 @@ const startMockLlm = () =>
         const isReduce = body.messages[0].content.includes("合并器");
         calls[isReduce ? "reduce" : "map"] += 1;
         const content = isReduce
-          ? { summary: "合并后的摘要", topics: [], newThings: [{ kind: "tool", name: "合并工具", detail: "d", link: null }], qa: [], timeline: [], uncategorized: [], links: [] }
+          ? { summary: "合并后的摘要", topics: [{ title: "合并话题", summary: "两段合在一起", importance: "high", messageCountEstimate: 420 }] }
           : mapReply(body);
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(content) } }] }));
@@ -116,7 +116,7 @@ test("background briefing: chunk once, map once, reduce per group, then serve a 
     // 2002: 8 messages two hours old -> one tail chunk.
     assert.equal(engine.closeChunks(db, groups, { now: NOW }), 3);
     const map = await engine.mapPendingChunks(db, client, { now: NOW });
-    assert.deepEqual(map, { done: 3, failed: 0, skippedForBudget: 0 });
+    assert.deepEqual(map, { done: 3, failed: 0, skippedForBudget: 0, blockedBy: null });
     const reduce = await engine.reduceBriefs(db, client, groups, { now: NOW });
     assert.equal(reduce.updated, 2);
     // Only the group with two chunks needed a reduce call.
@@ -142,7 +142,10 @@ test("background briefing: chunk once, map once, reduce per group, then serve a 
     assert.equal(briefing.groups[1].summary, "闲聊群 聊了 8 条");
     assert.deepEqual(briefing.mentions.map((item) => [item.kind, item.speaker]), [["at", "Alice"]]);
     assert.deepEqual(briefing.identity, { known: true, names: ["我自己"] });
-    assert.ok(briefing.highlights.newThings.some((item) => item.name === "合并工具" && item.groupName === "画图群"));
+    // The merge only writes the prose; new things and Q&A come straight from
+    // the chunk summaries (merged locally, deduped across the two chunks).
+    assert.deepEqual(briefing.highlights.newThings.filter((item) => item.groupName === "画图群").map((item) => item.name), ["画图群-模型"]);
+    assert.equal(briefing.highlights.hotTopics.find((topic) => topic.groupName === "画图群").title, "合并话题");
     assert.ok(briefing.highlights.qa.some((item) => item.groupName === "闲聊群" && item.resolved));
 
     // "看完了": the next briefing starts empty and old chunks no longer count.
@@ -171,4 +174,86 @@ test("daily LLM budget stops map calls instead of overspending", async () => {
     db.close();
     mock.server.close();
   }
+});
+
+test("pause blocks every LLM call until resumed", async () => {
+  const mock = await startMockLlm();
+  const db = seedStore();
+  try {
+    const client = createClient({ baseUrl: mock.url, apiKey: "test", model: "mock" });
+    engine.closeChunks(db, ["1001", "2002"], { now: NOW });
+    assert.deepEqual(engine.setPause(db, { now: NOW, minutes: 60 }), { paused: true, until: NOW + 3600 });
+    const paused = await engine.mapPendingChunks(db, client, { now: NOW });
+    assert.equal(paused.done, 0);
+    assert.equal(paused.blockedBy, "paused");
+    assert.equal(mock.calls.map, 0);
+    // An hour later the pause has expired on its own.
+    const later = await engine.mapPendingChunks(db, client, { now: NOW + 3601 });
+    assert.equal(later.done, 3);
+    assert.deepEqual(engine.setPause(db, { now: NOW, minutes: -1 }), { paused: true, until: null });
+    assert.deepEqual(engine.setPause(db, { now: NOW, minutes: 0 }), { paused: false, until: null });
+  } finally {
+    db.close();
+    mock.server.close();
+  }
+});
+
+test("a money budget check stops spending", async () => {
+  const mock = await startMockLlm();
+  const db = seedStore();
+  try {
+    const client = createClient({ baseUrl: mock.url, apiKey: "test", model: "mock" });
+    engine.closeChunks(db, ["1001", "2002"], { now: NOW });
+    const map = await engine.mapPendingChunks(db, client, { now: NOW, spendCheck: () => "money-budget" });
+    assert.equal(map.done, 0);
+    assert.equal(map.blockedBy, "money-budget");
+  } finally {
+    db.close();
+    mock.server.close();
+  }
+});
+
+test("a group's brief is re-merged at most once per interval unless forced", async () => {
+  const mock = await startMockLlm();
+  const db = seedStore();
+  try {
+    const client = createClient({ baseUrl: mock.url, apiKey: "test", model: "mock" });
+    engine.closeChunks(db, ["1001"], { now: NOW });
+    await engine.mapPendingChunks(db, client, { now: NOW });
+    await engine.reduceBriefs(db, client, ["1001"], { now: NOW });
+    const reducesBefore = mock.calls.reduce;
+
+    // New messages -> a new chunk ten minutes later: merge is deferred...
+    messageStore.ingestExport(db, {
+      groupIds: ["1001"], groupNames: { 1001: "画图群" }, startUnix: NOW, endUnix: NOW + 7200, coveredFromUnix: NOW,
+      messages: Array.from({ length: 6 }, (_, index) => ({
+        groupId: "1001", rowId: String(9000 + index), msgSeq: String(9000 + index), sentAt: NOW + index,
+        senderUin: "222", senderName: "Alice", text: `新消息 ${index}`, isSelf: false, atUins: [], atAll: false, replyTo: null,
+      })),
+      mediaMessages: [],
+    }, "run2");
+    engine.closeChunks(db, ["1001"], { now: NOW + 600, force: true });
+    await engine.mapPendingChunks(db, client, { now: NOW + 600 });
+    const deferred = await engine.reduceBriefs(db, client, ["1001"], { now: NOW + 600 });
+    assert.equal(deferred.deferred, 1);
+    assert.equal(mock.calls.reduce, reducesBefore);
+
+    // ...but "现在就总结" merges right away.
+    const forced = await engine.reduceBriefs(db, client, ["1001"], { now: NOW + 600, force: true });
+    assert.equal(forced.updated, 1);
+    assert.equal(mock.calls.reduce, reducesBefore + 1);
+  } finally {
+    db.close();
+    mock.server.close();
+  }
+});
+
+test("a longer tail wait lets a quiet group's few messages keep accumulating", () => {
+  // 20 messages, the oldest 2 hours old: closed at the default 1-hour wait,
+  // kept open when the user chose to wait 3 hours.
+  const quiet = pendingOf(20, { start: NOW - 2 * HOUR, step: 60 });
+  assert.deepEqual(engine.planChunks(quiet, { now: NOW }), [{ from: 0, to: 20 }]);
+  assert.deepEqual(engine.planChunks(quiet, { now: NOW, tailMaxAgeSeconds: 3 * HOUR }), []);
+  // The 6-hour safety net still closes it eventually.
+  assert.deepEqual(engine.planChunks(pendingOf(20, { start: NOW - 7 * HOUR, step: 60 }), { now: NOW, tailMaxAgeSeconds: 3 * HOUR }), [{ from: 0, to: 20 }]);
 });

@@ -15,7 +15,23 @@ const secrets = require("../secrets");
 const { notify } = require("../notify");
 const { formatHkt } = require("../unviewed_range");
 
-const DEFAULTS = { enabled: true, intervalMinutes: 15, autoSummarize: true, notifyMentions: true, notifyDaily: true };
+const DEFAULTS = {
+  enabled: true,
+  intervalMinutes: 15,
+  autoSummarize: true,
+  notifyMentions: true,
+  notifyDaily: true,
+  // Re-merge a group's brief at most this often (see briefing_engine). Merges
+  // were ~80% of measured AI cost at 60 minutes.
+  reduceIntervalMinutes: 120,
+  // How long a quiet group's few new messages wait before they are summarized
+  // on their own. Longer = fewer, fuller (cheaper) chunks, later summaries.
+  tailWaitMinutes: 60,
+  // null = no money cap (the daily call cap still applies).
+  dailyBudget: null,
+};
+const MERGE_INTERVALS = new Set([0, 15, 30, 60, 120, 240]);
+const TAIL_WAITS = new Set([60, 180, 360]);
 const FIRST_TICK_DELAY_MS = 15 * 1000;
 const BUSY_RETRY_MS = 2 * 60 * 1000;
 const MAX_LOG_LINES = 60;
@@ -74,6 +90,30 @@ const saveSettings = (patch) => {
   if (typeof patch.autoSummarize === "boolean") next.autoSummarize = patch.autoSummarize;
   if (typeof patch.notifyMentions === "boolean") next.notifyMentions = patch.notifyMentions;
   if (typeof patch.notifyDaily === "boolean") next.notifyDaily = patch.notifyDaily;
+  if (patch.reduceIntervalMinutes !== undefined) {
+    const minutes = Number(patch.reduceIntervalMinutes);
+    if (!MERGE_INTERVALS.has(minutes)) {
+      throw new Error("合并间隔无效。");
+    }
+    next.reduceIntervalMinutes = minutes;
+  }
+  if (patch.tailWaitMinutes !== undefined) {
+    const minutes = Number(patch.tailWaitMinutes);
+    if (!TAIL_WAITS.has(minutes)) {
+      throw new Error("零散消息的等待时间无效。");
+    }
+    next.tailWaitMinutes = minutes;
+  }
+  if (patch.dailyBudget !== undefined) {
+    const amount = Number(patch.dailyBudget?.amount);
+    if (patch.dailyBudget === null || amount === 0) {
+      next.dailyBudget = null;
+    } else if (Number.isFinite(amount) && amount > 0 && amount <= 10000 && ["CNY", "USD"].includes(patch.dailyBudget?.currency)) {
+      next.dailyBudget = { amount, currency: patch.dailyBudget.currency };
+    } else {
+      throw new Error("每日预算应为 0-10000 之间的金额，币种 CNY 或 USD。");
+    }
+  }
   if (patch.intervalMinutes !== undefined) {
     const minutes = Number(patch.intervalMinutes);
     if (!Number.isInteger(minutes) || minutes < 5 || minutes > 240) {
