@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const Database = require("better-sqlite3-multiple-ciphers");
 const { parseMessageMeta } = require("./message_meta");
+const { extractPictures, isSticker } = require("./picture_elements");
 
 const sqlQuote = (value) => `'${value.replaceAll("'", "''")}'`;
 
@@ -562,11 +563,15 @@ const exportMessages = (args, key) => {
           }
 
           const mediaRefs = extractMediaRefs(row.body_hex);
-          if (mediaRefs.length > 0) {
+          // Structured picture facts (md5, size, where Tencent serves it).
+          // Stickers are left out; a quoted picture is never included.
+          const pictures = extractPictures(row.body_hex).filter((picture) => !isSticker(picture));
+          if (mediaRefs.length > 0 || pictures.length > 0) {
             mediaMessages.push({
               ...messageBase,
               bodySnippet: getBodySnippet(row.body_hex),
               mediaRefs,
+              pictures,
             });
           }
         }
@@ -634,7 +639,9 @@ const exportMessages = (args, key) => {
           quotedImageHashes: [...new Set(quotedImageHashes)],
         });
       }
-      if (keptRefs.length > 0) {
+      // A repost of an earlier picture loses its text ref above but is still
+      // this person's own upload, which `pictures` (structural) knows.
+      if (keptRefs.length > 0 || media.pictures.length > 0) {
         dedupedMediaMessages.push({ ...media, mediaRefs: keptRefs });
       }
     }

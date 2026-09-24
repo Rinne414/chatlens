@@ -22,7 +22,7 @@ const openSettingsView = async () => {
     return;
   }
   renderSettingsView();
-  await Promise.all([refreshBackgroundStatus(), loadAiUsage()]);
+  await Promise.all([refreshBackgroundStatus(), loadAiUsage(), loadPictureStatus()]);
   renderSettingsView();
 };
 
@@ -374,9 +374,9 @@ const renderSettingsView = () => {
     el("ul", { style: "margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9" },
       el("li", {}, "只读：工具复制数据库文件后离线解析，从不写 QQ 的任何文件，也不使用 QQ 登录协议。"),
       el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。"),
-      el("li", {}, "外部流量：头像，以及本机缺原图时补下载群图片（按 md5 校验），走 QQ 公开 CDN；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；「检查更新」访问 GitHub。")));
+      el("li", {}, "外部流量：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图按 md5 校验，图片钥匙只留在内存里）；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；「检查更新」访问 GitHub。")));
 
-  setChildren($("#view-settings"), readinessCard, renderMoreLinks(), pathsCard, keysCard, llmCard, renderAiUsageCard(), backgroundCard, updateCard, aboutCard);
+  setChildren($("#view-settings"), readinessCard, renderMoreLinks(), pathsCard, keysCard, llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, updateCard, aboutCard);
 };
 
 /* --- check & update card --- */

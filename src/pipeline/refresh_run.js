@@ -14,7 +14,8 @@ const path = require("node:path");
 const { parseArgs } = require("node:util");
 const { loadConfig } = require("../server/toolkit_state");
 const messageStore = require("../message_store");
-const { ensureBriefingSchema } = require("../briefing_store");
+const { ensureBriefingSchema, getState, setState } = require("../briefing_store");
+const { REMOTE_LIFETIME_SECONDS, ingestPictures } = require("../picture_store");
 const engine = require("../briefing_engine");
 const { createClient, setUsageRecorder } = require("../llm_summarizer");
 const { ensureUsageSchema, recordUsage, todaySpend } = require("../llm_usage");
@@ -56,6 +57,42 @@ const groupStartsFor = (groupIds, now) => {
       const start = Number.isFinite(end) && end > 0 ? end - OVERLAP_SECONDS : now - FIRST_SCAN_SECONDS;
       return [groupId, Math.max(start, now - MAX_LOOKBACK_SECONDS)];
     }));
+  } finally {
+    db.close();
+  }
+};
+
+// Pictures of the last 31 days (what Tencent still serves) for groups whose
+// history was stored before the picture table existed, or that were added to
+// the watchlist since. Done once per group.
+const PICTURE_BACKFILL_KEY = "pictures_backfill";
+
+const pictureBackfillGroups = (groupIds) => {
+  const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
+  try {
+    const done = new Set(getState(db, PICTURE_BACKFILL_KEY, null)?.groups ?? []);
+    return groupIds.filter((groupId) => !done.has(groupId));
+  } finally {
+    db.close();
+  }
+};
+
+const ingestPictureBackfill = (filePath, groupIds) => {
+  const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const failed = new Set(data.failedGroups.map((item) => item.groupId));
+  const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
+  try {
+    let inserted = 0;
+    db.transaction(() => {
+      for (const item of data.items) {
+        inserted += ingestPictures(db, item.pictures.map((picture, seq) => ({
+          ...picture, groupId: item.groupId, rowId: `m${item.rowId}`, seq, sentAt: item.sentAt,
+        })));
+      }
+      const done = getState(db, PICTURE_BACKFILL_KEY, null)?.groups ?? [];
+      setState(db, PICTURE_BACKFILL_KEY, { groups: [...new Set([...done, ...groupIds.filter((groupId) => !failed.has(groupId))])] });
+    })();
+    return inserted;
   } finally {
     db.close();
   }
@@ -141,6 +178,8 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   const startsPath = path.join(workDir, "group-starts.json");
   const exportPath = path.join(workDir, "export.json");
   const analysisDir = path.join(workDir, "analysis");
+  const picturesPath = path.join(workDir, "pictures.json");
+  const backfillGroups = pictureBackfillGroups(groupIds);
   common.writeJson(startsPath, starts);
   const env = { NTQQ_DB_KEY: readSecretSync("ntqqKey"), QQ_GROUP_STARTS_JSON: startsPath };
   const scanLimit = Number(config.defaultScanLimit) > 0 ? Number(config.defaultScanLimit) : 1000000;
@@ -168,6 +207,11 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
         { env },
         "导出消息失败",
       ));
+      if (backfillGroups.length > 0) {
+        await timed("pictureBackfill", () => common.runNodeScript("export_pictures.js", [
+          mirror.messageDb, backfillGroups.join(","), now - REMOTE_LIFETIME_SECONDS, now, picturesPath,
+        ], { env }));
+      }
       await timed("unreadHint", () => common.runNodeScript("probe_qq_unread.js", [
         mirror.messageDb,
         path.join(common.storeDir, "qq-unread-hint.json"),
@@ -184,6 +228,7 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
 
   const ingest = await timed("ingest", () => common.runNodeScript("ingest_store.js", [exportPath, common.storeDbPath, `bg-${common.localStamp()}`], { env }));
   const inserted = Number(/inserted=(\d+)/u.exec(ingest.stdout)?.[1] ?? 0);
+  const picturesBackfilled = fs.existsSync(picturesPath) ? ingestPictureBackfill(picturesPath, backfillGroups) : 0;
 
   const ntDataDir = String(config.ntDataDir ?? "").trim();
   if (ntDataDir.length > 0 && fs.existsSync(ntDataDir)) {
@@ -203,6 +248,7 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   common.result("refreshResult", JSON.stringify({
     groups: groupIds.length,
     inserted,
+    picturesBackfilled,
     mirrorMs,
     elapsedMs: Date.now() - startedAt,
     timings,

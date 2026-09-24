@@ -15,6 +15,8 @@ const knowledgeAigc = require("./knowledge_aigc");
 const backupOps = require("./backup_ops");
 const update = require("./update_ops");
 const knowledge = require("./knowledge_ops");
+const pictureRoutes = require("./picture_routes");
+const picturePass = require("./picture_pass");
 const knowledgeExport = require("../knowledge_export");
 const platform = require("../platform");
 const { parseAutostart, withAutostart } = require("../autostart");
@@ -761,6 +763,10 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
+    if (await pictureRoutes.handlePictureApi(request, response, url, { sendJson, sendError, readBody })) {
+      return;
+    }
+
     sendError(response, 404, "Unknown API route");
   } catch (error) {
     sendError(response, 400, error.message);
@@ -823,7 +829,7 @@ const handleRequest = (request, response) => {
       return;
     }
 
-    if ((url.pathname.startsWith("/runs/") || url.pathname === "/knowledge-file") && isCrossSite(request)) {
+    if ((url.pathname.startsWith("/runs/") || url.pathname === "/knowledge-file" || url.pathname === "/picture") && isCrossSite(request)) {
       sendError(response, 403, "Forbidden");
       return;
     }
@@ -840,6 +846,16 @@ const handleRequest = (request, response) => {
     if (url.pathname === "/knowledge-file") {
       serveKnowledgeImage(response, url.searchParams.get("hash"), {
         thumb: url.searchParams.get("thumb") === "1",
+      });
+      return;
+    }
+
+    if (url.pathname === "/picture") {
+      pictureRoutes.servePicture(response, url).catch((error) => {
+        console.error(`picture failed: ${error.message}`);
+        if (!response.writableEnded) {
+          sendError(response, 500, "Internal error");
+        }
       });
       return;
     }
@@ -861,6 +877,7 @@ let httpServer = null;
 
 function shutdown() {
   background.stop();
+  picturePass.stop();
   releaseServerLock(state.toolRoot);
   // Let the HTTP response flush before exiting.
   setTimeout(() => process.exit(0), 300).unref();
@@ -881,7 +898,14 @@ const listen = (port, attempt) => {
     httpServer = server;
     const url = `http://127.0.0.1:${port}/`;
     console.log(`QQ 摘要控制台已启动: ${url}`);
-    background.start({ url, afterTick: briefing.afterTick });
+    background.start({
+      url,
+      afterTick: async (tick) => {
+        await briefing.afterTick(tick);
+        // Pictures after the refresh: its ingest is what adds new ones.
+        picturePass.runPass({ reason: "tick" }).catch((error) => console.error(`picture pass failed: ${error.message}`));
+      },
+    });
     desktop.removeLegacyScheduledTask()
       .then((removed) => {
         if (removed) {

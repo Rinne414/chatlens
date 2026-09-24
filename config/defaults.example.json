@@ -22,5 +22,10 @@
     "apiKeyEnv": "DEEPSEEK_API_KEY",
     "maxMessages": 400,
     "maxChars": 50000
+  },
+  "pictures": {
+    "enabled": true,
+    "budgetGB": 10,
+    "keepAllGroups": []
   }
 }

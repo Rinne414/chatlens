@@ -64,6 +64,11 @@ const openBackupView = async () => {
     backupState.error = error.message;
   }
   renderBackupView();
+  loadExpiringPictures().then(() => {
+    if (app.view === "backup") {
+      renderBackupView();
+    }
+  });
   pollBackupJob();
 };
 
@@ -336,6 +341,7 @@ const renderBackupView = () => {
       el("h2", {}, "清理 QQ 之前，先把有用的存到电脑"),
       el("p", {}, "选好群和时间，工具会从电脑版 QQ 的本地缓存里把图片、视频、文件和聊天记录按「群 / 年-月」存到你的文件夹，AI 图还会带上咒语和参数；再次运行只补新的。"),
       el("p", { class: "backup-tip" }, el("strong", {}, "先知道一件事："), "电脑 QQ 只保存你在电脑上看过的图：划过去只存一张预览图，点开看大图才存原图，QQ 没有「全部自动下载」的开关。没看过的群图片，保存时会「从 QQ 图片服务器补下载」，按 md5 取回原图（太旧的图服务器上可能已经没有了；不想联网可以在下面取消）。工具只读取，从不删除或修改 QQ 里的任何东西。")),
+    renderExpiringPictures(),
     backupState.setup.ntDataConfigured ? null : el("div", { class: "notice risk" }, "还没有设置 QQ 的 nt_data 目录，请先到「设置」自动探测路径。"),
     backupState.error ? el("div", { class: "notice risk" }, backupState.error) : null,
     backupForm(),

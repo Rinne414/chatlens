@@ -267,6 +267,10 @@ const decorateImage = (db, row, capabilities, ranges = [], { full = false } = {}
     // The cache path is never sent to the browser; images are fetched by hash.
     hasFile: (!fileMissing && row.file_path !== "") || hasObject,
     fileMissing,
+    // Full detail only: list cards do not offer the workflow download.
+    hasWorkflow: full && capabilities.imageChunks
+      ? db.prepare("SELECT 1 FROM image_chunks WHERE hash = ?").get(row.hash) !== undefined
+      : false,
     attributionReason: attributionReason(row, ranges, sightings.length > 0),
     coverageGroupCount: coveringGroupCount(ranges, row.file_mtime),
     params: parseParams(row.params_json),
@@ -287,6 +291,7 @@ const probeCapabilities = (db) => {
     confidence: promptRequests && hasColumn(db, "prompt_requests", "confidence"),
     answerKind: promptRequests && hasColumn(db, "prompt_requests", "answer_kind"),
     answerMedia: promptRequests && hasColumn(db, "prompt_requests", "answer_media_json"),
+    imageChunks: hasTable(db, "image_chunks"),
   };
 };
 

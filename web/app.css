@@ -1074,6 +1074,64 @@ html[data-theme="dark"] .brand-mark { color: #fff; }
 
 /* multi-image bubbles: stack every image of one message */
 .bubble.has-img .bubble-img + .bubble-img { margin-top: 4px; }
+.bubble-img.missing {
+  display: grid;
+  place-items: center;
+  width: 160px;
+  min-height: 96px;
+  padding: 12px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.picture-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+  gap: 16px;
+  padding: 24px;
+  background: rgba(8, 10, 14, .72);
+}
+.picture-viewer > img,
+.picture-viewer-missing {
+  max-width: 100%;
+  max-height: calc((100vh - 48px) / var(--zoom));
+  object-fit: contain;
+  justify-self: center;
+  align-self: center;
+  border-radius: 8px;
+}
+.picture-viewer-missing {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  padding: 24px;
+  color: #fff;
+}
+.picture-viewer-side {
+  align-self: center;
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  max-height: calc((100vh - 48px) / var(--zoom));
+  overflow: auto;
+}
+.picture-viewer-side .card-sub { word-break: break-all; }
+.picture-viewer-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.picture-keeps { display: flex; flex-wrap: wrap; gap: 8px; }
+.picture-keep { display: flex; gap: 6px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+@media (max-width: 800px) {
+  .picture-viewer { grid-template-columns: 1fr; align-content: start; overflow: auto; }
+  .picture-viewer > img { max-height: calc(60vh / var(--zoom)); }
+  .picture-viewer-side { align-self: stretch; }
+}
 
 /* ---------- knowledge base ---------- */
 .kb-tabs { display: flex; gap: 8px; margin-bottom: 14px; }

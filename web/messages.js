@@ -453,16 +453,37 @@ const mediaFilesFor = (item, counters) => {
   return picked === undefined ? [] : [picked];
 };
 
+const remotePicturesFor = (item) =>
+  (Array.isArray(item.pictures) ? item.pictures : [])
+    .filter((picture) => PICTURE_MD5.test(String(picture?.md5 ?? "")));
+
+const remotePictureNode = (picture) =>
+  el("img", {
+    class: "bubble-img",
+    src: pictureUrl(picture.md5, "thumb"),
+    loading: "lazy",
+    alt: "图片",
+    onclick: (event) => {
+      event.stopPropagation();
+      openPictureViewer(picture);
+    },
+    onerror: (event) => {
+      event.currentTarget.replaceWith(el("span", { class: "bubble-img missing" }, "图片还没抓到"));
+    },
+  });
+
 const chatMessageNode = (item, index, inSelection, mediaFiles) => {
   const isUnread = app.msg.dividerAt !== null && item.sentAt > app.msg.dividerAt;
   const imageFiles = mediaFiles.filter((file) => isImageFile(file.kind));
   const showImage = imageFiles.length > 0;
+  const remotePictures = showImage ? [] : remotePicturesFor(item);
+  const showRemote = remotePictures.length > 0;
   const firstFile = mediaFiles[0];
   const classes = ["bubble"];
   if (item.isMedia === 1) {
     classes.push("media");
   }
-  if (showImage) {
+  if (showImage || showRemote) {
     classes.push("has-img");
   }
   if (inSelection) {
@@ -471,28 +492,31 @@ const chatMessageNode = (item, index, inSelection, mediaFiles) => {
   if (isUnread) {
     classes.push("unread");
   }
+  const body = showImage
+    ? imageFiles.slice(0, 9).map((file) =>
+      el("img", {
+        class: "bubble-img",
+        src: file.webPath,
+        loading: "lazy",
+        alt: "图片",
+        onclick: (event) => {
+          event.stopPropagation();
+          window.open(file.webPath, "_blank", "noopener");
+        },
+      }))
+    : showRemote
+      ? remotePictures.slice(0, 9).map(remotePictureNode)
+      : displayText(item);
   return el("div", {
     class: classes.join(" "),
     dataset: { idx: String(index), sentat: String(item.sentAt), rowid: item.rowId },
-    onclick: !showImage && firstFile !== undefined ? () => window.open(firstFile.webPath, "_blank", "noopener") : undefined,
+    onclick: !showImage && !showRemote && firstFile !== undefined ? () => window.open(firstFile.webPath, "_blank", "noopener") : undefined,
     oncontextmenu: (event) => {
       event.preventDefault();
       onSelectMessage(index);
     },
   },
-    showImage
-      ? imageFiles.slice(0, 9).map((file) =>
-          el("img", {
-            class: "bubble-img",
-            src: file.webPath,
-            loading: "lazy",
-            alt: "图片",
-            onclick: (event) => {
-              event.stopPropagation();
-              window.open(file.webPath, "_blank", "noopener");
-            },
-          }))
-      : displayText(item),
+    body,
     el("time", {}, unixToHkt(item.sentAt).slice(11, 16)));
 };
 

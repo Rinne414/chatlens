@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3-multiple-ciphers");
+const { ensurePictureSchema, ingestPictures } = require("./picture_store");
 
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS messages (
@@ -64,6 +65,7 @@ const openStore = (storePath) => {
   }
   db.prepare("CREATE INDEX IF NOT EXISTS idx_messages_self ON messages(is_self, group_id)").run();
   db.prepare("CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(sent_at)").run();
+  ensurePictureSchema(db);
   return db;
 };
 
@@ -104,7 +106,8 @@ const sanitizeSnippet = (raw) => {
 };
 
 const mediaText = (message) => {
-  const kinds = [...new Set((message.mediaRefs ?? []).map((ref) => ref.kind))].join(",");
+  const refKinds = (message.mediaRefs ?? []).map((ref) => ref.kind);
+  const kinds = [...new Set((message.pictures ?? []).length > 0 ? [...refKinds, "image"] : refKinds)].join(",");
   const fileName = (message.mediaRefs ?? []).map((ref) => ref.fileName).find((name) => typeof name === "string" && name.length > 0);
   const snippet = sanitizeSnippet(message.bodySnippet);
   const text = snippet.length >= 2 ? snippet : fileName ?? "";
@@ -168,6 +171,13 @@ const ingestExport = (db, exportData, runId) => {
 
     for (const message of exportData.mediaMessages ?? []) {
       const media = mediaText(message);
+      ingestPictures(db, (message.pictures ?? []).map((picture, seq) => ({
+        ...picture,
+        groupId: String(message.groupId),
+        rowId: `m${message.rowId}`,
+        seq,
+        sentAt: message.sentAt,
+      })));
       inserted += insertMessage.run({
         groupId: String(message.groupId),
         rowId: `m${message.rowId}`,

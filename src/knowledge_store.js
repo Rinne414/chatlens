@@ -12,6 +12,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const zlib = require("node:zlib");
 const Database = require("better-sqlite3-multiple-ciphers");
 const { normalizeOriginalReplyMedia } = require("./prompt_requests");
 
@@ -97,6 +98,15 @@ const SCHEMA_STATEMENTS = [
   )`,
   "CREATE INDEX IF NOT EXISTS idx_prompt_requests_hash ON prompt_requests(image_hash)",
   "CREATE INDEX IF NOT EXISTS idx_prompt_requests_time ON prompt_requests(group_id, ask_sent_at)",
+  // Every text chunk of a generated picture, untruncated and gzipped. The
+  // parsed columns above cap raw text at 60k characters; a ComfyUI workflow
+  // can be larger, and it is what lets the picture be re-created after the
+  // original itself is gone.
+  `CREATE TABLE IF NOT EXISTS image_chunks (
+    hash TEXT PRIMARY KEY,
+    chunks_gz BLOB NOT NULL,
+    saved_at INTEGER NOT NULL DEFAULT 0
+  )`,
   // Files that parsed to nothing are recorded so a rescan can skip them until
   // either the file or the parser changes.
   `CREATE TABLE IF NOT EXISTS scan_state (
@@ -441,6 +451,17 @@ const PLACEHOLDER_GENERATOR = "stripped";
 // in the store -- it outlived the image -- so a missing file is RECORDED, not
 // deleted: file_path is cleared and file_missing set, keeping prompt, model and
 // attribution searchable while marking the preview as unavailable.
+const saveImageChunks = (db, hash, chunks, now = Math.floor(Date.now() / 1000)) =>
+  db.prepare(`
+    INSERT INTO image_chunks (hash, chunks_gz, saved_at) VALUES (?, ?, ?)
+    ON CONFLICT(hash) DO UPDATE SET chunks_gz = excluded.chunks_gz, saved_at = excluded.saved_at
+  `).run(hash, zlib.gzipSync(Buffer.from(JSON.stringify(chunks), "utf8")), now);
+
+const readImageChunks = (db, hash) => {
+  const row = db.prepare("SELECT chunks_gz AS gz FROM image_chunks WHERE hash = ?").get(hash);
+  return row === undefined ? null : JSON.parse(zlib.gunzipSync(row.gz).toString("utf8"));
+};
+
 const markMissingFiles = (db, existsOnDisk) => {
   const rows = db.prepare("SELECT hash, file_path FROM images WHERE file_path <> '' AND file_missing = 0").all();
   const clear = db.prepare("UPDATE images SET file_path = '', file_missing = 1 WHERE hash = ?");
@@ -489,6 +510,8 @@ module.exports = {
   loadScanState,
   isUnchanged,
   markMissingFiles,
+  saveImageChunks,
+  readImageChunks,
   storeSummary,
   countsByGenerator,
   tagsFromPrompt,

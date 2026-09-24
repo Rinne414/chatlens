@@ -266,18 +266,28 @@ const requestAnswer = (row) => {
     el("span", { class: "kb-prompt-label" }, `${row.answerBy} 回复了 ${media.length} 个图片或文件`),
     el("div", { class: "kb-answer-media" }, media.map((item) => {
       const label = item.fileName || item.hash || (item.kind === "image" ? "图片" : "文件");
-      return item.kind === "image" && item.hash !== null && item.hasFile
-        ? el("a", {
+      if (item.kind === "image" && item.hash !== null && item.hasFile) {
+        return el("a", {
           class: "kb-answer-image",
           href: knowledgeFileUrl(item.hash),
           target: "_blank",
           rel: "noreferrer",
           title: label,
-        }, el("img", { src: knowledgeThumbUrl(item.hash), alt: label, loading: "lazy", decoding: "async" }))
-        : el("div", { class: "kb-answer-file", title: label },
-          el("span", {}, item.kind === "image" ? "图片" : "文件"),
-          el("strong", {}, label),
-          item.kind === "image" ? el("small", {}, "本地没有可预览副本") : null);
+        }, el("img", { src: knowledgeThumbUrl(item.hash), alt: label, loading: "lazy", decoding: "async" }));
+      }
+      if (item.kind === "image" && PICTURE_MD5.test(String(item.hash ?? ""))) {
+        return el("a", {
+          class: "kb-answer-image",
+          href: pictureUrl(item.hash, "preview"),
+          target: "_blank",
+          rel: "noreferrer",
+          title: label,
+        }, el("img", { src: pictureUrl(item.hash, "thumb"), alt: label, loading: "lazy", decoding: "async" }));
+      }
+      return el("div", { class: "kb-answer-file", title: label },
+        el("span", {}, item.kind === "image" ? "图片" : "文件"),
+        el("strong", {}, label),
+        item.kind === "image" ? el("small", {}, "本地没有可预览副本") : null);
     })));
 };
 
@@ -302,20 +312,35 @@ const openDetail = async (item) => {
   loadKnowledgeRelated(item.hash);
 };
 
+const missingThumb = (item) =>
+  el("div", { class: "kb-thumb missing" },
+    el("span", {}, "?"),
+    el("small", {}, unavailableImageText(item.fileMissing)));
+
 const thumbnail = (item) => {
-  if (!item.hasFile) {
-    return el("div", { class: "kb-thumb missing" },
-      el("span", {}, "?"),
-      el("small", {}, unavailableImageText(item.fileMissing)));
+  if (item.hasFile) {
+    return el("img", {
+      class: "kb-thumb",
+      src: knowledgeThumbUrl(item.hash),
+      loading: "lazy",
+      decoding: "async",
+      alt: item.prompt.slice(0, 60) || item.hash,
+      onclick: () => openDetail(item),
+    });
   }
-  return el("img", {
+  if (!PICTURE_MD5.test(String(item.hash ?? ""))) {
+    return missingThumb(item);
+  }
+  const node = el("img", {
     class: "kb-thumb",
-    src: knowledgeThumbUrl(item.hash),
+    src: pictureUrl(item.hash, "thumb"),
     loading: "lazy",
     decoding: "async",
     alt: item.prompt.slice(0, 60) || item.hash,
     onclick: () => openDetail(item),
+    onerror: () => node.replaceWith(missingThumb(item)),
   });
+  return node;
 };
 
 /* ---------- images surface ---------- */
@@ -1085,7 +1110,14 @@ const renderKnowledgeDetail = () => {
         item.hasFile
           ? el("a", { href: knowledgeFileUrl(item.hash), target: "_blank", rel: "noreferrer", title: "在新窗口看原图（原始文件，参数完整）" },
             el("img", { class: "kb-overlay-image", src: knowledgeFileUrl(item.hash), alt: "原图" }))
-          : el("div", { class: "kb-thumb missing" }, el("span", {}, unavailableImageText(item.fileMissing)))),
+          : PICTURE_MD5.test(String(item.hash ?? ""))
+            ? el("img", {
+              class: "kb-overlay-image",
+              src: pictureUrl(item.hash, "preview"),
+              alt: "预览",
+              title: "腾讯上的预览。点右边可以取原图或下载工作流。",
+            })
+            : el("div", { class: "kb-thumb missing" }, el("span", {}, unavailableImageText(item.fileMissing)))),
       el("div", { class: "kb-overlay-info" }, knowledgeDetailInfo(item, params)))));
 };
 
@@ -1117,9 +1149,46 @@ const knowledgeDetailInfo = (item, params) => [
       el("ul", { class: "kb-sightings" },
         item.sightings.map((seen) =>
           el("li", {}, `${formatUnix(seen.sentAt)} · ${seen.groupName || seen.groupId} · ${seen.speaker}`)))),
+  knowledgePictureActions(item),
   knowledgeAskList(item),
   knowledgeRelated(item),
 ];
+
+const knowledgePictureActions = (item) => {
+  if (!PICTURE_MD5.test(String(item.hash ?? ""))) {
+    return null;
+  }
+  return el("div", { class: "row" },
+    el("button", {
+      class: "btn small",
+      onclick: () => openPictureViewer({
+        md5: item.hash,
+        width: item.width,
+        height: item.height,
+        size: item.fileSize,
+        probe: item.hasWorkflow ? "ai" : "",
+        kept: item.hasFile,
+      }),
+    }, "打开图片"),
+    item.hasWorkflow
+      ? el("button", {
+        class: "btn small",
+        onclick: () => downloadPictureWorkflow(item.hash).catch((error) => alert(error.message)),
+      }, "下载工作流")
+      : null,
+    item.hasFile
+      ? null
+      : el("button", {
+        class: "btn small",
+        onclick: async () => {
+          try {
+            alert((await keepOnePicture(item.hash)).text);
+          } catch (error) {
+            alert(error.message);
+          }
+        },
+      }, "保存原图"));
+};
 
 /* ---------- view ---------- */
 

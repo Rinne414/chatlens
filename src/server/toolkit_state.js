@@ -3,6 +3,7 @@ const path = require("node:path");
 const { readJson } = require("../report_utils");
 const { collectRun, collectRuns, pathExists, dirSize, parseRunTimestamp } = require("../run_index");
 const messageStore = require("../message_store");
+const pictureStore = require("../picture_store");
 const { summarizeCatchup } = require("../run_catchup");
 const { normalizeLlmError, readLlmError, readLlmUnused } = require("../llm_status");
 const { resolvePasteCursor: resolvePasteCursorMatch } = require("../paste_cursor");
@@ -392,8 +393,16 @@ const getStoreMessages = (query) => {
     search: typeof query.q === "string" ? query.q : undefined,
   });
 
+  // Picture facts for media rows, so the chat can show every picture (the
+  // console fetches it from Tencent when QQ never saved it).
+  const byRow = pictureStore.picturesForRows(db, groupId, result.messages.filter((message) => message.isMedia === 1).map((message) => message.rowId));
+  const messages = result.messages.map((message) => (byRow.has(message.rowId)
+    ? { ...message, pictures: byRow.get(message.rowId).map(({ rowId, seq, ...picture }) => picture) }
+    : message));
+
   return {
     ...result,
+    messages,
     coverage: messageStore.getCoverage(db, groupId),
     readMark: messageStore.getReadMark(db, groupId),
   };
