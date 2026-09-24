@@ -83,6 +83,9 @@ const getSetup = () => {
     targetDir: config.backup?.targetDir ?? defaultTargetDir(),
     groups: groupChoices(config),
     categories: normalizeCategories(config.backup?.categories),
+    // On by default: PC QQ never downloaded most pictures, and QQ's own image
+    // server (md5-verified) is the only way back to their originals.
+    remote: config.backup?.remote !== false,
     lastReport: readReport(),
     ntDataConfigured: String(config.ntDataDir ?? "").trim().length > 0,
   };
@@ -117,7 +120,7 @@ const start = ({ mode, groupIds, fromDay, toDay, categories, remote, targetDir }
   fs.mkdirSync(backupDir, { recursive: true });
   fs.writeFileSync(requestPath, `${JSON.stringify(request, null, 2)}\n`, "utf8");
   const raw = state.loadRawConfig();
-  state.writeConfig({ ...raw, backup: { ...(raw.backup ?? {}), targetDir: target, categories: normalized } });
+  state.writeConfig({ ...raw, backup: { ...(raw.backup ?? {}), targetDir: target, categories: normalized, remote: request.remote } });
   const job = jobs.startBackupJob({ requestPath, mode });
   return { started: true, jobId: job.id };
 };

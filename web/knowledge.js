@@ -33,7 +33,7 @@ const INTENT_LABELS = { prompt: "要咒语", original: "要原图" };
 const REASON_TEXT = {
   attributed: null,
   evicted: "QQ 缓存中的原图现在已不存在，参数还留着",
-  unavailable: "本地没有原图副本，可能从未下载过原图",
+  unavailable: "电脑上没有原图：电脑 QQ 只在你点开大图时才下载原图",
   "outside-coverage": "这张图的时间不在已总结的范围内 —— 补跑那段时间就能对上发图人",
   "not-in-messages": "那段时间已扫过部分群，消息里没出现这张图（可能是还没扫的群、私聊、收藏，或你自己生成）",
 };
@@ -838,7 +838,7 @@ const knowledgeCoverageNote = () => {
       evicted === 0 ? null : el("p", { class: "kb-meta" },
         `${evicted} 张曾有本地原图，但对应缓存文件现在已不存在；参数仍然保留。`),
       el("p", { class: "kb-meta" },
-        "提示：QQ 设置里开启「自动下载原图」后，之后群里的图才会保留 AI 参数 —— 压缩过的图读不出任何参数。")));
+        "提示：AI 参数只在原图里。发图的人要勾选「原图」，否则 QQ 会把图压缩、参数就没了；收到的图要在电脑 QQ 里点开看大图，电脑上才有原图可读。")));
 };
 
 const knowledgeStats = () => {
@@ -1003,7 +1003,7 @@ const renderCoverage = () => {
       : el("div", {},
         el("h3", { class: "kb-cov-heading" }, "有图但一张都没入库的群"),
         el("p", { class: "kb-meta" },
-          "这些群发的图基本都被 QQ 压缩过，读不到 AI 参数。开启「自动下载原图」后，以后的图才有机会入库。"),
+          "这些群的图在电脑上只有预览图或压缩版，读不到 AI 参数。发图时勾选「原图」、在电脑 QQ 里点开看大图，以后的图才有机会入库。"),
         el("div", { class: "kb-cov-list" },
           data.unattributedGroups.map((row) =>
             el("div", { class: "kb-cov-group" },

@@ -395,12 +395,12 @@ const main = () => {
   }
 
   // Surfaced because it is actionable: QQ only keeps a full-resolution original
-  // when the image was downloaded at original quality, and that is a client
-  // setting the user controls.
+  // when PC QQ saved the original, which it does only for pictures the user
+  // opened full size (there is no "download every original" setting).
   if (stats.imageRefs > 0 && stats.originalMissing / stats.imageRefs > 0.5) {
     const percent = ((stats.originalMissing / stats.imageRefs) * 100).toFixed(0);
     process.stdout.write(`提示：本次 ${percent}% 的图片本地没有原图，AI 参数无法读取。\n`);
-    process.stdout.write("      在 QQ 设置里开启「自动下载原图」可让以后的图片保留生成参数。\n");
+    process.stdout.write("      电脑 QQ 只在点开大图时保存原图；发图时勾选「原图」、点开看大图，以后的图片才有生成参数。\n");
   }
 };
 

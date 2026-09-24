@@ -25,7 +25,9 @@ const backupState = {
   fromDay: null,
   toDay: null,
   categories: null,
-  remote: false,
+  remote: true,
+  // Set once the user ticks/unticks the box, so a reload keeps their choice.
+  remoteChosen: false,
   targetDir: "",
   job: null,
   report: null,
@@ -53,6 +55,7 @@ const openBackupView = async () => {
     backupState.report = backupState.report ?? setup.lastReport;
     backupState.selected = backupState.selected ?? new Set(setup.groups.filter((group) => group.watched).map((group) => group.groupId));
     backupState.categories = backupState.categories ?? { ...setup.categories };
+    backupState.remote = backupState.remoteChosen ? backupState.remote : setup.remote;
     backupState.targetDir = backupState.targetDir || setup.targetDir;
     backupState.fromDay = backupState.fromDay ?? backupDaysAgo(29);
     backupState.toDay = backupState.toDay ?? backupToday();
@@ -193,8 +196,8 @@ const backupTargetPicker = () =>
       oninput: (event) => { backupState.targetDir = event.target.value; },
     }),
     el("label", { class: "backup-remote" },
-      el("input", { type: "checkbox", checked: backupState.remote, onchange: (event) => { backupState.remote = event.target.checked; } }),
-      el("span", {}, "电脑上没有原图的群图片，尝试从 QQ 图片服务器下载",
+      el("input", { type: "checkbox", checked: backupState.remote, onchange: (event) => { backupState.remote = event.target.checked; backupState.remoteChosen = true; } }),
+      el("span", {}, "从 QQ 图片服务器补下载：电脑上没有原图的群图片",
         el("small", {}, "按图片 md5 下载并校验，只对群图片有效，旧图可能已失效。会产生外网请求。"))));
 
 const backupForm = () => {
@@ -237,8 +240,11 @@ const backupVerdict = (report) => {
   return el("div", { class: "backup-verdict check" },
     el("strong", {}, `⚠ 还有 ${briefNumber(gaps)} 个文件电脑上没有原文件`,
       gaps > report.totals.missing ? `（${briefNumber(gaps - report.totals.missing)} 个只有缩略图或压缩版${saved ? "，已先存下" : ""}）` : ""),
-    el("p", {}, "清理手机前：在电脑 QQ 里点开这些消息让它下载原图 / 视频（或在 QQ 设置里打开自动下载原图），然后重新扫描；",
-      report.remoteCandidates > 0 && !report.remote ? `也可以勾选「从 QQ 图片服务器下载」再试（${briefNumber(report.remoteCandidates)} 张可尝试）。` : "还是找不到的，请在手机上另存。"));
+    el("p", {}, "清理手机前：",
+      report.remoteCandidates > 0 && !report.remote
+        ? `先勾选下面的「从 QQ 图片服务器补下载」再保存一次（${briefNumber(report.remoteCandidates)} 张可以试）；`
+        : "",
+      "还缺的，在电脑 QQ 里点开这些图片 / 视频（点开大图才会下载原文件），再扫描一次；实在找不到的，请在手机上另存。"));
 };
 
 const backupTiles = (report) => {
@@ -329,7 +335,7 @@ const renderBackupView = () => {
     el("section", { class: "backup-intro" },
       el("h2", {}, "清理 QQ 之前，先把有用的存到电脑"),
       el("p", {}, "选好群和时间，工具会从电脑版 QQ 的本地缓存里把图片、视频、文件和聊天记录按「群 / 年-月」存到你的文件夹，AI 图还会带上咒语和参数；再次运行只补新的。"),
-      el("p", { class: "brief-meta" }, "只能存电脑 QQ 下载过的内容：手机上的图，电脑 QQ 看过或开了「自动下载原图」才有原图。工具只读取，从不删除或修改 QQ 里的任何东西。")),
+      el("p", { class: "backup-tip" }, el("strong", {}, "先知道一件事："), "电脑 QQ 只保存你在电脑上看过的图：划过去只存一张预览图，点开看大图才存原图，QQ 没有「全部自动下载」的开关。没看过的群图片，保存时会「从 QQ 图片服务器补下载」，按 md5 取回原图（太旧的图服务器上可能已经没有了；不想联网可以在下面取消）。工具只读取，从不删除或修改 QQ 里的任何东西。")),
     backupState.setup.ntDataConfigured ? null : el("div", { class: "notice risk" }, "还没有设置 QQ 的 nt_data 目录，请先到「设置」自动探测路径。"),
     backupState.error ? el("div", { class: "notice risk" }, backupState.error) : null,
     backupForm(),
