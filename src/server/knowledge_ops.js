@@ -295,6 +295,22 @@ const probeCapabilities = (db) => {
   };
 };
 
+// SQL for each has:/no: flag over images aliased `i`. Shared by the search
+// filter and the facet counts, so a flag can never count one thing and filter
+// another.
+const flagConditionsFor = (capabilities) => ({
+  prompt: "i.prompt <> ''",
+  negative: "i.negative_prompt <> ''",
+  lora: "EXISTS (SELECT 1 FROM image_loras x WHERE x.hash = i.hash)",
+  sender: "EXISTS (SELECT 1 FROM sightings x WHERE x.hash = i.hash)",
+  file: availableFileCondition(capabilities, "i."),
+  answer: capabilities.promptRequests
+    ? `EXISTS (SELECT 1 FROM prompt_requests x WHERE x.image_hash = i.hash AND ${answeredRequestCondition(capabilities, "x.")})`
+    : "1 = 0",
+  request: capabilities.promptRequests ? "EXISTS (SELECT 1 FROM prompt_requests x WHERE x.image_hash = i.hash)" : "1 = 0",
+  params: `i.generator <> '${PLACEHOLDER_GENERATOR}'`,
+});
+
 // Translates a parsed query into SQL conditions.
 //
 // Every field contributes an AND-ed condition; values WITHIN one list field are
@@ -407,18 +423,7 @@ const buildConditions = (query, capabilities) => {
     conditions.push(`i.file_mtime <= ${bind(Math.floor(Date.parse(`${query.dateTo}T23:59:59Z`) / 1000))}`);
   }
 
-  const flagConditions = {
-    prompt: "i.prompt <> ''",
-    negative: "i.negative_prompt <> ''",
-    lora: "EXISTS (SELECT 1 FROM image_loras x WHERE x.hash = i.hash)",
-    sender: "EXISTS (SELECT 1 FROM sightings x WHERE x.hash = i.hash)",
-    file: availableFileCondition(capabilities, "i."),
-    answer: capabilities.promptRequests
-      ? `EXISTS (SELECT 1 FROM prompt_requests x WHERE x.image_hash = i.hash AND ${answeredRequestCondition(capabilities, "x.")})`
-      : "1 = 0",
-    request: capabilities.promptRequests ? "EXISTS (SELECT 1 FROM prompt_requests x WHERE x.image_hash = i.hash)" : "1 = 0",
-    params: `i.generator <> '${PLACEHOLDER_GENERATOR}'`,
-  };
+  const flagConditions = flagConditionsFor(capabilities);
   for (const [flag, wanted] of Object.entries(query.flags)) {
     const condition = flagConditions[flag];
     if (condition === undefined) {
@@ -466,6 +471,28 @@ const imageColumnsFor = (capabilities) =>
   `${IMAGE_COLUMNS}, ${capabilities.fileMissing ? "file_missing" : "0 AS file_missing"}, ` +
   `${capabilities.objectPath ? "object_path" : "'' AS object_path"}`;
 
+// The WHERE fragment (over images aliased `i`) for a query plus the dropdown
+// selections. Dropdown values are folded into the parsed query so there is
+// exactly one path from "what the user asked for" to SQL.
+const filterFor = (capabilities, { query = "", generator = "", groupId = "", sender = "" }) => {
+  const parsed = parseQuery(query);
+  if (generator !== "" && !parsed.generators.includes(generator)) {
+    parsed.generators.push(generator);
+  }
+  if (groupId !== "" && !parsed.groups.includes(groupId)) {
+    parsed.groups.push(groupId);
+  }
+  if (sender !== "" && !parsed.senders.includes(sender)) {
+    parsed.senders.push(sender);
+  }
+  const { where, args, freeText } = buildConditions(parsed, capabilities);
+  const match = toMatchExpression(freeText);
+  const ftsFilter = match === ""
+    ? ""
+    : "AND i.hash IN (SELECT hash FROM images_fts WHERE images_fts MATCH @ftsMatch)";
+  return { parsed, clause: `${ftsFilter} ${where}`, args: match === "" ? args : { ...args, ftsMatch: match } };
+};
+
 // Searches the library. `query` accepts the full grammar from knowledge_query
 // (key:value, -key:value, ranges, flags) plus bare free text; `generator`,
 // `groupId` and `sender` are the dropdown equivalents, applied on top.
@@ -483,35 +510,16 @@ const searchImages = (toolRoot, {
   try {
     const capabilities = probeCapabilities(db);
     const columns = imageColumnsFor(capabilities);
-
-    // Dropdown selections are folded into the parsed query so there is exactly
-    // one path from "what the user asked for" to SQL.
-    const parsed = parseQuery(query);
-    if (generator !== "" && !parsed.generators.includes(generator)) {
-      parsed.generators.push(generator);
-    }
-    if (groupId !== "" && !parsed.groups.includes(groupId)) {
-      parsed.groups.push(groupId);
-    }
-    if (sender !== "" && !parsed.senders.includes(sender)) {
-      parsed.senders.push(sender);
-    }
-
-    const { where, args, freeText } = buildConditions(parsed, capabilities);
-    const match = toMatchExpression(freeText);
-    const ftsFilter = match === ""
-      ? ""
-      : "AND i.hash IN (SELECT hash FROM images_fts WHERE images_fts MATCH @ftsMatch)";
-    const queryArgs = match === "" ? args : { ...args, ftsMatch: match };
+    const { parsed, clause, args: queryArgs } = filterFor(capabilities, { query, generator, groupId, sender });
     const ordering = `ORDER BY ${orderClause(sort, capabilities)}`;
 
     const rows = db.prepare(`
       SELECT ${columns} FROM images i
-      WHERE 1 = 1 ${ftsFilter} ${where} ${ordering} LIMIT @limit OFFSET @offset
+      WHERE 1 = 1 ${clause} ${ordering} LIMIT @limit OFFSET @offset
     `).all({ ...queryArgs, limit: clampLimit(limit), offset });
 
     const total = db.prepare(`
-      SELECT COUNT(*) AS count FROM images i WHERE 1 = 1 ${ftsFilter} ${where}
+      SELECT COUNT(*) AS count FROM images i WHERE 1 = 1 ${clause}
     `).get(queryArgs).count;
 
     // Loaded once per request, not per row: this opens a second database.
@@ -545,19 +553,12 @@ const collectForExport = (toolRoot, options = {}) => {
   }
   try {
     const capabilities = probeCapabilities(db);
-    const parsed = parseQuery(options.query ?? "");
-    for (const [key, target] of [["generator", "generators"], ["groupId", "groups"], ["sender", "senders"]]) {
-      const value = options[key] ?? "";
-      if (value !== "" && !parsed[target].includes(value)) {
-        parsed[target].push(value);
-      }
-    }
-
-    const { where, args, freeText } = buildConditions(parsed, capabilities);
-    const match = toMatchExpression(freeText);
-    const ftsFilter = match === ""
-      ? ""
-      : "AND i.hash IN (SELECT hash FROM images_fts WHERE images_fts MATCH @ftsMatch)";
+    const { clause, args } = filterFor(capabilities, {
+      query: options.query ?? "",
+      generator: options.generator ?? "",
+      groupId: options.groupId ?? "",
+      sender: options.sender ?? "",
+    });
 
     // An explicit selection wins over the filters: the user ticked those exact
     // images, so nothing else should sneak in.
@@ -574,17 +575,13 @@ const collectForExport = (toolRoot, options = {}) => {
       });
     }
 
-    const queryArgs = {
-      ...args,
-      ...selectionArgs,
-      ...(match === "" ? {} : { ftsMatch: match }),
-    };
+    const queryArgs = { ...args, ...selectionArgs };
     const requested = Number.parseInt(options.limit ?? 0, 10);
     const cap = requested > 0 ? Math.min(requested, EXPORT_HARD_CAP) : EXPORT_HARD_CAP;
 
     const statement = db.prepare(`
       SELECT ${imageColumnsFor(capabilities)} FROM images i
-      WHERE 1 = 1 ${ftsFilter} ${selectionFilter} ${where}
+      WHERE 1 = 1 ${selectionFilter} ${clause}
       ORDER BY ${orderClause(options.sort ?? "recent", capabilities)}
       LIMIT @limit OFFSET @offset
     `);
@@ -918,7 +915,23 @@ const promptRequests = (toolRoot, { onlyAnswered = false, limit } = {}) => {
 
 // Facets for the filter controls, plus the honest counters the UI shows so the
 // gaps (stripped metadata, evicted files) are visible rather than implied.
+// The overview classifies every image (tens of thousands of rows) and blocks
+// the server while it does; the library only changes on a harvest, so a
+// short-lived copy is served in between.
+const OVERVIEW_CACHE_MS = 5 * 60 * 1000;
+const overviewCache = new Map();
+
 const overview = (toolRoot) => {
+  const hit = overviewCache.get(toolRoot);
+  if (hit !== undefined && Date.now() - hit.at < OVERVIEW_CACHE_MS) {
+    return hit.value;
+  }
+  const value = computeOverview(toolRoot);
+  overviewCache.set(toolRoot, { at: Date.now(), value });
+  return value;
+};
+
+const computeOverview = (toolRoot) => {
   const db = openReadOnly(toolRoot);
   if (db === null) {
     return { available: false };
@@ -1006,9 +1019,95 @@ const overview = (toolRoot) => {
   }
 };
 
+// The library scopes offered as the first facet. Kept here (not only in the UI)
+// so the counts and the search agree on what each scope means.
+const SCOPE_QUERIES = { prompt: "has:prompt", sender: "has:sender", all: "" };
+// No tag facet: counting tags means grouping ~400k rows (measured 3.6 s);
+// tags stay reachable through search (tag:...).
+const FACET_LIMITS = { checkpoints: 12, loras: 16, groups: 30, senders: 24 };
+const FACET_CACHE_MS = 60 * 1000;
+const FACET_CACHE_SIZE = 30;
+const facetCache = new Map();
+
+// Counts for the 咒语库 filter sidebar under the current filter: how many
+// images each source / model / LoRA / tag / group / sender would leave. The
+// scope counts ignore the scope itself, so switching scope shows what you get.
+const facets = (toolRoot, options = {}) => {
+  const key = JSON.stringify([toolRoot, options.query ?? "", options.scope ?? "prompt", options.generator ?? "", options.groupId ?? "", options.sender ?? ""]);
+  const cached = facetCache.get(key);
+  if (cached !== undefined && Date.now() - cached.at < FACET_CACHE_MS) {
+    return cached.value;
+  }
+  const value = computeFacets(toolRoot, options);
+  facetCache.delete(key);
+  facetCache.set(key, { at: Date.now(), value });
+  if (facetCache.size > FACET_CACHE_SIZE) {
+    facetCache.delete(facetCache.keys().next().value);
+  }
+  return value;
+};
+
+// A browse right after a harvest may show counts up to FACET_CACHE_MS old;
+// the result grid itself is never cached.
+const computeFacets = (toolRoot, { query = "", scope = "prompt", generator = "", groupId = "", sender = "" } = {}) => {
+  const db = openReadOnly(toolRoot);
+  if (db === null) {
+    return { available: false };
+  }
+  try {
+    const capabilities = probeCapabilities(db);
+    const selection = { generator, groupId, sender };
+    const base = filterFor(capabilities, { ...selection, query });
+    const scoped = filterFor(capabilities, { ...selection, query: [SCOPE_QUERIES[scope] ?? "", query].join(" ").trim() });
+    const flags = flagConditionsFor(capabilities);
+
+    const scopes = db.prepare(`
+      SELECT COUNT(*) AS "all",
+             COALESCE(SUM(CASE WHEN ${flags.prompt} THEN 1 ELSE 0 END), 0) AS prompt,
+             COALESCE(SUM(CASE WHEN ${flags.sender} THEN 1 ELSE 0 END), 0) AS sender
+      FROM images i WHERE 1 = 1 ${base.clause}
+    `).get(base.args);
+
+    const rows = (sql) => db.prepare(sql).all(scoped.args);
+    const flagCounts = db.prepare(`
+      SELECT ${["params", "request", "answer", "file"].map((name) => `COALESCE(SUM(CASE WHEN ${flags[name]} THEN 1 ELSE 0 END), 0) AS ${name}`).join(", ")}
+      FROM images i WHERE 1 = 1 ${scoped.clause}
+    `).get(scoped.args);
+
+    return {
+      available: true,
+      total: scopes[scope] ?? scopes.all,
+      scopes,
+      flags: flagCounts,
+      generators: rows(`
+        SELECT i.generator AS value, COUNT(*) AS count FROM images i
+        WHERE 1 = 1 ${scoped.clause} GROUP BY i.generator ORDER BY count DESC`),
+      checkpoints: rows(`
+        SELECT i.checkpoint AS value, COUNT(*) AS count FROM images i
+        WHERE i.checkpoint <> '' ${scoped.clause}
+        GROUP BY i.checkpoint ORDER BY count DESC LIMIT ${FACET_LIMITS.checkpoints}`),
+      loras: rows(`
+        SELECT l.lora_name AS value, COUNT(DISTINCT l.hash) AS count
+        FROM image_loras l JOIN images i ON i.hash = l.hash
+        WHERE 1 = 1 ${scoped.clause} GROUP BY l.lora_name ORDER BY count DESC LIMIT ${FACET_LIMITS.loras}`),
+      groups: rows(`
+        SELECT s.group_id AS value, MAX(s.group_name) AS label, COUNT(DISTINCT s.hash) AS count
+        FROM sightings s JOIN images i ON i.hash = s.hash
+        WHERE 1 = 1 ${scoped.clause} GROUP BY s.group_id ORDER BY count DESC LIMIT ${FACET_LIMITS.groups}`),
+      senders: rows(`
+        SELECT s.speaker AS value, COUNT(DISTINCT s.hash) AS count
+        FROM sightings s JOIN images i ON i.hash = s.hash
+        WHERE s.speaker <> '' ${scoped.clause} GROUP BY s.speaker ORDER BY count DESC LIMIT ${FACET_LIMITS.senders}`),
+    };
+  } finally {
+    db.close();
+  }
+};
+
 module.exports = {
   knowledgeDbPath,
   searchImages,
+  facets,
   collectForExport,
   imageByHash,
   imageFilePath,

@@ -106,6 +106,19 @@ const keepOne = async (md5) => {
   }
 };
 
+// The original as a local file to copy out, without keeping it in the store:
+// the kept copy, QQ's cache variant, the library's local original, or a fresh
+// download into a temp file. `temporary` files are the caller's to delete.
+const originalFile = async (md5, localOriginal = () => null) => {
+  const row = store.fileRow(db(), md5);
+  const local = service.keptPath(row, md5) ?? service.variantPath(row, "cache") ?? localOriginal(md5);
+  if (local !== null && fs.existsSync(local)) {
+    return { filePath: local, temporary: false };
+  }
+  const fetched = await fetchAndStoreTemp(md5);
+  return fetched.error === undefined ? { filePath: fetched.filePath, temporary: true } : { error: fetched.error };
+};
+
 // The original straight into a temp file (not the cache): it is about to be
 // copied into media-objects anyway.
 const fetchAndStoreTemp = async (md5) => {
@@ -218,4 +231,4 @@ const thumbOne = async (picture) => {
   return "failed";
 };
 
-module.exports = { resolvePicture, keepOriginals, keepOne, probeOne, previewOne, thumbOne, fetchAndStore };
+module.exports = { resolvePicture, keepOriginals, keepOne, originalFile, probeOne, previewOne, thumbOne, fetchAndStore };

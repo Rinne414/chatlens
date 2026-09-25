@@ -2,7 +2,7 @@
 
 /* ---------- group pictures fetched from Tencent ----------
    Thumbnails in chat, a viewer that fetches a bigger copy when opened,
-   the settings card, and the "expiring soon" list on the backup page.
+   and the settings card. The backup page draws its own expiring list.
    /picture is a plain <img> URL (no API token). Saving and settings go
    through /api/pictures, which does send the token. */
 
@@ -175,7 +175,7 @@ const keepOnePicture = async (md5) => {
 
 const downloadPictureWorkflow = async (md5) => {
   const response = await fetch(`/api/pictures/workflow?md5=${encodeURIComponent(md5)}`, {
-    headers: { "x-cc-token": TOKEN },
+    headers: { "x-cc-token": ccAuth.token },
   });
   if (!response.ok) {
     let message = "这张图没有保存的工作流。";
@@ -400,65 +400,6 @@ const renderPictureSettingsCard = () => {
     watchlist.length === 0
       ? el("p", { class: "card-sub" }, "还没有关注群。")
       : el("div", { class: "picture-keeps" }, watchlist.map((group) => pictureKeepToggle(group, kept.has(String(group.groupId))))));
-};
-
-/* ---------- backup: AI originals about to disappear ---------- */
-
-const expiringRow = (item) =>
-  el("div", { class: "backup-expiring-row" },
-    el("button", {
-      class: "backup-expiring-thumb",
-      title: "打开",
-      onclick: () => openPictureViewer({ ...item, probe: "ai" }),
-    }, el("img", { src: pictureUrl(item.md5, "thumb"), alt: "", loading: "lazy" })),
-    el("div", {},
-      el("strong", {}, pictureGroupName(item.groupId)),
-      el("p", { class: "card-sub" },
-        `${item.daysLeft === 0 ? "今天就会从腾讯删掉" : `大约还剩 ${item.daysLeft} 天`} · ${formatByteSize(item.size)}`)),
-    el("button", {
-      class: "btn small",
-      onclick: async (event) => {
-        const button = event.currentTarget;
-        button.disabled = true;
-        try {
-          const kept = await keepOnePicture(item.md5);
-          button.textContent = kept.status === "kept" ? "已保存" : kept.text;
-          if (kept.status === "kept") {
-            await loadExpiringPictures();
-            if (app.view === "backup") {
-              renderBackupView();
-            }
-          }
-        } catch (error) {
-          button.disabled = false;
-          button.textContent = error.message;
-        }
-      },
-    }, "保存原图"));
-
-const renderExpiringPictures = () => {
-  if (pictureUi.expiringError !== null && pictureUi.expiring === undefined) {
-    return el("section", { class: "card" },
-      el("h2", {}, "即将过期的 AI 原图"),
-      el("div", { class: "notice risk" }, pictureUi.expiringError));
-  }
-  if (pictureUi.expiring === undefined) {
-    return el("section", { class: "card" },
-      el("h2", {}, "即将过期的 AI 原图"),
-      el("p", { class: "card-sub" }, "正在读取…"));
-  }
-  const items = pictureUi.expiring.items ?? [];
-  return el("section", { class: "card" },
-    el("h2", {}, "即将过期的 AI 原图"),
-    el("p", { class: "card-sub" },
-      "这些图的咒语已经记下，原图还在腾讯服务器上，但没有留在本机。超过 31 天腾讯会删掉，QQ 也找不回来。",
-      pictureUi.expiring.soon > 0 ? ` 其中 ${pictureUi.expiring.soon} 张会在 7 天内过期。` : ""),
-    items.length === 0
-      ? el("p", { class: "card-sub" }, "现在没有待保存的 AI 原图。")
-      : el("div", { class: "backup-expiring" }, items.slice(0, 40).map(expiringRow),
-        (pictureUi.expiring.total ?? items.length) > 40
-          ? el("p", { class: "card-sub" }, `还有 ${(pictureUi.expiring.total ?? items.length) - 40} 张，先保存上面这些。`)
-          : null));
 };
 
 document.addEventListener("keydown", (event) => {

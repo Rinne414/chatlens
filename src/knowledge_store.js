@@ -151,6 +151,11 @@ const openKnowledgeStore = (storePath) => {
     db.prepare("ALTER TABLE prompt_requests ADD COLUMN answer_media_json TEXT NOT NULL DEFAULT '[]'").run();
   }
   db.prepare("UPDATE prompt_requests SET answer_kind = 'text' WHERE answer_kind = '' AND answer_text <> ''").run();
+  // The 咒语库 overview reads these columns for every image. The last two were
+  // added after the large raw_chunks_json column, so reading them from the
+  // table walks each row's overflow pages (measured 9.5 s for 74k images);
+  // from this covering index it is a plain index scan.
+  db.prepare("CREATE INDEX IF NOT EXISTS idx_images_availability ON images(hash, file_mtime, file_path, file_missing, object_path)").run();
   return db;
 };
 

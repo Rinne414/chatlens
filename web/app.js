@@ -1,6 +1,9 @@
 "use strict";
 
-const TOKEN = document.querySelector('meta[name="cc-token"]').content;
+// The server makes a new token every time it starts (an update, a restart,
+// autostart at login). A page left open across that would fail every request
+// with "Missing or invalid token", so api() re-reads it and retries once.
+const ccAuth = { token: document.querySelector('meta[name="cc-token"]').content, refreshing: null };
 const $ = (selector) => document.querySelector(selector);
 const {
   createTimelineSelection,
@@ -51,14 +54,95 @@ const setChildren = (node, ...children) => {
   node.replaceChildren(...children.flat(Infinity).filter((child) => child !== null && child !== undefined && child !== false));
 };
 
+const TOKEN_PATTERN = /<meta name="cc-token" content="([a-f0-9]{32})">/u;
+const CONNECTION_TOAST_MS = 4000;
+const connection = { state: "ok", timer: null };
+
+// Reading our own page is exactly what a reload does, so this grants nothing a
+// reload would not. Shared: a page fires several requests at once, and each
+// would otherwise fetch the page again.
+const refreshToken = () => {
+  if (ccAuth.refreshing === null) {
+    ccAuth.refreshing = fetch("/", { cache: "no-store" })
+      .then((response) => (response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`))))
+      .then((html) => {
+        const match = html.match(TOKEN_PATTERN);
+        if (match === null) {
+          throw new Error("页面里没有访问令牌");
+        }
+        ccAuth.token = match[1];
+      })
+      .finally(() => {
+        ccAuth.refreshing = null;
+      });
+  }
+  return ccAuth.refreshing;
+};
+
+const renderConnectionBanner = () => {
+  const banner = $("#conn-banner");
+  if (banner === null) {
+    return;
+  }
+  banner.hidden = connection.state === "ok";
+  banner.className = `conn-banner ${connection.state}`;
+  if (connection.state === "offline") {
+    setChildren(banner,
+      el("span", {}, "连不上后台服务：它可能停止了，或正在更新后重启。"),
+      el("button", {
+        class: "btn small",
+        onclick: async () => {
+          try {
+            await refreshToken();
+            setConnection("ok");
+            refreshCurrentView();
+          } catch {
+            setConnection("offline");
+          }
+        },
+      }, "重新连接"));
+  } else if (connection.state === "reconnected") {
+    setChildren(banner, el("span", {}, "后台服务刚重启过，已自动重新连接。"));
+  }
+};
+
+const setConnection = (state) => {
+  clearTimeout(connection.timer);
+  if (connection.state === state && state === "ok") {
+    return;
+  }
+  connection.state = state;
+  if (state === "reconnected") {
+    connection.timer = setTimeout(() => setConnection("ok"), CONNECTION_TOAST_MS);
+  }
+  renderConnectionBanner();
+};
+
+const apiFetch = (path, options) => fetch(path, {
+  ...options,
+  headers: {
+    "x-cc-token": ccAuth.token,
+    ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
+  },
+});
+
 const api = async (path, options = {}) => {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      "x-cc-token": TOKEN,
-      ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
-    },
-  });
+  let response;
+  try {
+    response = await apiFetch(path, options);
+    if (response.status === 401) {
+      await refreshToken();
+      response = await apiFetch(path, options);
+      if (response.status !== 401) {
+        setConnection("reconnected");
+      }
+    } else if (connection.state === "offline") {
+      setConnection("ok");
+    }
+  } catch {
+    setConnection("offline");
+    throw new Error("连不上后台服务，请确认它还在运行。");
+  }
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(payload.error ?? `HTTP ${response.status}`);
@@ -140,6 +224,12 @@ const app = {
     selA: null,
     selB: null,
     origin: null,
+    extras: null,
+    filter: "all",
+    mediaOnly: false,
+    panel: localStorage.getItem("cc-msg-panel") === "1",
+    panelItems: null,
+    selfUins: [],
   },
   mediaTab: {
     data: null,
@@ -186,7 +276,6 @@ const app = {
     sender: "",
     sort: "recent",
     showHelp: false,
-    density: "detail",
     loadingMore: false,
     showExport: false,
     exportMode: "new",
@@ -202,6 +291,9 @@ const app = {
     selected: new Set(),
     overview: null,
     results: null,
+    facets: null,
+    facetsKey: "",
+    expandedFacets: new Set(),
     requests: null,
     coverage: null,
     loading: false,
@@ -211,8 +303,8 @@ const app = {
   },
 };
 
-const VIEW_TITLES = { brief: "简报", review: "回顾", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
-const NAV_ICONS = { brief: "📰", review: "📅", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
+const VIEW_TITLES = { brief: "简报", review: "回顾", trends: "热点", group: "群", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
+const NAV_ICONS = { brief: "📰", review: "📅", trends: "🔥", group: "👥", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
 const KIND_ICONS = { image: "📷", video: "🎬", sticker: "😃", face: "😃", emoji: "😃", audio: "🎵", file: "📎" };
 const KIND_LABELS = { image: "图片", video: "视频", sticker: "表情", face: "表情", emoji: "表情", audio: "语音", file: "文件" };
 
@@ -349,7 +441,18 @@ const hktToUnix = (text) => {
 // Views reached from a page rather than the rail highlight their parent entry.
 const NAV_PARENT = { run: "brief", reader: "brief", history: "settings", watchlist: "settings", storage: "settings" };
 
+// Run when the user leaves a view: overlays belong to the view that opened them.
+const VIEW_LEAVE_HOOKS = [];
+
 const showView = (name) => {
+  if (app.view !== name) {
+    for (const layer of document.querySelectorAll(".view-layer")) {
+      layer.remove();
+    }
+    for (const hook of VIEW_LEAVE_HOOKS) {
+      hook();
+    }
+  }
   app.view = name;
   const navName = NAV_PARENT[name] ?? name;
   for (const button of document.querySelectorAll("#nav button")) {
@@ -2274,6 +2377,10 @@ const renderCurrentView = () => {
     renderBriefView();
   } else if (app.view === "review") {
     renderReviewView();
+  } else if (app.view === "trends") {
+    renderTrendsView();
+  } else if (app.view === "group") {
+    renderGroupView();
   } else if (app.view === "backup") {
     renderBackupView();
   } else if (app.view === "run") {
@@ -2305,6 +2412,14 @@ const openView = (name) => {
     openReviewView();
     return;
   }
+  if (name === "trends") {
+    openTrendsView();
+    return;
+  }
+  if (name === "group") {
+    openGroupView();
+    return;
+  }
   if (name === "backup") {
     openBackupView();
     return;
@@ -2329,10 +2444,25 @@ const openView = (name) => {
   renderCurrentView();
 };
 
+// Views whose data is cached in page state register how to drop it here
+// (e.g. VIEW_RELOADERS.knowledge); every other view simply re-opens, which
+// fetches fresh data anyway.
+const VIEW_RELOADERS = {};
+
+const refreshCurrentView = () => {
+  const reload = VIEW_RELOADERS[app.view];
+  if (typeof reload === "function") {
+    reload();
+    return;
+  }
+  openView(app.view);
+};
+
 const boot = async () => {
   for (const button of document.querySelectorAll("#nav button")) {
     button.addEventListener("click", () => openView(button.dataset.view));
   }
+  $("#view-refresh")?.addEventListener("click", refreshCurrentView);
   $("#theme-toggle")?.addEventListener("click", toggleTheme);
   $("#zoom-select")?.addEventListener("change", (event) => changeZoom(event.target.value));
   applyZoom();
@@ -2352,6 +2482,7 @@ const boot = async () => {
 
   try {
     await loadState();
+    startRail();
   } catch (error) {
     setChildren($("#view-brief"),
       el("div", { class: "card" }, el("div", { class: "notice risk" }, `无法连接控制台服务: ${error.message}`)));

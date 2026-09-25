@@ -82,4 +82,4 @@ const afterTick = async ({ ok }) => {
   });
 };
 
-module.exports = { getBriefing, markSeen, afterTick };
+module.exports = { getBriefing, markSeen, afterTick, watchlistOf, uinFromPath };

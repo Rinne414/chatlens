@@ -154,15 +154,15 @@ test("index.html references only scripts that exist", () => {
   }
 });
 
-test("the knowledge grid math module is reachable under its own global name", () => {
+test("the pure helper modules are reachable under their own global names", () => {
   const sandbox = makeSandbox();
   const context = vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(WEB, "knowledge_grid_math.js"), "utf8"), context, {
-    filename: "knowledge_grid_math.js",
-  });
+  for (const file of ["wall_layout.js", "kb_tokens.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(WEB, file), "utf8"), context, { filename: file });
+  }
 
-  assert.equal(typeof sandbox.window.KnowledgeGridMath, "object");
-  assert.equal(typeof sandbox.window.KnowledgeGridMath.windowFor, "function");
+  assert.equal(typeof sandbox.window.WallLayout.layoutWall, "function");
+  assert.equal(typeof sandbox.window.KbTokens.tokenLabel, "function");
 });
 
 test("reader back returns to the view that opened the report", () => {

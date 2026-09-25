@@ -16,6 +16,10 @@ const backupOps = require("./backup_ops");
 const update = require("./update_ops");
 const knowledge = require("./knowledge_ops");
 const pictureRoutes = require("./picture_routes");
+const galleryOps = require("./gallery_ops");
+const railOps = require("./rail_ops");
+const groupOps = require("./group_ops");
+const trendsOps = require("./trends_ops");
 const picturePass = require("./picture_pass");
 const knowledgeExport = require("../knowledge_export");
 const platform = require("../platform");
@@ -297,6 +301,34 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/trends") {
+      sendJson(response, 200, trendsOps.getTrends({
+        days: url.searchParams.get("days") ?? "3",
+        fresh: url.searchParams.get("fresh") === "1",
+      }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/group/timeline") {
+      sendJson(response, 200, groupOps.getGroupTimeline(url.searchParams));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/inbox-extras") {
+      sendJson(response, 200, railOps.getInboxExtras(url.searchParams.get("groupIds")));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/group") {
+      sendJson(response, 200, groupOps.getGroupInsights(url.searchParams.get("groupId") ?? ""));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/rail") {
+      sendJson(response, 200, railOps.getRail());
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/store-timeline") {
       sendJson(response, 200, state.getStoreTimeline(Object.fromEntries(url.searchParams)));
       return;
@@ -314,7 +346,9 @@ const handleApi = async (request, response, url) => {
 
     if (request.method === "POST" && url.pathname === "/api/readmark") {
       const body = await readBody(request);
-      sendJson(response, 200, { readMark: state.saveReadMark(body) });
+      const readMark = state.saveReadMark(body);
+      railOps.invalidateRail();
+      sendJson(response, 200, { readMark });
       return;
     }
 
@@ -337,6 +371,17 @@ const handleApi = async (request, response, url) => {
         sort: url.searchParams.get("sort") ?? "recent",
         limit: url.searchParams.get("limit"),
         offset: Number.parseInt(url.searchParams.get("offset") ?? "0", 10) || 0,
+      }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/knowledge/facets") {
+      sendJson(response, 200, knowledge.facets(state.toolRoot, {
+        query: url.searchParams.get("q") ?? "",
+        scope: url.searchParams.get("scope") ?? "prompt",
+        generator: url.searchParams.get("generator") ?? "",
+        groupId: url.searchParams.get("groupId") ?? "",
+        sender: url.searchParams.get("sender") ?? "",
       }));
       return;
     }
@@ -764,6 +809,10 @@ const handleApi = async (request, response, url) => {
     }
 
     if (await pictureRoutes.handlePictureApi(request, response, url, { sendJson, sendError, readBody })) {
+      return;
+    }
+
+    if (galleryOps.handleGalleryApi(request, response, url, { sendJson, sendError })) {
       return;
     }
 

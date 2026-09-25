@@ -191,8 +191,11 @@ const ingestExport = (db, exportData, runId) => {
   return { inserted };
 };
 
-const queryMessages = (db, { groupId, fromUnix, toUnix, afterSentAt, afterRowId, beforeSentAt, beforeRowId, limit, search }) => {
+const queryMessages = (db, { groupId, fromUnix, toUnix, afterSentAt, afterRowId, beforeSentAt, beforeRowId, limit, search, mediaOnly = false }) => {
   const conditions = ["group_id = @groupId"];
+  if (mediaOnly) {
+    conditions.push("is_media = 1");
+  }
   const params = { groupId: String(groupId) };
 
   if (Number.isFinite(fromUnix)) {
@@ -223,7 +226,8 @@ const queryMessages = (db, { groupId, fromUnix, toUnix, afterSentAt, afterRowId,
   const order = pagingBackward ? "DESC" : "ASC";
   const rows = db
     .prepare(`
-      SELECT group_id AS groupId, row_id AS rowId, sent_at AS sentAt, speaker, text, is_media AS isMedia, media_kinds AS mediaKinds, speaker_uin AS speakerUin
+      SELECT group_id AS groupId, row_id AS rowId, sent_at AS sentAt, speaker, text, is_media AS isMedia, media_kinds AS mediaKinds, speaker_uin AS speakerUin,
+             at_uins AS atUins, at_all AS atAll, reply_to_uin AS replyToUin, is_self AS isSelf
       FROM messages
       WHERE ${conditions.join(" AND ")}
       ORDER BY sent_at ${order}, row_id ${order}

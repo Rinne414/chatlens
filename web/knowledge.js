@@ -102,7 +102,8 @@ const loadKnowledgeOverview = async () => {
 
 // requestId guards against an earlier, slower search overwriting a later one.
 // `append` adds a page instead of replacing, which is how the library beyond the
-// first 60 images is reachable at all.
+// first 60 images is reachable at all. A new search keeps the old results on
+// screen (dimmed) until the new ones arrive, instead of blanking the page.
 const loadKnowledgeResults = async ({ append = false } = {}) => {
   const requestId = app.knowledgeTab.requestId + 1;
   const offset = append ? (app.knowledgeTab.results?.items.length ?? 0) : 0;
@@ -111,10 +112,12 @@ const loadKnowledgeResults = async ({ append = false } = {}) => {
     loading: true,
     loadingMore: append,
     error: null,
-    ...(append ? {} : { results: null }),
   });
   if (append) {
+    updateKnowledgeResultTexts();
+  } else {
     renderKnowledgeView();
+    loadKnowledgeFacets();
   }
 
   const params = new URLSearchParams({
@@ -141,11 +144,19 @@ const loadKnowledgeResults = async ({ append = false } = {}) => {
       loading: false,
       loadingMore: false,
     });
+    if (append && app.view === "knowledge" && wallSetEntries(KB_WALL_KEY, knowledgeWallEntries())) {
+      updateKnowledgeResultTexts();
+      return;
+    }
   } catch (error) {
     if (app.knowledgeTab.requestId !== requestId) {
       return;
     }
     replaceKnowledgeTab({ loading: false, loadingMore: false, error: error.message });
+  }
+  if (!append) {
+    // A new result set starts at its top, not wherever the old one was scrolled.
+    window.scrollTo({ top: 0 });
   }
   renderKnowledgeView();
 };
@@ -188,23 +199,21 @@ const ensureKnowledgeLoaded = async () => {
   // there was no frame in which the error could be shown.
   renderKnowledgeView();
 
-  if (app.knowledgeTab.overview === null) {
-    await loadKnowledgeOverview();
-    renderKnowledgeView();
-  }
+  // The overview (numbers at the top) is the slowest request and the server
+  // answers one at a time, so it goes after the surface's own data and only
+  // its own strip is redrawn when it arrives.
   if (app.knowledgeTab.surface === "images" && app.knowledgeTab.results === null) {
     await loadKnowledgeResults();
-    return;
-  }
-  if (app.knowledgeTab.surface === "requests" && app.knowledgeTab.requests === null) {
+  } else if (app.knowledgeTab.surface === "requests" && app.knowledgeTab.requests === null) {
     await loadKnowledgeRequests();
-    return;
-  }
-  if (app.knowledgeTab.surface === "coverage" && app.knowledgeTab.coverage === null) {
+  } else if (app.knowledgeTab.surface === "coverage" && app.knowledgeTab.coverage === null) {
     await loadKnowledgeCoverage();
-    return;
+  } else {
+    renderKnowledgeView();
   }
-  renderKnowledgeView();
+  if (app.knowledgeTab.overview === null) {
+    loadKnowledgeOverview().then(() => (app.knowledgeTab.error === null ? renderKnowledgeHeader() : renderKnowledgeView()));
+  }
 };
 
 /* ---------- shared bits ---------- */
@@ -296,7 +305,7 @@ const requestAnswer = (row) => {
 // the panel never appears empty while the request is in flight.
 const openDetail = async (item) => {
   replaceKnowledgeTab({ detail: item, detailLoading: true });
-  renderKnowledgeView();
+  renderKnowledgeDetailLayer();
   try {
     const full = await api(`/api/knowledge/image?hash=${encodeURIComponent(item.hash)}`);
     // Ignore a late response for an image the user has already navigated away from.
@@ -308,154 +317,11 @@ const openDetail = async (item) => {
     // The clamped version is still useful; just stop showing a spinner.
     replaceKnowledgeTab({ detailLoading: false });
   }
-  renderKnowledgeView();
+  renderKnowledgeDetailLayer();
   loadKnowledgeRelated(item.hash);
 };
 
-const missingThumb = (item) =>
-  el("div", { class: "kb-thumb missing" },
-    el("span", {}, "?"),
-    el("small", {}, unavailableImageText(item.fileMissing)));
-
-const thumbnail = (item) => {
-  if (item.hasFile) {
-    return el("img", {
-      class: "kb-thumb",
-      src: knowledgeThumbUrl(item.hash),
-      loading: "lazy",
-      decoding: "async",
-      alt: item.prompt.slice(0, 60) || item.hash,
-      onclick: () => openDetail(item),
-    });
-  }
-  if (!PICTURE_MD5.test(String(item.hash ?? ""))) {
-    return missingThumb(item);
-  }
-  const node = el("img", {
-    class: "kb-thumb",
-    src: pictureUrl(item.hash, "thumb"),
-    loading: "lazy",
-    decoding: "async",
-    alt: item.prompt.slice(0, 60) || item.hash,
-    onclick: () => openDetail(item),
-    onerror: () => node.replaceWith(missingThumb(item)),
-  });
-  return node;
-};
-
 /* ---------- images surface ---------- */
-
-const paramChips = (item) => {
-  const params = item.params ?? {};
-  const chips = [
-    params.steps === undefined ? null : `steps ${params.steps}`,
-    params.cfgScale === undefined ? null : `cfg ${params.cfgScale}`,
-    params.sampler === undefined ? null : String(params.sampler),
-    params.scheduler === undefined ? null : String(params.scheduler),
-    params.seed === undefined ? null : `seed ${params.seed}`,
-    item.width > 0 ? `${item.width}×${item.height}` : null,
-  ].filter((chip) => chip !== null);
-  return chips.map((chip) => el("span", { class: "kb-chip" }, chip));
-};
-
-// Narrowing by clicking what you see, rather than retyping it. Implemented as a
-// query mutation so the visible search box always reflects the active filter.
-const filterBy = (expression) => () => {
-  replaceKnowledgeTab({ query: expression, detail: null });
-  loadKnowledgeResults();
-};
-
-const quoteIfNeeded = (value) => (/\s/u.test(value) ? `"${value}"` : value);
-
-// A checkbox overlaid on the thumbnail, so picking specific images for export
-// never requires leaving the grid.
-const selectionBox = (item) => {
-  const picked = app.knowledgeTab.selected.has(item.hash);
-  return el("label", {
-    class: picked ? "kb-pick picked" : "kb-pick",
-    title: "选中以便只导出这些",
-    onclick: (event) => event.stopPropagation(),
-  },
-  el("input", {
-    type: "checkbox",
-    checked: picked,
-    onchange: (event) => {
-      // A Set is mutated in place here rather than copied: the alternative is
-      // rebuilding a 7,000-entry set on every click.
-      if (event.target.checked) {
-        app.knowledgeTab.selected.add(item.hash);
-      } else {
-        app.knowledgeTab.selected.delete(item.hash);
-      }
-      renderKnowledgeView();
-    },
-  }));
-};
-
-const imageCard = (item) => {
-  const seen = item.sightings[0];
-  const asks = item.promptRequests ?? [];
-  return el("article", { class: "kb-card", "data-testid": "kb-card" },
-    el("div", { class: "kb-thumb-wrap" }, thumbnail(item), selectionBox(item)),
-    el("div", { class: "kb-card-body" },
-      el("div", { class: "kb-card-head" },
-        el("span", { class: "kb-badge" }, generatorLabel(item.generator)),
-        item.checkpoint === ""
-          ? null
-          : el("button", {
-            class: "kb-model kb-linkish",
-            title: "只看这个模型",
-            onclick: filterBy(`model:${quoteIfNeeded(item.checkpoint)}`),
-          }, item.checkpoint),
-        asks.length > 0
-          ? el("span", { class: "kb-badge ok" }, `${asks.length} 人求过`)
-          : null),
-      item.isPlaceholder
-        ? el("p", { class: "kb-note" }, "本地副本中没有可解析的 AI 生成参数；下面的咒语来自群里的回复。")
-        : promptBlock(item.prompt, "咒语", { truncated: item.promptTruncated }),
-      item.loras.length === 0
-        ? null
-        : el("div", { class: "kb-loras" },
-          el("span", { class: "kb-prompt-label" }, `LoRA ×${item.loras.length}`),
-          el("div", { class: "kb-chip-row" },
-            item.loras.slice(0, 6).map((lora) =>
-              el("button", {
-                class: "kb-chip clickable",
-                title: "只看用了这个 LoRA 的图",
-                onclick: filterBy(`lora:${quoteIfNeeded(lora.name)}`),
-              }, lora.weight === null ? lora.name : `${lora.name} @${lora.weight}`)),
-            item.loras.length > 6 ? el("span", { class: "kb-chip" }, `+${item.loras.length - 6}`) : null)),
-      el("div", { class: "kb-chip-row" }, paramChips(item)),
-      asks.map(requestAnswer),
-      seen === undefined
-        ? el("p", { class: "kb-meta muted" }, REASON_TEXT[item.attributionReason] ?? "没有群消息记录")
-        : el("p", { class: "kb-meta" },
-          el("button", {
-            class: "kb-linkish",
-            title: "只看这个人发的图",
-            onclick: filterBy(`sender:${quoteIfNeeded(seen.speaker)}`),
-          }, seen.speaker),
-          ` · ${seen.groupName || seen.groupId} · ${formatUnix(seen.sentAt)}`)));
-};
-
-// Shows how the query was understood, straight from the server's own parse.
-// Without this an operator grammar is undiscoverable: a user cannot tell a typo
-// from "no results", and warnings would be invisible.
-const searchPreview = () => {
-  const parsed = app.knowledgeTab.results?.parsed;
-  if (parsed === null || parsed === undefined) {
-    return null;
-  }
-  if (parsed.parts.length === 0 && parsed.warnings.length === 0) {
-    return null;
-  }
-  return el("div", { class: "kb-preview" },
-    parsed.parts.length === 0 ? null : el("span", { class: "kb-prompt-label" }, "理解为"),
-    parsed.parts.map((part) =>
-      el("span", { class: `kb-preview-chip ${part.kind === "exclude" ? "exclude" : ""}` }, part.text)),
-    parsed.warnings.map((warning) =>
-      el("span", { class: "kb-preview-chip warn", title: warning.reason }, `⚠ ${warning.raw} — ${warning.reason}`)));
-};
 
 const syntaxHelpPanel = () => {
   if (!app.knowledgeTab.showHelp) {
@@ -680,25 +546,6 @@ const exportPanel = () => {
             el("ul", { class: "kb-sightings" }, result.notes.map((note) => el("li", {}, note))))));
 };
 
-const DENSITY_KEY = "cc-knowledge-density";
-const DENSITIES = new Set(["detail", "compact"]);
-
-// Detail shows the prompt on the card; compact is a thumbnail wall for scanning
-// a large result set. Persisted because it is a lasting preference, not a
-// per-search choice.
-const densityToggle = () => {
-  const button = (value, label) =>
-    el("button", {
-      class: app.knowledgeTab.density === value ? "btn small active" : "btn small",
-      onclick: () => {
-        replaceKnowledgeTab({ density: value });
-        localStorage.setItem(DENSITY_KEY, value);
-        renderKnowledgeView();
-      },
-    }, label);
-  return el("div", { class: "kb-density" }, button("detail", "详细"), button("compact", "只看图"));
-};
-
 const LIBRARY_SCOPES = [
   { value: "prompt", label: "有咒语", query: "has:prompt" },
   { value: "sender", label: "群里发过", query: "has:sender" },
@@ -709,121 +556,6 @@ const SCOPE_KEY = "cc-knowledge-scope";
 const knowledgeSearchQuery = () => {
   const scope = LIBRARY_SCOPES.find((item) => item.value === app.knowledgeTab.libraryScope) ?? LIBRARY_SCOPES[0];
   return [scope.query, app.knowledgeTab.query].filter((part) => part !== "").join(" ");
-};
-
-const libraryScopeToggle = () => {
-  const button = (value, label) =>
-    el("button", {
-      class: app.knowledgeTab.libraryScope === value ? "btn small active" : "btn small",
-      "data-testid": `kb-scope-${value}`,
-      onclick: () => {
-        replaceKnowledgeTab({ libraryScope: value });
-        localStorage.setItem(SCOPE_KEY, value);
-        loadKnowledgeResults();
-      },
-    }, label);
-  return el("div", { class: "kb-density" },
-    LIBRARY_SCOPES.map((scope) => button(scope.value, scope.label)));
-};
-
-const knowledgeFilters = () => {
-  const overview = app.knowledgeTab.overview;
-  const generators = overview?.generators ?? [];
-  const groups = overview?.groups ?? [];
-  const senders = overview?.senders ?? [];
-
-  const searchInput = el("input", {
-    type: "search",
-    class: "kb-search",
-    placeholder: "搜咒语，或用 tag: model: lora: sender: steps>=30 …",
-    value: app.knowledgeTab.query,
-    "data-testid": "kb-search",
-  });
-  // Search on Enter rather than per keystroke: each query hits FTS plus a COUNT
-  // over thousands of rows, and the store is also written by harvest runs.
-  searchInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      replaceKnowledgeTab({ query: searchInput.value.trim() });
-      loadKnowledgeResults();
-    }
-  });
-
-  const picker = (value, onchange, placeholder, options) =>
-    el("select", { class: "kb-select", onchange: (event) => onchange(event.target.value) },
-      el("option", { value: "" }, placeholder),
-      options.map((option) =>
-        el("option", { value: option.value, selected: option.value === value }, option.label)));
-
-  const generatorSelect = picker(app.knowledgeTab.generator, (value) => {
-    replaceKnowledgeTab({ generator: value });
-    loadKnowledgeResults();
-  }, "全部来源", generators.map((row) => ({ value: row.generator, label: `${generatorLabel(row.generator)} (${row.count})` })));
-
-  const groupSelect = picker(app.knowledgeTab.groupId, (value) => {
-    replaceKnowledgeTab({ groupId: value });
-    loadKnowledgeResults();
-  }, "全部群", groups.map((row) => ({ value: row.groupId, label: `${row.groupName || row.groupId} (${row.images})` })));
-
-  // Only images with a sighting have a known sender, so the count is small by
-  // nature; the label says so to avoid looking broken.
-  const senderSelect = picker(app.knowledgeTab.sender, (value) => {
-    replaceKnowledgeTab({ sender: value });
-    loadKnowledgeResults();
-  }, senders.length === 0 ? "没有已知发图人" : "全部发图人", senders.map((row) => ({ value: row.speaker, label: `${row.speaker} (${row.images})` })));
-
-  const sortSelect = picker(app.knowledgeTab.sort, (value) => {
-    replaceKnowledgeTab({ sort: value || "recent" });
-    loadKnowledgeResults();
-  }, SORT_LABELS.recent, Object.entries(SORT_LABELS).map(([value, label]) => ({ value, label })));
-
-  const hasFilters = app.knowledgeTab.query !== "" || app.knowledgeTab.generator !== ""
-    || app.knowledgeTab.groupId !== "" || app.knowledgeTab.sender !== "";
-
-  return el("div", { class: "kb-controls" },
-    el("div", { class: "kb-control-row" },
-      searchInput,
-      el("button", {
-        class: "btn",
-        onclick: () => {
-          replaceKnowledgeTab({ query: searchInput.value.trim() });
-          loadKnowledgeResults();
-        },
-      }, "搜索"),
-      el("button", {
-        class: app.knowledgeTab.showHelp ? "btn small active" : "btn small",
-        title: "搜索语法",
-        onclick: () => {
-          replaceKnowledgeTab({ showHelp: !app.knowledgeTab.showHelp });
-          renderKnowledgeView();
-        },
-      }, "语法"),
-      el("button", {
-        class: app.knowledgeTab.showExport ? "btn small active" : "btn small",
-        title: "导出当前筛选结果",
-        onclick: () => {
-          const showExport = !app.knowledgeTab.showExport;
-          replaceKnowledgeTab({ showExport });
-          if (showExport) {
-            loadExportPreview();
-          } else {
-            renderKnowledgeView();
-          }
-        },
-      }, "导出"),
-      hasFilters
-        ? el("button", {
-          class: "btn small",
-          onclick: () => {
-            replaceKnowledgeTab({ query: "", generator: "", groupId: "", sender: "" });
-            loadKnowledgeResults();
-          },
-        }, "清除筛选")
-        : null),
-    el("div", { class: "kb-control-row" }, libraryScopeToggle(), generatorSelect, groupSelect, senderSelect, sortSelect, densityToggle()),
-    el("div", { class: "kb-control-row" }, knowledgeQuickFilters()),
-    searchPreview(),
-    syntaxHelpPanel(),
-    exportPanel());
 };
 
 // Explains the library's shape up front. Without this the user sees thousands of
@@ -866,26 +598,47 @@ const knowledgeCoverageNote = () => {
         "提示：AI 参数只在原图里。发图的人要勾选「原图」，否则 QQ 会把图压缩、参数就没了；收到的图要在电脑 QQ 里点开看大图，电脑上才有原图可读。")));
 };
 
+// Each number is also a way in: clicking it shows what it counts.
+const openFacetSection = (id) => {
+  replaceKnowledgeTab({ surface: "images", expandedFacets: new Set([...app.knowledgeTab.expandedFacets, id]) });
+  ensureKnowledgeLoaded();
+  queueMicrotask(() => document.getElementById(`kb-facet-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+};
+
 const knowledgeStats = () => {
   const counts = app.knowledgeTab.overview?.counts;
   if (counts === undefined) {
     return null;
   }
-  const stat = (label, value, hint) =>
-    el("div", { class: "kb-stat", title: hint ?? "" },
-      el("strong", {}, String(value)),
-      el("span", {}, label));
+  const stat = (label, value, hint, onClick) =>
+    el(onClick === undefined ? "div" : "button", {
+      class: onClick === undefined ? "kb-stat" : "kb-stat clickable",
+      type: onClick === undefined ? undefined : "button",
+      title: hint ?? "",
+      onclick: onClick,
+    },
+    el("strong", {}, briefNumber(value)),
+    el("span", {}, label));
+  const showImages = (patch) => () => {
+    replaceKnowledgeTab({ surface: "images" });
+    applyKnowledgeFilter(patch);
+  };
 
   return el("div", { class: "kb-stats" },
-    stat("张图有参数", counts.images),
-    stat("个 LoRA", counts.loras),
-    stat("个标签", counts.tags),
-    stat("张能对上发图人", counts.attributed, "只有跑过总结的时间段才对得上"),
+    stat("张图有参数", counts.images, "点击：只看原图带参数的图",
+      showImages({ libraryScope: "all", query: window.KbTokens.addToken(app.knowledgeTab.query, "has:params") })),
+    stat("个 LoRA", counts.loras, "点击：看当前结果里最常用的 LoRA", () => openFacetSection("lora")),
+    stat("个标签", counts.tags, "标签可以用 tag:名字 搜索"),
+    stat("张能对上发图人", counts.attributed, "点击：只看知道是谁发的图", showImages({ libraryScope: "sender" })),
     counts.promptRequests > 0
-      ? stat("次求图 / 咒语", counts.promptRequests, `其中 ${counts.answeredRequests} 次已有回复`)
+      ? stat("次求图 / 咒语", counts.promptRequests, `其中 ${counts.answeredRequests} 次已有回复。点击查看记录`, () => {
+        replaceKnowledgeTab({ surface: "requests" });
+        ensureKnowledgeLoaded();
+      })
       : null,
     counts.fileMissing > 0
-      ? stat("张缓存原图已不存在", counts.fileMissing, "参数还留着，当前没有本地原图")
+      ? stat("张缓存原图已不存在", counts.fileMissing, "参数还留着，当前没有本地原图。点击只看这些",
+        showImages({ libraryScope: "all", query: window.KbTokens.addToken(app.knowledgeTab.query, "no:file") }))
       : null);
 };
 
@@ -1072,7 +825,7 @@ const renderKnowledgeDetail = () => {
   const params = item.params ?? {};
   const close = () => {
     replaceKnowledgeTab({ detail: null });
-    renderKnowledgeView();
+    renderKnowledgeDetailLayer();
   };
 
   const items = app.knowledgeTab.results?.items ?? [];
@@ -1207,140 +960,62 @@ const knowledgeSurfaceTabs = () => {
     tab("coverage", "覆盖情况"));
 };
 
-// Watches the bottom sentinel and loads the next page when it comes into view.
-// One observer is reused across renders; observing a fresh node each time would
-// leak an observer per render.
-let sentinelObserver = null;
-
-const observeSentinel = (node) => {
-  if (typeof IntersectionObserver === "undefined") {
-    // Without observer support the page still works: the sentinel text tells the
-    // user to scroll, and any filter change reloads from the top.
-    return;
-  }
-  if (sentinelObserver === null) {
-    sentinelObserver = new IntersectionObserver((entries) => {
-      const visible = entries.some((entry) => entry.isIntersecting);
-      const tab = app.knowledgeTab;
-      const loaded = tab.results?.items.length ?? 0;
-      const total = tab.results?.total ?? 0;
-      if (visible && !tab.loading && !tab.loadingMore && loaded < total && app.view === "knowledge") {
-        loadKnowledgeResults({ append: true });
-      }
-    }, { rootMargin: "400px" });
-  }
-  sentinelObserver.disconnect();
-  // Observe on the next tick so the node is in the document and can intersect.
-  queueMicrotask(() => {
-    if (node.isConnected) {
-      sentinelObserver.observe(node);
-    }
-  });
+const knowledgeHeader = () => {
+  const surface = app.knowledgeTab.surface;
+  return [
+    surface === "coverage" ? null : knowledgeStats(),
+    surface === "images" ? knowledgeCoverageNote() : null,
+  ];
 };
 
-// Windowed rendering is used past a threshold; below it a plain grid is simpler
-// and imposes no fixed-height constraint. The teardown handle must be released
-// before each re-render or old scroll listeners keep firing on a detached node.
-let releaseVirtualGrid = null;
-
-const teardownVirtualGrid = () => {
-  if (releaseVirtualGrid !== null) {
-    releaseVirtualGrid();
-    releaseVirtualGrid = null;
+// Redraws only the stats strip, so the wall below is not rebuilt.
+const renderKnowledgeHeader = () => {
+  const node = document.getElementById("kb-header");
+  if (node !== null && app.view === "knowledge") {
+    setChildren(node, knowledgeHeader());
   }
-};
-
-const renderImages = () => {
-  const results = app.knowledgeTab.results;
-  if (results === null || results === undefined) {
-    return el("div", { class: "empty" }, "读取中…");
-  }
-  if (results.available === false) {
-    return el("div", { class: "empty" },
-      "还没有咒语库。跑一次总结，工具就会从 QQ 图片缓存里读出 AI 生成参数并建库。");
-  }
-  if (results.items.length === 0) {
-    return el("div", { class: "empty" },
-      app.knowledgeTab.query === "" && app.knowledgeTab.generator === "" && app.knowledgeTab.groupId === "" && app.knowledgeTab.sender === "" && app.knowledgeTab.libraryScope === "all"
-        ? "库里还没有图片。"
-        : "没有符合条件的图片。可改用「群里发过」或「全部」，或点「清除筛选」。");
-  }
-
-  const remaining = results.total - results.items.length;
-  const windowed = window.KnowledgeGridMath.shouldVirtualize(results.items.length);
-  const grid = windowed
-    ? el("div", { class: "kb-vgrid", "data-testid": "kb-vgrid" })
-    : el("div", { class: `kb-grid ${app.knowledgeTab.density}` }, results.items.map(imageCard));
-
-  if (windowed) {
-    // Mounted after this subtree is in the document, so clientWidth is real.
-    queueMicrotask(() => {
-      if (!grid.isConnected) {
-        return;
-      }
-      teardownVirtualGrid();
-      releaseVirtualGrid = window.KnowledgeGrid.mountVirtualGrid({
-        container: grid,
-        items: results.items,
-        density: app.knowledgeTab.density,
-        renderItem: imageCard,
-      });
-    });
-  }
-
-  // Scrolling loads the next page: a button to continue reading a list is noise,
-  // since reaching the bottom already expresses the intent. The sentinel is
-  // observed rather than polled on scroll so it costs nothing while idle.
-  const sentinel = remaining <= 0
-    ? null
-    : el("div", { class: "kb-sentinel" },
-      app.knowledgeTab.loadingMore
-        ? el("span", { class: "kb-meta" }, "读取中…")
-        : el("span", { class: "kb-meta" }, `继续下滑加载（还有 ${remaining} 张）`));
-  if (sentinel !== null) {
-    observeSentinel(sentinel);
-  }
-
-  return el("div", {},
-    el("p", { class: "kb-meta" },
-      remaining > 0
-        ? `共 ${results.total} 张，已显示 ${results.items.length} 张。`
-        : `共 ${results.total} 张，已全部显示。`,
-      windowed ? "　（大量结果已启用窗口渲染）" : ""),
-    grid,
-    sentinel);
 };
 
 const renderKnowledgeView = () => {
   const surface = app.knowledgeTab.surface;
-  // Every render replaces the grid node, so any previous window must be released
-  // first; renderImages re-mounts it when it is still the active surface.
-  teardownVirtualGrid();
   const body = surface === "images"
-    ? renderImages()
+    ? renderKnowledgeImages()
     : surface === "requests" ? renderRequests() : renderCoverage();
   setChildren($("#view-knowledge"),
-    el("section", { class: "panel" },
+    el("section", { class: "panel kb-page" },
       knowledgeSurfaceTabs(),
-      surface === "coverage" ? null : knowledgeStats(),
-      surface === "images" ? knowledgeCoverageNote() : null,
-      surface === "images" ? knowledgeFilters() : null,
+      el("div", { id: "kb-header", class: "kb-header" }, knowledgeHeader()),
+      surface === "images" ? knowledgeSearchBar() : null,
+      surface === "images" ? knowledgeConditions() : null,
+      surface === "images" ? syntaxHelpPanel() : null,
+      surface === "images" ? exportPanel() : null,
       app.knowledgeTab.error === null
         ? null
         : el("p", { class: "kb-note warn" }, app.knowledgeTab.error),
-      body),
-    renderKnowledgeDetail());
+      body));
 };
 
-try {
-  if (!KNOWLEDGE_SURFACES.has(app.knowledgeTab.surface)) {
-    replaceKnowledgeTab({ surface: "images" });
+// The detail overlay lives outside the view, so opening, stepping through and
+// closing it never rebuilds the picture wall underneath.
+const renderKnowledgeDetailLayer = () => {
+  document.getElementById("kb-detail-layer")?.remove();
+  const overlay = renderKnowledgeDetail();
+  if (overlay === null) {
+    return;
   }
-  const stored = localStorage.getItem(DENSITY_KEY);
-  replaceKnowledgeTab({ density: DENSITIES.has(stored) ? stored : "detail" });
-} catch {
-  // A blocked localStorage must never stop the page from loading.
-  replaceKnowledgeTab({ surface: "images", density: "detail" });
+  overlay.id = "kb-detail-layer";
+  overlay.classList.add("view-layer");
+  document.body.append(overlay);
+};
+
+VIEW_RELOADERS.knowledge = () => {
+  replaceKnowledgeTab({ overview: null, results: null, facets: null, facetsKey: "", requests: null, coverage: null });
+  ensureKnowledgeLoaded();
+};
+VIEW_LEAVE_HOOKS.push(() => replaceKnowledgeTab({ detail: null }));
+
+if (!KNOWLEDGE_SURFACES.has(app.knowledgeTab.surface)) {
+  replaceKnowledgeTab({ surface: "images" });
 }
 
 document.addEventListener("keydown", (event) => {
@@ -1354,7 +1029,7 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && app.knowledgeTab.detail !== null) {
     replaceKnowledgeTab({ detail: null });
-    renderKnowledgeView();
+    renderKnowledgeDetailLayer();
     return;
   }
   if (app.knowledgeTab.detail !== null && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {

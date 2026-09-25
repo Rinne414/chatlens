@@ -391,6 +391,7 @@ const getStoreMessages = (query) => {
     beforeRowId: typeof query.beforeRowId === "string" && query.beforeRowId.length > 0 ? query.beforeRowId : undefined,
     limit: Number.parseInt(query.limit ?? "300", 10),
     search: typeof query.q === "string" ? query.q : undefined,
+    mediaOnly: query.media === "1",
   });
 
   // Picture facts for media rows, so the chat can show every picture (the
@@ -405,6 +406,8 @@ const getStoreMessages = (query) => {
     messages,
     coverage: messageStore.getCoverage(db, groupId),
     readMark: messageStore.getReadMark(db, groupId),
+    // So the chat can mark what is addressed to you.
+    selfUins: messageStore.getSelfIdentity(db).uins,
   };
 };
 

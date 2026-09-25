@@ -10,6 +10,7 @@ const path = require("node:path");
 const jobs = require("./picture_jobs");
 const picturePass = require("./picture_pass");
 const service = require("./picture_service");
+const exportOps = require("./picture_export_ops");
 
 const IMAGE_TYPES = { ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
 const STATE_TEXT = {
@@ -83,6 +84,12 @@ const handlePictureApi = async (request, response, url, { sendJson, sendError, r
       return true;
     case "POST /api/pictures/keep":
       sendJson(response, 200, await jobs.keepOriginals((await readBody(request)).md5s));
+      return true;
+    case "POST /api/pictures/export":
+      sendJson(response, 200, await exportOps.exportPictures(await readBody(request)));
+      return true;
+    case "POST /api/pictures/export/open":
+      sendJson(response, 200, exportOps.openExportFolder(await readBody(request)));
       return true;
     case "GET /api/pictures/expiring":
       sendJson(response, 200, picturePass.expiring());

@@ -24,41 +24,59 @@ const displayText = (item) =>
 
 /* ---------- inbox ---------- */
 
-const renderInbox = () => {
-  const overview = app.msg.overview;
-  const groups = overview?.groups ?? [];
+const inboxRow = (group) => {
+  const name = group.name || group.groupId;
+  const last = group.lastMessage;
+  const extra = app.msg.extras?.[group.groupId] ?? null;
+  const preview = last === null || last === undefined
+    ? "（暂无消息）"
+    : `${last.speaker}: ${last.isMedia === 1 ? mediaLabelText(last.mediaKinds, last.text) : last.text}`;
+  return el("button", {
+    class: "inbox-row",
+    onclick: () => openChat({ groupId: group.groupId, groupName: name, fromLastRead: true }),
+  },
+    avatarEl(name, group.groupId, undefined, groupAvatarUrl(group.groupId)),
+    el("span", { class: "inbox-main" },
+      el("span", { class: "inbox-top" },
+        el("span", { class: "inbox-name" }, name),
+        extra === null ? null : inboxBadges(extra),
+        el("span", { class: "inbox-time" }, shortTime(group.lastUnix))),
+      el("span", { class: "inbox-bottom" },
+        el("span", { class: "inbox-preview" }, preview),
+        group.unreadCount > 0
+          ? el("span", { class: "badge" }, group.unreadCount > 99 ? "99+" : String(group.unreadCount))
+          : null),
+      extra === null || extra.topics.length === 0
+        ? null
+        : el("span", { class: "inbox-topics" }, el("span", {}, "在聊"), extra.topics.map((topic) => el("span", { class: "inbox-topic" }, topic)))));
+};
 
-  const rows = groups.map((group) => {
-    const name = group.name || group.groupId;
-    const last = group.lastMessage;
-    const preview = last === null || last === undefined
-      ? "（暂无消息）"
-      : `${last.speaker}: ${last.isMedia === 1 ? mediaLabelText(last.mediaKinds, last.text) : last.text}`;
-    return el("button", {
-      class: "inbox-row",
-      onclick: () => openChat({ groupId: group.groupId, groupName: name, fromLastRead: true }),
-    },
-      avatarEl(name, group.groupId, undefined, groupAvatarUrl(group.groupId)),
-      el("span", { class: "inbox-main" },
-        el("span", { class: "inbox-top" },
-          el("span", { class: "inbox-name" }, name),
-          el("span", { class: "inbox-time" }, shortTime(group.lastUnix))),
-        el("span", { class: "inbox-bottom" },
-          el("span", { class: "inbox-preview" }, preview),
-          group.unreadCount > 0
-            ? el("span", { class: "badge" }, group.unreadCount > 99 ? "99+" : String(group.unreadCount))
-            : null)));
-  });
+const renderInbox = () => {
+  const groups = app.msg.overview?.groups ?? [];
+  const extras = app.msg.extras;
+  const active = INBOX_FILTERS.find(([key]) => key === app.msg.filter) ?? INBOX_FILTERS[0];
+  const shown = extras === null ? groups : groups.filter((group) => active[2](extras[group.groupId] ?? { mentions: 0, newAi: 0, qa: 0 }));
+  const countFor = (test) => (extras === null ? null : groups.filter((group) => test(extras[group.groupId] ?? { mentions: 0, newAi: 0, qa: 0 })).length);
 
   setChildren($("#view-messages"),
     el("div", { class: "card" },
-      el("div", { class: "row", style: "justify-content:space-between;margin-bottom:10px" },
-        el("h2", { style: "margin:0" }, "群消息"),
-        el("span", { class: "card-sub", style: "margin:0" },
-          "本地消息永久保留，不会自动删除 · 蓝点是本工具未查看数，不是 QQ 未读")),
+      el("div", { class: "row inbox-head" },
+        el("h2", {}, "群消息"),
+        el("div", { class: "wall-modes", role: "group", "aria-label": "筛选" }, INBOX_FILTERS.map(([key, label, test]) => el("button", {
+          class: app.msg.filter === key ? "wall-mode active" : "wall-mode",
+          type: "button",
+          "aria-pressed": String(app.msg.filter === key),
+          onclick: () => {
+            app.msg.filter = key;
+            renderInbox();
+          },
+        }, label, key === "all" || countFor(test) === null ? "" : ` ${countFor(test)}`))),
+        el("span", { class: "card-sub inbox-note" }, "数字是本工具还没看过的消息，不是 QQ 未读")),
       groups.length === 0
-        ? el("div", { class: "empty" }, "还没有本地消息记录，先在「运行」页跑一次总结。")
-        : el("div", { class: "inbox-list" }, rows)));
+        ? el("div", { class: "empty" }, "还没有本地消息记录。后台刷新第一次跑完后这里就会有群。")
+        : shown.length === 0
+          ? el("div", { class: "empty" }, "没有符合这个筛选的群。")
+          : el("div", { class: "inbox-list" }, shown.map(inboxRow))));
 };
 
 /* ---------- chat data ---------- */
@@ -74,6 +92,9 @@ const buildMessagesQuery = (reset) => {
   }
   if (msg.q.trim().length > 0) {
     params.set("q", msg.q.trim());
+  }
+  if (msg.mediaOnly) {
+    params.set("media", "1");
   }
   if (!reset && msg.items.length > 0) {
     const last = msg.items.at(-1);
@@ -136,6 +157,7 @@ const loadMessages = async (reset) => {
     msg.hasMore = result.hasMore;
     msg.coverage = result.coverage ?? [];
     msg.readMark = result.readMark ?? null;
+    msg.selfUins = Array.isArray(result.selfUins) ? result.selfUins : msg.selfUins;
     if (reset && msg.dividerAt === null && msg.readMark !== null) {
       msg.dividerAt = msg.readMark.sentAt;
     }
@@ -159,6 +181,9 @@ const loadOlderMessages = async () => {
     params.set("beforeRowId", first.rowId);
     if (msg.q.trim().length > 0) {
       params.set("q", msg.q.trim());
+    }
+    if (msg.mediaOnly) {
+      params.set("media", "1");
     }
     const result = await api(`/api/messages?${params}`);
     msg.items = [...result.messages, ...msg.items];
@@ -186,6 +211,8 @@ const openChat = async ({ groupId, groupName, fromUnix, toUnix, fromLastRead, or
   msg.selB = null;
   msg.scrollToUnread = fromLastRead === true;
   msg.origin = origin ?? null;
+  msg.mediaOnly = false;
+  msg.panelItems = null;
   msg.scrollToTime = Number.isFinite(scrollToTime) ? scrollToTime : null;
   msg.scrollToRowIds = Array.isArray(scrollToRowIds) ? [...scrollToRowIds] : [];
 
@@ -211,6 +238,9 @@ const openChat = async ({ groupId, groupName, fromUnix, toUnix, fromLastRead, or
     alert(`读取消息失败: ${error.message}`);
   }
   renderMessagesView();
+  if (msg.panel) {
+    loadChatPanel();
+  }
 };
 
 const openMessagesView = async (preset) => {
@@ -234,6 +264,7 @@ const openMessagesView = async (preset) => {
     return;
   }
   renderMessagesView();
+  loadInboxExtras();
 };
 
 const rangeCoverage = (coverage, fromUnix, toUnix) => {
@@ -273,6 +304,7 @@ const postReadMark = async (body) => {
       // ignores the server's same-second row_id tie-break.
     }
   }
+  loadRail();
 };
 
 const markReadToLatest = async () => {
@@ -524,6 +556,7 @@ const chatMessageNode = (item, index, inSelection, mediaFiles) => {
   if (isUnread) {
     classes.push("unread");
   }
+  classes.push(...markClasses(item));
   const body = showImage
     ? imageFiles.slice(0, 9).map((file) =>
       el("img", {
@@ -563,6 +596,7 @@ const compactMessageNode = (item, index, inSelection) => {
   if (app.msg.dividerAt !== null && item.sentAt > app.msg.dividerAt) {
     classes.push("unread");
   }
+  classes.push(...markClasses(item));
   return el("div", {
     class: classes.join(" "),
     dataset: { idx: String(index), sentat: String(item.sentAt), rowid: item.rowId },
@@ -830,6 +864,18 @@ const renderChat = () => {
           renderMessagesView();
         },
       }, msg.style === "compact" ? "🗨️ 气泡模式" : "☰ 紧凑模式"),
+      el("button", {
+        class: msg.mediaOnly ? "btn small active" : "btn small",
+        type: "button",
+        "aria-pressed": String(msg.mediaOnly),
+        onclick: toggleMediaOnly,
+      }, "只看图片"),
+      el("button", {
+        class: msg.panel ? "btn small active" : "btn small",
+        type: "button",
+        "aria-pressed": String(msg.panel),
+        onclick: toggleChatPanel,
+      }, "本群摘要"),
       el("button", { class: "btn small", onclick: markReadToLatest }, "全部标为本工具已查看")),
     rangeStatus,
     el("div", { class: "row" },
@@ -872,7 +918,11 @@ const renderChat = () => {
 
   const toBottom = el("button", { class: "to-bottom", title: "回到最新", onclick: goToLatest }, "⤓");
 
-  setChildren($("#view-messages"), header, el("div", { class: "chat-wrap" }, list, toBottom), selectionBar);
+  setChildren($("#view-messages"), header,
+    el("div", { class: msg.panel ? "chat-body with-panel" : "chat-body" },
+      el("div", { class: "chat-wrap" }, list, toBottom),
+      msg.panel ? el("aside", { id: "chat-panel", class: "chat-panel" }, chatPanelBody()) : null),
+    selectionBar);
   setupChatObservers(list);
 
   if (Array.isArray(msg.scrollToRowIds) && msg.scrollToRowIds.length > 0) {

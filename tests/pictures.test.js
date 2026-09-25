@@ -343,7 +343,7 @@ test("generated pictures keep an untruncated workflow and do not replace a real 
   }
 });
 
-test("the page wires chat thumbnails, the viewer, settings, and the expiring list", () => {
+test("the page wires chat thumbnails, the viewer, settings, the gallery and the expiring list", () => {
   const root = path.join(__dirname, "..");
   const html = fs.readFileSync(path.join(root, "web", "index.html"), "utf8");
   const messages = fs.readFileSync(path.join(root, "web", "messages.js"), "utf8");
@@ -354,7 +354,10 @@ test("the page wires chat thumbnails, the viewer, settings, and the expiring lis
   assert.match(messages, /pictureUrl\(picture\.md5, "thumb"\)/u);
   assert.match(messages, /openPictureViewer\(picture\)/u);
   assert.match(settings, /renderPictureSettingsCard\(\)/u);
-  assert.match(backup, /renderExpiringPictures\(\)/u);
+  const gallery = fs.readFileSync(path.join(root, "web", "gallery.js"), "utf8");
+  assert.match(backup, /backupRescue\(\)/u);
+  assert.match(backup, /api\("\/api\/pictures\/keep"/u);
+  assert.match(gallery, /pictureUrl\(item\.md5, "thumb"\)/u);
   assert.match(knowledge, /downloadPictureWorkflow\(item\.hash\)/u);
   assert.equal(fs.existsSync(path.join(root, "web", "pictures.js")), true);
 });

@@ -322,6 +322,7 @@ module.exports = {
   buildStem,
   sanitizeStem,
   promptFor,
+  sidecarText,
   csvFrom,
   LEDGER_SCHEMA,
 };
