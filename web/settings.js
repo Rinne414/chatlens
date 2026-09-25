@@ -22,7 +22,7 @@ const openSettingsView = async () => {
     return;
   }
   renderSettingsView();
-  await Promise.all([refreshBackgroundStatus(), loadAiUsage(), loadPictureStatus()]);
+  await Promise.all([refreshBackgroundStatus(), loadAiUsage(), loadPictureStatus(), autoCheckForUpdate()]);
   renderSettingsView();
 };
 
@@ -366,95 +366,15 @@ const renderSettingsView = () => {
   /* --- background refresh, notifications, desktop --- */
   const backgroundCard = renderBackgroundCard();
 
-  /* --- check & update --- */
-  const updateCard = renderUpdateCard();
 
   const aboutCard = el("div", { class: "card" },
     el("h2", {}, "安全说明"),
     el("ul", { style: "margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9" },
       el("li", {}, "只读：工具复制数据库文件后离线解析，从不写 QQ 的任何文件，也不使用 QQ 登录协议。"),
       el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。"),
-      el("li", {}, "外部流量：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图按 md5 校验，图片钥匙只留在内存里）；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；「检查更新」访问 GitHub。")));
+      el("li", {}, "外部流量：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图按 md5 校验，图片钥匙只留在内存里）；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本信息。")));
 
-  setChildren($("#view-settings"), readinessCard, renderMoreLinks(), pathsCard, keysCard, llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, updateCard, aboutCard);
-};
-
-/* --- check & update card --- */
-
-const updateState = { info: null, busy: false, notice: null };
-
-const renderUpdateCard = () => {
-  const msg = el("span", { style: "font-size:13px" });
-  if (updateState.notice !== null) {
-    settingsFeedback(msg, updateState.notice.text, updateState.notice.isError);
-  }
-  const info = updateState.info;
-  const currentVersion = settingsState.status?.version ?? "?";
-
-  const checkButton = el("button", {
-    class: "btn small",
-    disabled: updateState.busy,
-    onclick: async () => {
-      updateState.busy = true;
-      updateState.notice = { text: "正在检查更新…", isError: false };
-      renderSettingsView();
-      try {
-        updateState.info = await api("/api/update/check");
-        updateState.notice = updateState.info.hasUpdate
-          ? { text: `发现新版本 v${updateState.info.latestVersion}（当前 v${updateState.info.currentVersion}）。`, isError: false }
-          : { text: `已是最新版本（v${updateState.info.currentVersion}）。`, isError: false };
-      } catch (error) {
-        updateState.notice = { text: `检查失败：${error.message}`, isError: true };
-      }
-      updateState.busy = false;
-      renderSettingsView();
-    },
-  }, "🔎 检查更新");
-
-  const applyButton = info?.hasUpdate === true
-    ? el("button", {
-        class: "btn small primary",
-        disabled: updateState.busy,
-        onclick: async () => {
-          if (!window.confirm(`更新到 v${info.latestVersion}？\n控制台会自动退出并重启（约 10-30 秒）。配置、密钥和已生成的数据都会保留。`)) {
-            return;
-          }
-          updateState.busy = true;
-          updateState.notice = { text: "正在下载并安装更新…", isError: false };
-          renderSettingsView();
-          try {
-            await api("/api/update/apply", { method: "POST", body: "{}" });
-            setChildren($("#view-settings"),
-              el("div", { class: "card" },
-                el("h2", {}, "正在更新"),
-                el("p", { class: "card-sub" },
-                  "控制台正在退出并替换程序文件，完成后会自动重新启动并打开新页面。",
-                  el("br"),
-                  isWindowsHost()
-                    ? "如果 30 秒后没有自动打开，请手动双击 Start-QQ-Console.cmd。"
-                    : "如果 30 秒后没有自动打开，请运行安装目录里的 ./start.sh。")));
-            return;
-          } catch (error) {
-            updateState.notice = { text: `更新失败：${error.message}`, isError: true };
-          }
-          updateState.busy = false;
-          renderSettingsView();
-        },
-      }, `⬆️ 一键更新到 v${info.latestVersion}`)
-    : null;
-
-  const notesBlock = info?.hasUpdate === true && info.notes
-    ? el("pre", { style: "margin:10px 0 0;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:180px;overflow:auto;color:var(--muted)" }, info.notes)
-    : null;
-
-  return el("div", { class: "card" },
-    el("h2", {}, "关于与更新"),
-    el("p", { class: "card-sub" },
-      `当前版本 v${currentVersion} · 项目主页 `,
-      el("a", { href: "https://github.com/Rinne414/chatlens", target: "_blank", rel: "noopener" }, "GitHub"),
-      "。检查更新会访问 GitHub 获取最新发布版本；一键更新会下载对应安装包并自动重启控制台，你的配置、密钥和数据不受影响。"),
-    el("div", { class: "row" }, checkButton, applyButton, msg),
-    notesBlock);
+  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderMoreLinks(), pathsCard, keysCard, llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, aboutCard);
 };
 
 /* --- pages that moved off the rail --- */

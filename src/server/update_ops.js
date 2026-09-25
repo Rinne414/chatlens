@@ -78,7 +78,14 @@ const isNewerVersion = (candidate, current) => {
   return false;
 };
 
-const checkUpdate = async () => {
+// The console checks by itself when it opens and every few hours; the answer
+// is kept this long, so that is at most one GitHub request per window. A
+// failed check (offline, rate limit) is retried after FAILED_CHECK_RETRY_MS.
+const AUTO_CHECK_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const FAILED_CHECK_RETRY_MS = 30 * 60 * 1000;
+let lastCheck = null;
+
+const fetchLatestRelease = async () => {
   const body = await httpRequest(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
   let release;
   try {
@@ -104,6 +111,23 @@ const checkUpdate = async () => {
       downloadUrl: asset.browser_download_url ?? null,
     })),
   };
+};
+
+// maxAgeMs 0 (the 检查更新 button, applyUpdate) always asks GitHub.
+const checkUpdate = async ({ maxAgeMs = 0, now = Date.now() } = {}) => {
+  const age = lastCheck === null ? Infinity : now - lastCheck.at;
+  const limit = lastCheck?.error === undefined ? maxAgeMs : Math.min(maxAgeMs, FAILED_CHECK_RETRY_MS);
+  if (age >= limit) {
+    try {
+      lastCheck = { at: now, result: await fetchLatestRelease() };
+    } catch (error) {
+      lastCheck = { at: now, error };
+    }
+  }
+  if (lastCheck.error !== undefined) {
+    throw lastCheck.error;
+  }
+  return lastCheck.result;
 };
 
 // Zero-setup bundles ship their own node (node\node.exe / node/bin/node);
@@ -350,4 +374,4 @@ const applyUpdate = async () => {
   return { updating: true, targetVersion: info.latestVersion };
 };
 
-module.exports = { checkUpdate, applyUpdate, pickAssetFor, isNewerVersion, windowsUpdaterArgs };
+module.exports = { AUTO_CHECK_MAX_AGE_MS, checkUpdate, applyUpdate, pickAssetFor, isNewerVersion, windowsUpdaterArgs };

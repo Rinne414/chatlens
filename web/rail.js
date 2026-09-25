@@ -117,6 +117,7 @@ const renderRailStatus = () => {
 const renderRail = () => {
   renderRailGroups();
   renderRailStatus();
+  renderRailVersion();
 };
 
 const loadRail = async () => {
@@ -135,6 +136,7 @@ const loadRail = async () => {
       railState.error = error.message;
     }
     renderRail();
+    autoCheckForUpdate();
   }
 };
 

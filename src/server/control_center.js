@@ -327,7 +327,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/rail") {
-      sendJson(response, 200, railOps.getRail());
+      sendJson(response, 200, { ...railOps.getRail(), version: packageInfo.version });
       return;
     }
 
@@ -681,7 +681,8 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/update/check") {
-      sendJson(response, 200, await update.checkUpdate());
+      const cached = url.searchParams.get("cached") === "1";
+      sendJson(response, 200, await update.checkUpdate({ maxAgeMs: cached ? update.AUTO_CHECK_MAX_AGE_MS : 0 }));
       return;
     }
 
