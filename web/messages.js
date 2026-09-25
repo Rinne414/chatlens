@@ -5,6 +5,11 @@
 const nowUnix = () => Math.floor(Date.now() / 1000);
 
 const MSG_PAGE_SIZE = 300;
+// Messages kept in the chat at once. A page loaded at one end drops as many
+// from the far end; they load again when scrolled back to. Keeping every page
+// ever loaded (and rebuilding them all on each page) reached 3,320 messages,
+// ~100k DOM nodes and +700 MB in the browser after 70 s of scrolling.
+const CHAT_WINDOW = MSG_PAGE_SIZE * 3;
 const BUBBLE_GROUP_GAP_SECONDS = 300;
 const AUTO_READ_DEBOUNCE_MS = 1500;
 
@@ -142,10 +147,25 @@ const ensureMediaMap = async () => {
   }
 };
 
+const NO_PAGE = { added: [], dropped: [] };
+
+// At most `max` items. `dropFrom` is the end away from the page just added:
+// "start" after appending newer messages, "end" after prepending older ones.
+const windowedItems = (items, max, dropFrom) => {
+  const excess = items.length - max;
+  if (excess <= 0) {
+    return { items, dropped: [] };
+  }
+  return dropFrom === "start"
+    ? { items: items.slice(excess), dropped: items.slice(0, excess) }
+    : { items: items.slice(0, max), dropped: items.slice(max) };
+};
+
+// Returns the page added at the bottom and the messages dropped at the top.
 const loadMessages = async (reset) => {
   const msg = app.msg;
   if (msg.groupId === null || msg.loading) {
-    return;
+    return NO_PAGE;
   }
   msg.loading = true;
   try {
@@ -153,25 +173,31 @@ const loadMessages = async (reset) => {
       await ensureMediaMap();
     }
     const result = await api(`/api/messages?${buildMessagesQuery(reset)}`);
-    msg.items = reset ? result.messages : [...msg.items, ...result.messages];
+    const { items, dropped } = windowedItems(reset ? result.messages : [...msg.items, ...result.messages], CHAT_WINDOW, "start");
+    msg.items = items;
     msg.hasMore = result.hasMore;
+    if (dropped.length > 0) {
+      msg.hasOlder = true;
+    }
     msg.coverage = result.coverage ?? [];
     msg.readMark = result.readMark ?? null;
     msg.selfUins = Array.isArray(result.selfUins) ? result.selfUins : msg.selfUins;
     if (reset && msg.dividerAt === null && msg.readMark !== null) {
       msg.dividerAt = msg.readMark.sentAt;
     }
+    return { added: result.messages, dropped };
   } finally {
     msg.loading = false;
   }
 };
 
 // Backward (older) page loader for the top sentinel; prepends and keeps the
-// forward cursor untouched.
+// forward cursor untouched. Returns the page added at the top and the
+// messages dropped at the bottom.
 const loadOlderMessages = async () => {
   const msg = app.msg;
   if (msg.loading || msg.items.length === 0) {
-    return;
+    return NO_PAGE;
   }
   msg.loading = true;
   try {
@@ -179,6 +205,11 @@ const loadOlderMessages = async () => {
     const params = new URLSearchParams({ groupId: msg.groupId, limit: String(MSG_PAGE_SIZE) });
     params.set("beforeSentAt", String(first.sentAt));
     params.set("beforeRowId", first.rowId);
+    // A bounded range pages back only to its own start (to reload messages
+    // the window dropped); an open-ended one may go further back.
+    if (Number.isFinite(msg.from) && Number.isFinite(msg.to)) {
+      params.set("from", String(msg.from));
+    }
     if (msg.q.trim().length > 0) {
       params.set("q", msg.q.trim());
     }
@@ -186,8 +217,13 @@ const loadOlderMessages = async () => {
       params.set("media", "1");
     }
     const result = await api(`/api/messages?${params}`);
-    msg.items = [...result.messages, ...msg.items];
+    const { items, dropped } = windowedItems([...result.messages, ...msg.items], CHAT_WINDOW, "end");
+    msg.items = items;
     msg.hasOlder = result.hasMore && result.messages.length > 0;
+    if (dropped.length > 0) {
+      msg.hasMore = true;
+    }
+    return { added: result.messages, dropped };
   } finally {
     msg.loading = false;
   }
@@ -352,22 +388,42 @@ const scheduleAutoRead = (sentAt, rowId) => {
 
 /* ---------- selection + quick summary ---------- */
 
+// Selection ends are kept by message, not by list index: pages added above
+// or dropped from the window shift every index.
+const selectionMark = (item) => ({ rowId: item.rowId, sentAt: item.sentAt });
+
+// A selection end's index in the loaded window; an end the window dropped
+// sits just before (-1) or just after (length) it.
+const selectionIndex = (mark) => {
+  const items = app.msg.items;
+  const found = items.findIndex((item) => item.rowId === mark.rowId);
+  if (found >= 0) {
+    return found;
+  }
+  return items.length > 0 && mark.sentAt >= items.at(-1).sentAt ? items.length : -1;
+};
+
 const selectionRange = () => {
   const { selA, selB } = app.msg;
   if (selA === null) {
     return null;
   }
-  const end = selB ?? selA;
-  return { lo: Math.min(selA, end), hi: Math.max(selA, end) };
+  const start = selectionIndex(selA);
+  const end = selectionIndex(selB ?? selA);
+  return { lo: Math.min(start, end), hi: Math.max(start, end) };
 };
 
-const onSelectMessage = (index) => {
+// Messages in the selection, or null when part of it is outside the window.
+const selectionCount = (range) =>
+  range !== null && range.lo >= 0 && range.hi < app.msg.items.length ? range.hi - range.lo + 1 : null;
+
+const onSelectMessage = (item) => {
   const msg = app.msg;
   if (msg.selA === null || msg.selB !== null) {
-    msg.selA = index;
+    msg.selA = selectionMark(item);
     msg.selB = null;
   } else {
-    msg.selB = index;
+    msg.selB = selectionMark(item);
   }
   renderMessagesView();
 };
@@ -410,19 +466,17 @@ const quickSummaryResultNodes = (result) => [
 ];
 
 const summarizeSelection = async () => {
-  const range = selectionRange();
-  if (range === null) {
+  const { selA, selB } = app.msg;
+  if (selA === null) {
     return;
   }
-  const items = app.msg.items.slice(range.lo, range.hi + 1);
-  if (items.length === 0) {
-    clearSelection();
-    return;
-  }
-  const fromUnix = items[0].sentAt;
-  const toUnix = items.at(-1).sentAt;
+  const end = selB ?? selA;
+  const fromUnix = Math.min(selA.sentAt, end.sentAt);
+  const toUnix = Math.max(selA.sentAt, end.sentAt);
+  const count = selectionCount(selectionRange());
 
-  const status = el("p", { style: "margin:0" }, `正在总结选中的 ${items.length} 条消息…（约 10-30 秒）`);
+  const status = el("p", { style: "margin:0" },
+    `正在总结${count === null ? "所选时段的消息" : `选中的 ${count} 条消息`}…（约 10-30 秒）`);
   const modal = showModal("选段总结", status);
   try {
     await api("/api/quick-summary", { method: "POST", body: JSON.stringify({ groupId: app.msg.groupId, fromUnix, toUnix }) });
@@ -492,9 +546,31 @@ const remotePicturesFor = (item) =>
   (Array.isArray(item.pictures) ? item.pictures : [])
     .filter((picture) => PICTURE_MD5.test(String(picture?.md5 ?? "")));
 
+// Tencent's thumbnail is the picture scaled to 300 px on its long side, never
+// enlarged (measured 2026-09-25). Giving the <img> its shown size up front
+// keeps the list from changing height as thumbnails arrive, so a page
+// inserted above the reader leaves them where they were. `box` is the CSS
+// max size the picture is shown within (stickers: 140).
+const THUMB_LONG_SIDE = 300;
+const STICKER_BOX = 140;
+
+const thumbBox = (picture, box = THUMB_LONG_SIDE) => {
+  const width = Number(picture.width);
+  const height = Number(picture.height);
+  if (!(width > 0 && height > 0)) {
+    return { width: undefined, height: undefined };
+  }
+  const thumb = Math.min(1, THUMB_LONG_SIDE / Math.max(width, height));
+  const thumbWidth = Math.round(width * thumb);
+  const thumbHeight = Math.round(height * thumb);
+  const fit = Math.min(1, box / thumbWidth, box / thumbHeight);
+  return { width: Math.round(thumbWidth * fit), height: Math.round(thumbHeight * fit) };
+};
+
 const remotePictureNode = (picture) =>
   el("img", {
     class: "bubble-img",
+    ...thumbBox(picture),
     src: pictureUrl(picture.md5, "thumb"),
     loading: "lazy",
     alt: "图片",
@@ -514,6 +590,7 @@ const GIF_FORMAT = 2000;
 const remoteStickerNode = (picture) =>
   el("img", {
     class: "bubble-sticker",
+    ...thumbBox(picture, STICKER_BOX),
     src: pictureUrl(picture.md5, "thumb"),
     loading: "lazy",
     alt: "表情",
@@ -539,7 +616,7 @@ const remoteStickerNode = (picture) =>
 
 const isStickerFile = (kind) => kind === "sticker" || kind === "emoji" || kind === "face";
 
-const chatMessageNode = (item, index, inSelection, mediaFiles) => {
+const chatMessageNode = (item, inSelection, mediaFiles) => {
   const isUnread = app.msg.dividerAt !== null && item.sentAt > app.msg.dividerAt;
   const imageFiles = mediaFiles.filter((file) => isImageFile(file.kind));
   const showImage = imageFiles.length > 0;
@@ -577,18 +654,18 @@ const chatMessageNode = (item, index, inSelection, mediaFiles) => {
       : displayText(item);
   return el("div", {
     class: classes.join(" "),
-    dataset: { idx: String(index), sentat: String(item.sentAt), rowid: item.rowId },
+    dataset: { sentat: String(item.sentAt), rowid: item.rowId },
     onclick: !showImage && !showRemote && firstFile !== undefined ? () => window.open(firstFile.webPath, "_blank", "noopener") : undefined,
     oncontextmenu: (event) => {
       event.preventDefault();
-      onSelectMessage(index);
+      onSelectMessage(item);
     },
   },
     body,
     el("time", {}, unixToHkt(item.sentAt).slice(11, 16)));
 };
 
-const compactMessageNode = (item, index, inSelection) => {
+const compactMessageNode = (item, inSelection) => {
   const classes = ["msg-row"];
   if (item.isMedia === 1) {
     classes.push("media");
@@ -602,10 +679,10 @@ const compactMessageNode = (item, index, inSelection) => {
   classes.push(...markClasses(item));
   return el("div", {
     class: classes.join(" "),
-    dataset: { idx: String(index), sentat: String(item.sentAt), rowid: item.rowId },
+    dataset: { sentat: String(item.sentAt), rowid: item.rowId },
     oncontextmenu: (event) => {
       event.preventDefault();
-      onSelectMessage(index);
+      onSelectMessage(item);
     },
   },
     el("time", {}, unixToHkt(item.sentAt).slice(5, 16)),
@@ -613,23 +690,29 @@ const compactMessageNode = (item, index, inSelection) => {
     el("span", { class: "msg-text" }, displayText(item)));
 };
 
-const buildChatNodes = () => {
+// Chat nodes for `items`, continuing after `prev` (the message rendered just
+// before them, or null at the top of the list). In bubble style `openBody` is
+// the bubble column `prev` sits in, so a speaker's run continues across a page
+// boundary. `messageNodes` lists every message node created.
+const buildChatNodes = (items, { prev = null, openBody = null, dividerPlaced = app.msg.dividerAt === null } = {}) => {
   const msg = app.msg;
   const nodes = [];
+  const messageNodes = [];
   const range = selectionRange();
+  const indexOf = range === null ? null : new Map(msg.items.map((item, index) => [item.rowId, index]));
   const mediaCounters = new Map();
-  let currentDay = "";
-  let dividerPlaced = msg.dividerAt === null;
-  let bubbleBody = null;
-  let prevItem = null;
+  let currentDay = prev === null ? "" : unixToHkt(prev.sentAt).slice(0, 10);
+  let placed = dividerPlaced;
+  let bubbleBody = openBody;
+  let prevItem = prev;
 
-  msg.items.forEach((item, index) => {
+  for (const item of items) {
     const day = unixToHkt(item.sentAt).slice(0, 10);
     let breakGroup = false;
 
-    if (!dividerPlaced && item.sentAt > msg.dividerAt) {
+    if (!placed && item.sentAt > msg.dividerAt) {
       nodes.push(el("div", { class: "msg-unread-divider", id: "unread-divider" }, "── 上次读到这里 ──"));
-      dividerPlaced = true;
+      placed = true;
       breakGroup = true;
     }
     if (day !== currentDay) {
@@ -642,9 +725,12 @@ const buildChatNodes = () => {
       breakGroup = true;
     }
 
-    const inSelection = range !== null && index >= range.lo && index <= range.hi;
+    const index = indexOf?.get(item.rowId);
+    const inSelection = index !== undefined && index >= range.lo && index <= range.hi;
     if (msg.style === "compact") {
-      nodes.push(compactMessageNode(item, index, inSelection));
+      const node = compactMessageNode(item, inSelection);
+      nodes.push(node);
+      messageNodes.push(node);
     } else {
       const sameGroup = !breakGroup
         && prevItem !== null
@@ -657,74 +743,14 @@ const buildChatNodes = () => {
         nodes.push(el("div", { class: "bubble-group" },
           avatarEl(item.speaker, item.speaker, "sm", userAvatarUrl(item.speakerUin)), bubbleBody));
       }
-      bubbleBody.append(chatMessageNode(item, index, inSelection, mediaFilesFor(item, mediaCounters)));
+      const node = chatMessageNode(item, inSelection, mediaFilesFor(item, mediaCounters));
+      bubbleBody.append(node);
+      messageNodes.push(node);
     }
     prevItem = item;
-  });
-
-  return nodes;
-};
-
-const setupChatObservers = (listNode) => {
-  msgObservers.scroll?.disconnect();
-  msgObservers.scrollUp?.disconnect();
-  msgObservers.read?.disconnect();
-
-  // Scroll-up loader: chat paging used to be forward-only, so after a
-  // time-jump or "从上次已读" the messages older than the window start were
-  // unreachable even though the store had them.
-  const topSentinel = listNode.querySelector(".load-sentinel-top");
-  if (topSentinel !== null) {
-    msgObservers.scrollUp = new IntersectionObserver(async (entries) => {
-      if (entries.some((entry) => entry.isIntersecting) && app.msg.hasOlder && !app.msg.loading) {
-        const previousHeight = listNode.scrollHeight;
-        const previousTop = listNode.scrollTop;
-        try {
-          await loadOlderMessages();
-        } catch {
-          return;
-        }
-        renderMessagesView();
-        const nextList = document.querySelector(".chat-scroll");
-        if (nextList !== null) {
-          nextList.scrollTop = previousTop + (nextList.scrollHeight - previousHeight);
-        }
-      }
-    }, { root: listNode, rootMargin: "200px" });
-    msgObservers.scrollUp.observe(topSentinel);
   }
 
-  const sentinel = listNode.querySelector(".load-sentinel");
-  if (sentinel !== null) {
-    msgObservers.scroll = new IntersectionObserver(async (entries) => {
-      if (entries.some((entry) => entry.isIntersecting) && app.msg.hasMore && !app.msg.loading) {
-        const keepScroll = listNode.scrollTop;
-        try {
-          await loadMessages(false);
-        } catch {
-          return;
-        }
-        renderMessagesView();
-        const nextList = document.querySelector(".chat-scroll");
-        if (nextList !== null) {
-          nextList.scrollTop = keepScroll;
-        }
-      }
-    }, { root: listNode, rootMargin: "200px" });
-    msgObservers.scroll.observe(sentinel);
-  }
-
-  msgObservers.read = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (entry.isIntersecting) {
-        const { sentat, rowid } = entry.target.dataset;
-        scheduleAutoRead(Number(sentat), rowid ?? "");
-      }
-    }
-  }, { root: listNode, threshold: 0.5 });
-  for (const node of listNode.querySelectorAll("[data-sentat]")) {
-    msgObservers.read.observe(node);
-  }
+  return { nodes, messageNodes };
 };
 
 const chatRangeChips = () => {
@@ -828,7 +854,7 @@ const renderChat = () => {
   // Rebuilding the list resets scroll to the top; remember where the reader was
   // so selection clicks and style/icon toggles don't jump the chat away.
   const previousScrollTop = document.querySelector(".chat-scroll")?.scrollTop ?? 0;
-  const listNodes = buildChatNodes();
+  const { nodes: listNodes } = buildChatNodes(msg.items);
   const boundedCoverage = rangeCoverage(msg.coverage, msg.from, msg.to);
   const rangeStatus = !Number.isFinite(msg.from) || !Number.isFinite(msg.to)
     ? null
@@ -842,12 +868,15 @@ const renderChat = () => {
           ? "完整扫描"
           : `扫描 ${Math.round(boundedCoverage.coverageRatio * 100)}% · 缺失 ${formatDuration(boundedCoverage.missingSeconds)}`));
 
+  // The sentinels stay in the list (hidden when there is nothing to load) so
+  // pages can be inserted next to them without rebuilding the list.
   const list = el("div", { class: `chat-scroll ${msg.style === "compact" ? "msg-list" : "chat-list"}` },
-    msg.hasOlder && msg.items.length > 0 ? el("div", { class: "load-sentinel-top empty" }, "上滑加载更早…") : null,
+    el("div", { class: "load-sentinel-top empty" }, "上滑加载更早…"),
     msg.items.length === 0 && !msg.loading
       ? el("div", { class: "empty" }, "这个范围内没有本地记录。")
       : listNodes,
-    msg.hasMore ? el("div", { class: "load-sentinel empty" }, "下滑加载更多…") : null);
+    el("div", { class: "load-sentinel empty" }, "下滑加载更多…"));
+  refreshChatChrome(list);
 
   const header = el("div", { class: "card chat-head" },
     el("div", { class: "row", style: "margin-bottom:10px" },
@@ -857,7 +886,7 @@ const renderChat = () => {
       }, msg.origin === null ? "← 群列表" : `← ${msg.origin.label}`),
       avatarEl(msg.groupName, msg.groupId, "sm", groupAvatarUrl(msg.groupId)),
       el("h2", { style: "margin:0;font-size:16px" }, msg.groupName),
-      el("span", { class: "card-sub", style: "margin:0" }, `${msg.items.length} 条${msg.hasMore ? "+" : ""}`),
+      el("span", { class: "card-sub chat-count", style: "margin:0" }, chatCountText()),
       el("span", { style: "flex:1" }),
       el("button", {
         class: "btn small",
@@ -915,7 +944,9 @@ const renderChat = () => {
   const range = selectionRange();
   const selectionBar = range === null ? null
     : el("div", { class: "sel-bar" },
-        el("span", {}, app.msg.selB === null ? "已选起点，右键另一条消息选终点" : `已选 ${range.hi - range.lo + 1} 条`),
+        el("span", {}, app.msg.selB === null
+          ? "已选起点，右键另一条消息选终点"
+          : selectionCount(range) === null ? "已选一段（部分不在当前载入的消息里）" : `已选 ${selectionCount(range)} 条`),
         el("button", { class: "btn small primary", onclick: summarizeSelection, disabled: app.msg.selB === null && app.msg.selA === null }, "🧠 总结所选"),
         el("button", { class: "btn small", onclick: clearSelection }, "取消"));
 

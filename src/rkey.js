@@ -140,4 +140,97 @@ const pickWorking = async (candidates, probe, { fetchImpl } = {}) => {
   return { key: null, probeGone: false };
 };
 
-module.exports = { scanCandidates, parseCandidates, collectFromBuffer, pickWorking };
+// The key the console holds, in memory only. `scan` returns { key, problem }.
+// A scan reads every QQ process (~12 s, measured 2026-09-25), so it runs at
+// most every RESCAN_MIN_MS. Tencent refusing a key usually means it expired,
+// but it can also be one picture the key is not good for: a key that worked
+// in the last KEY_TRUST_MS is kept until it is refused MAX_REFUSALS times in
+// a row. Earlier every refusal forced an immediate rescan.
+const KEY_TRUST_MS = 60 * 1000;
+const RESCAN_MIN_MS = 2 * 60 * 1000;
+const MAX_REFUSALS = 3;
+
+const createKeyHolder = ({ scan, now = Date.now }) => {
+  const state = { key: null, problem: null, checkedAt: 0, lastOkAt: 0, lastScanAt: 0, refusals: 0, scanning: null };
+
+  const rescan = () => {
+    state.lastScanAt = now();
+    state.scanning = Promise.resolve()
+      .then(scan)
+      .then(({ key, problem }) => {
+        if (key === null) {
+          state.problem = problem;
+          return null;
+        }
+        Object.assign(state, { key, problem: null, checkedAt: now(), lastOkAt: now(), refusals: 0 });
+        return key;
+      })
+      .catch(() => {
+        state.problem = "scan-failed";
+        return null;
+      })
+      .finally(() => {
+        state.scanning = null;
+      });
+    return state.scanning;
+  };
+
+  // A usable key, scanning when there is none (not more often than
+  // RESCAN_MIN_MS, so a closed QQ is not rescanned on every request).
+  const ensure = async () => {
+    if (state.key !== null) {
+      return state.key;
+    }
+    if (state.scanning !== null) {
+      return state.scanning;
+    }
+    if (now() - state.lastScanAt < RESCAN_MIN_MS) {
+      return null;
+    }
+    return rescan();
+  };
+
+  const succeeded = (key) => {
+    if (key !== null && key === state.key) {
+      state.lastOkAt = now();
+      state.refusals = 0;
+    }
+  };
+
+  // Tencent refused `key`: returns a different key to retry with, or null.
+  const refused = async (key) => {
+    if (key === null) {
+      return null;
+    }
+    if (state.key === key) {
+      state.refusals += 1;
+      const stale = now() - state.lastOkAt >= KEY_TRUST_MS || state.refusals >= MAX_REFUSALS;
+      if (!stale || now() - state.lastScanAt < RESCAN_MIN_MS) {
+        return null;
+      }
+      state.key = null;
+    }
+    const fresh = await ensure();
+    return fresh !== null && fresh !== key ? fresh : null;
+  };
+
+  const status = () => ({
+    ready: state.key !== null,
+    problem: state.problem,
+    checkedAt: state.checkedAt > 0 ? new Date(state.checkedAt).toISOString() : null,
+    scanning: state.scanning !== null,
+  });
+
+  return { ensure, succeeded, refused, status };
+};
+
+module.exports = {
+  KEY_TRUST_MS,
+  RESCAN_MIN_MS,
+  MAX_REFUSALS,
+  scanCandidates,
+  parseCandidates,
+  collectFromBuffer,
+  pickWorking,
+  createKeyHolder,
+};

@@ -6,6 +6,7 @@
 // the old Windows-only scheduled task.
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const state = require("./toolkit_state");
@@ -78,6 +79,20 @@ const status = {
 };
 let timer = null;
 let child = null;
+
+// The refresh hashes the whole QQ database and runs in the background, so it
+// yields the CPU to whatever the user is doing. On Windows the processes it
+// starts (key scans) inherit the lower priority class.
+const lowerPriority = (pid) => {
+  if (!Number.isInteger(pid)) {
+    return;
+  }
+  try {
+    os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+  } catch (error) {
+    console.error(`refresh priority could not be lowered: ${error.message}`);
+  }
+};
 let serverUrl = null;
 let onTickFinished = () => {};
 
@@ -196,6 +211,7 @@ const tick = ({ force }) => {
   status.nextRunAt = null;
   const args = [refreshScript, ...(force ? ["--force"] : [])];
   child = spawn(process.execPath, args, { cwd: state.toolRoot, ...platform.spawnOptionsForTree() });
+  lowerPriority(child.pid);
   let output = "";
   let buffer = "";
   const consume = (chunk) => {

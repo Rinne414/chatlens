@@ -34,7 +34,6 @@ const DEFAULTS = { enabled: true, budgetGB: 10, keepAllGroups: [] };
 const BUDGETS_GB = new Set([2, 5, 10, 20, 50, 100]);
 const GB = 1024 ** 3;
 const CACHE_SHARE = 0.3;
-const RESCAN_MIN_MS = 2 * 60 * 1000;
 const PASS_MAX_MS = 10 * 60 * 1000;
 const BATCH = 40;
 const CONCURRENCY = 3;
@@ -75,56 +74,31 @@ const saveSettings = (patch) => {
 
 /* ---------- rkey (memory only) ---------- */
 
-const rkey = { key: null, problem: null, checkedAt: 0, lastScanAt: 0, scanning: null };
-
 const scanForRkey = async () => {
-  rkey.lastScanAt = Date.now();
   const probes = store.recentNt(state.getStore(), unix(), 5);
   if (probes.length === 0) {
-    rkey.problem = "no-pictures";
-    return null;
+    return { key: null, problem: "no-pictures" };
   }
   const scan = await rkeyScan.scanCandidates(state.toolRoot);
   if (scan.problem !== null) {
-    rkey.problem = scan.problem;
-    return null;
+    return { key: null, problem: scan.problem };
   }
   for (const probe of probes) {
     const picked = await rkeyScan.pickWorking(scan.candidates, probe);
     if (picked.key !== null) {
-      Object.assign(rkey, { key: picked.key, problem: null, checkedAt: Date.now() });
-      return picked.key;
+      return { key: picked.key, problem: null };
     }
     if (!picked.probeGone) {
       break;
     }
   }
-  rkey.problem = scan.candidates.length === 0 ? "none-found" : "none-valid";
-  return null;
+  return { key: null, problem: scan.candidates.length === 0 ? "none-found" : "none-valid" };
 };
 
-// A valid rkey, scanning QQ's memory when there is none (at most every 2
-// minutes, so a closed QQ is not rescanned on every request).
-const ensureRkey = async () => {
-  if (rkey.key !== null) {
-    return rkey.key;
-  }
-  if (rkey.scanning !== null) {
-    return rkey.scanning;
-  }
-  if (Date.now() - rkey.lastScanAt < RESCAN_MIN_MS) {
-    return null;
-  }
-  rkey.scanning = scanForRkey()
-    .catch(() => {
-      rkey.problem = "scan-failed";
-      return null;
-    })
-    .finally(() => {
-      rkey.scanning = null;
-    });
-  return rkey.scanning;
-};
+const rkey = rkeyScan.createKeyHolder({ scan: scanForRkey });
+
+// A valid rkey, scanning QQ's memory when there is none (see createKeyHolder).
+const ensureRkey = () => rkey.ensure();
 
 /* ---------- fetching and files ---------- */
 
@@ -137,22 +111,23 @@ const countTraffic = (bytes) => {
   traffic.bytes += bytes;
 };
 
-// One fetch, retried once with a fresh rkey when Tencent refuses the key.
+// One fetch, retried once with a fresh rkey when Tencent refuses the key and
+// the holder decides the key itself is stale.
 const withRkey = async (picture, fetchOnce) => {
-  const key = picture.fileId ? await ensureRkey() : null;
+  let key = picture.fileId ? await ensureRkey() : null;
   let result = await fetchOnce(key);
   if (result.outcome === "rkey") {
-    if (rkey.key === key) {
-      rkey.key = null;
-      rkey.lastScanAt = 0;
-    }
-    const fresh = await ensureRkey();
-    if (fresh !== null && fresh !== key) {
+    const fresh = await rkey.refused(key);
+    if (fresh !== null) {
+      key = fresh;
       result = await fetchOnce(fresh);
     }
   }
   if (result.outcome === "ok") {
     countTraffic(result.bytes.length);
+    if (result.via === "nt") {
+      rkey.succeeded(key);
+    }
   }
   return result;
 };
@@ -211,12 +186,7 @@ const localFile = (row, md5, size) => {
 const anyLocalFile = (row, md5) =>
   variantPath(row, "thumb") ?? variantPath(row, "preview") ?? keptPath(row, md5) ?? variantPath(row, "cache");
 
-const rkeyStatus = () => ({
-  ready: rkey.key !== null,
-  problem: rkey.problem,
-  checkedAt: rkey.checkedAt > 0 ? new Date(rkey.checkedAt).toISOString() : null,
-  scanning: rkey.scanning !== null,
-});
+const rkeyStatus = () => rkey.status();
 
 const trafficToday = () => (traffic.day === new Date().toISOString().slice(0, 10) ? traffic.bytes : 0);
 

@@ -479,3 +479,72 @@ test("no two page scripts declare the same top-level const", () => {
 
   assert.deepEqual(duplicates, [], `top-level identifiers collide across classic scripts:\n${duplicates.join("\n")}`);
 });
+
+// The chat used to keep every page it ever loaded and rebuild the whole list
+// on each one: 70 s of scrolling an image-heavy group reached 3,320 messages,
+// ~100k DOM nodes and +700 MB in the browser (measured 2026-09-25).
+const loadPageContext = () => {
+  const context = vm.createContext(makeSandbox());
+  for (const script of pageScripts()) {
+    try {
+      vm.runInContext(fs.readFileSync(path.join(WEB, script), "utf8"), context, { filename: script });
+    } catch {
+      // Render paths fail in the fake DOM; the declarations are what we need.
+    }
+  }
+  return context;
+};
+
+test("the chat keeps a bounded window of loaded messages", () => {
+  const context = loadPageContext();
+  const windowedItems = vm.runInContext("windowedItems", context);
+  const max = vm.runInContext("CHAT_WINDOW", context);
+  const page = vm.runInContext("MSG_PAGE_SIZE", context);
+  assert.ok(max >= 2 * page, "the window holds at least two pages");
+  const rows = (from, count) => Array.from({ length: count }, (_, i) => ({ rowId: String(from + i) }));
+
+  const small = rows(0, 10);
+  const kept = windowedItems(small, max, "start");
+  assert.equal(kept.items, small);
+  assert.equal(kept.dropped.length, 0);
+
+  const appended = windowedItems(rows(0, max + page), max, "start");
+  assert.equal(appended.items.length, max);
+  assert.equal(appended.items[0].rowId, String(page));
+  assert.deepEqual(Array.from(appended.dropped, (row) => row.rowId), rows(0, page).map((row) => row.rowId));
+
+  const prepended = windowedItems(rows(0, max + page), max, "end");
+  assert.equal(prepended.items.length, max);
+  assert.equal(prepended.items.at(-1).rowId, String(max - 1));
+  assert.equal(prepended.dropped[0].rowId, String(max));
+});
+
+test("chat paging inserts pages instead of rebuilding the list", () => {
+  const source = fs.readFileSync(path.join(WEB, "messages.js"), "utf8");
+  const paging = fs.readFileSync(path.join(WEB, "chat_paging.js"), "utf8");
+  const observers = paging.slice(paging.indexOf("const setupChatObservers"));
+  assert.match(observers, /applyChatPage\(listNode, page, "top"\)/u);
+  assert.match(observers, /applyChatPage\(listNode, page, "bottom"\)/u);
+  assert.doesNotMatch(observers, /renderMessagesView\(\)/u);
+  const apply = paging.slice(paging.indexOf("const applyChatPage"), paging.indexOf("const setupChatObservers"));
+  assert.match(apply, /prependChatPage\(list, page\)/u);
+  assert.match(apply, /appendChatPage\(list, page\)/u);
+  // Selection survives pages being added or dropped: it is kept by message, not by index.
+  assert.doesNotMatch(source, /onSelectMessage\(index\)/u);
+});
+
+test("chat pictures get their thumbnail's size before they load", () => {
+  // Tencent's thumbnail is the picture scaled to 300 px on its long side, never
+  // enlarged (measured 2026-09-25). A box of that size keeps the list from
+  // changing height as thumbnails arrive, so inserted pages keep the reader's place.
+  const context = loadPageContext();
+  const thumbBox = vm.runInContext("thumbBox", context);
+  const plain = (box) => ({ width: box.width, height: box.height });
+  assert.deepEqual(plain(thumbBox({ width: 832, height: 1216 })), { width: 205, height: 300 });
+  assert.deepEqual(plain(thumbBox({ width: 1536, height: 1024 })), { width: 300, height: 200 });
+  assert.deepEqual(plain(thumbBox({ width: 60, height: 42 })), { width: 60, height: 42 });
+  // Stickers are shown within 140 x 140.
+  assert.deepEqual(plain(thumbBox({ width: 1080, height: 662 }, 140)), { width: 140, height: 86 });
+  assert.deepEqual(plain(thumbBox({ width: 100, height: 92 }, 140)), { width: 100, height: 92 });
+  assert.deepEqual(plain(thumbBox({ width: 0, height: 0 })), { width: undefined, height: undefined });
+});

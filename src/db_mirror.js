@@ -115,6 +115,97 @@ const readFully = (fd, buffer, length, position) => {
   return total;
 };
 
+// Every sync re-reads the whole ~10 GB source. Read through the Windows file
+// cache, that pushed 10 GB into standby memory every refresh and evicted what
+// other programs had cached (the PC felt sluggish after each refresh).
+// FILE_FLAG_NO_BUFFERING (libuv's UV_FS_O_DIRECT on Windows) reads straight
+// from disk: measured 2026-09-25 on the real 10.5 GB file, read + hash took
+// 6.7 s instead of ~20 s and the standby cache did not change. NTFS flushes
+// a file's dirty cached pages before an uncached read of them, so QQ's latest
+// writes are seen. Uncached I/O needs sector-aligned offsets, lengths and
+// buffer addresses; anything unsupported falls back to cached reads.
+const UV_FS_O_DIRECT = 0x02000000;
+const DIRECT_ALIGN = 4096;
+const ALIGN_PROBE_STEP = 16;
+
+const cachedReader = (sourcePath, prefixBytes) => {
+  const fd = fs.openSync(sourcePath, "r");
+  const buffer = Buffer.allocUnsafe(READ_CHUNK_BYTES);
+  return {
+    mode: "cached",
+    size: fs.fstatSync(fd).size,
+    read: (mirrorOffset, wanted) => buffer.subarray(0, readFully(fd, buffer, wanted, mirrorOffset + prefixBytes)),
+    close: () => fs.closeSync(fd),
+  };
+};
+
+// The buffer's memory address is not visible from JS; a read into a
+// misaligned view fails with EINVAL, so try views until one is accepted.
+const findAlignedOffset = (fd, raw) => {
+  for (let offset = 0; offset < DIRECT_ALIGN; offset += ALIGN_PROBE_STEP) {
+    try {
+      fs.readSync(fd, raw, offset, DIRECT_ALIGN, 0);
+      return offset;
+    } catch (error) {
+      if (error.code !== "EINVAL") {
+        throw error;
+      }
+    }
+  }
+  return -1;
+};
+
+// Reads [start, start+length) where both are sector multiples. A short read
+// that is not a sector multiple can only be the end of the file.
+const readAligned = (fd, view, length, start) => {
+  let total = 0;
+  while (total < length) {
+    const read = fs.readSync(fd, view, total, length - total, start + total);
+    total += read;
+    if (read === 0 || total % DIRECT_ALIGN !== 0) {
+      break;
+    }
+  }
+  return total;
+};
+
+const uncachedReader = (sourcePath, prefixBytes) => {
+  let fd;
+  try {
+    fd = fs.openSync(sourcePath, fs.constants.O_RDONLY | UV_FS_O_DIRECT);
+  } catch {
+    return null;
+  }
+  try {
+    // Room for the sector the block's start falls in and a partial last sector.
+    const raw = Buffer.allocUnsafeSlow(READ_CHUNK_BYTES + 3 * DIRECT_ALIGN);
+    const offset = findAlignedOffset(fd, raw);
+    if (offset < 0) {
+      fs.closeSync(fd);
+      return null;
+    }
+    const view = raw.subarray(offset, offset + READ_CHUNK_BYTES + 2 * DIRECT_ALIGN);
+    return {
+      mode: "uncached",
+      size: fs.fstatSync(fd).size,
+      read: (mirrorOffset, wanted) => {
+        const filePosition = mirrorOffset + prefixBytes;
+        const lead = filePosition % DIRECT_ALIGN;
+        const length = Math.ceil((lead + wanted) / DIRECT_ALIGN) * DIRECT_ALIGN;
+        const got = readAligned(fd, view, length, filePosition - lead);
+        return view.subarray(lead, lead + Math.max(0, Math.min(wanted, got - lead)));
+      },
+      close: () => fs.closeSync(fd),
+    };
+  } catch {
+    fs.closeSync(fd);
+    return null;
+  }
+};
+
+const openSourceReader = (sourcePath, prefixBytes, uncached) =>
+  (uncached ? uncachedReader(sourcePath, prefixBytes) : null) ?? cachedReader(sourcePath, prefixBytes);
+
 const metaPathFor = (targetPath) => `${targetPath}.mirror.json`;
 const hashesPathFor = (targetPath) => `${targetPath}.blocks`;
 
@@ -143,23 +234,22 @@ const loadTrustedHashes = (targetPath, prefixBytes) => {
 };
 
 // Re-reads the whole source but rewrites only blocks whose hash changed.
-const diffSync = (sourcePath, targetPath, prefixBytes) => {
+const diffSync = (sourcePath, targetPath, prefixBytes, uncached) => {
   const trusted = loadTrustedHashes(targetPath, prefixBytes);
-  const source = fs.openSync(sourcePath, "r");
+  const source = openSourceReader(sourcePath, prefixBytes, uncached);
   const target = fs.openSync(targetPath, fs.existsSync(targetPath) ? "r+" : "w+");
   let changedBlocks = 0;
   let blockCount = 0;
   let mirrorBytes = 0;
   const hashes = [];
   try {
-    const sourceBytes = fs.fstatSync(source).size;
-    mirrorBytes = Math.max(0, sourceBytes - prefixBytes);
+    mirrorBytes = Math.max(0, source.size - prefixBytes);
     blockCount = Math.ceil(mirrorBytes / BLOCK_BYTES);
-    const buffer = Buffer.allocUnsafe(READ_CHUNK_BYTES);
     let mirrorOffset = 0;
     while (mirrorOffset < mirrorBytes) {
-      const wanted = Math.min(buffer.length, mirrorBytes - mirrorOffset);
-      const read = readFully(source, buffer, wanted, mirrorOffset + prefixBytes);
+      const wanted = Math.min(READ_CHUNK_BYTES, mirrorBytes - mirrorOffset);
+      const buffer = source.read(mirrorOffset, wanted);
+      const read = buffer.length;
       if (read === 0) {
         // The source shrank mid-read; whatever we have is still consistent
         // block by block, and the next sync starts over.
@@ -185,7 +275,7 @@ const diffSync = (sourcePath, targetPath, prefixBytes) => {
     fs.ftruncateSync(target, mirrorBytes);
   } finally {
     fs.closeSync(target);
-    fs.closeSync(source);
+    source.close();
   }
 
   const stat = fs.statSync(targetPath);
@@ -199,7 +289,26 @@ const diffSync = (sourcePath, targetPath, prefixBytes) => {
     mirrorMtimeMs: Math.trunc(stat.mtimeMs),
     syncedAt: new Date().toISOString(),
   }));
-  return { changedBlocks, blockCount, changedBytes: Math.min(changedBlocks * BLOCK_BYTES, mirrorBytes), fullRewrite: trusted === null };
+  return {
+    changedBlocks,
+    blockCount,
+    changedBytes: Math.min(changedBlocks * BLOCK_BYTES, mirrorBytes),
+    fullRewrite: trusted === null,
+    readMode: source.mode,
+  };
+};
+
+// An uncached read that fails mid-file (an unexpected alignment rule, say)
+// redoes the pass through the cache rather than failing the refresh.
+const diffSyncWithFallback = (sourcePath, targetPath, prefixBytes, uncached) => {
+  try {
+    return diffSync(sourcePath, targetPath, prefixBytes, uncached);
+  } catch (error) {
+    if (!uncached) {
+      throw error;
+    }
+    return diffSync(sourcePath, targetPath, prefixBytes, false);
+  }
 };
 
 const fileVersion = (filePath) => {
@@ -215,7 +324,7 @@ const fileVersion = (filePath) => {
 // happened. Otherwise redo the pass — each retry rewrites only what changed.
 const MAX_CONSISTENCY_ATTEMPTS = 4;
 
-const syncOneDatabase = (database, sourcePath, targetPath) => {
+const syncOneDatabase = (database, sourcePath, targetPath, uncached) => {
   const prefixBytes = detectPrefixBytes(sourcePath);
   let attempts = 0;
   let changedBlocks = 0;
@@ -226,20 +335,20 @@ const syncOneDatabase = (database, sourcePath, targetPath) => {
     const before = fileVersion(sourcePath);
     syncSidecars(sourcePath, targetPath);
     if (database.diffed) {
-      last = diffSync(sourcePath, targetPath, prefixBytes);
+      last = diffSyncWithFallback(sourcePath, targetPath, prefixBytes, uncached);
       changedBlocks += last.changedBlocks;
       changedBytes += last.changedBytes;
     } else {
       copyWithoutPrefix(sourcePath, targetPath, prefixBytes);
     }
     if (fileVersion(sourcePath) === before) {
-      return { prefixBytes, attempts, consistent: true, changedBlocks, changedBytes, fullRewrite: last?.fullRewrite ?? true };
+      return { prefixBytes, attempts, consistent: true, changedBlocks, changedBytes, fullRewrite: last?.fullRewrite ?? true, readMode: last?.readMode ?? "copy" };
     }
   }
-  return { prefixBytes, attempts, consistent: false, changedBlocks, changedBytes, fullRewrite: last?.fullRewrite ?? true };
+  return { prefixBytes, attempts, consistent: false, changedBlocks, changedBytes, fullRewrite: last?.fullRewrite ?? true, readMode: last?.readMode ?? "copy" };
 };
 
-const syncMirror = ({ ntDbDir, mirrorDir }) => {
+const syncMirror = ({ ntDbDir, mirrorDir, uncached = process.platform === "win32" }) => {
   if (typeof ntDbDir !== "string" || !path.isAbsolute(ntDbDir)) {
     throw new Error(`QQ 数据库目录必须是绝对路径: ${ntDbDir}`);
   }
@@ -251,7 +360,7 @@ const syncMirror = ({ ntDbDir, mirrorDir }) => {
     if (!fs.existsSync(sourcePath)) {
       throw new Error(`找不到源数据库: ${sourcePath}（请在设置页检查 QQ 数据库路径）`);
     }
-    stats[database.source] = syncOneDatabase(database, sourcePath, path.join(mirrorDir, database.target));
+    stats[database.source] = syncOneDatabase(database, sourcePath, path.join(mirrorDir, database.target), uncached);
   }
   return {
     cleanDir: mirrorDir,

@@ -727,6 +727,7 @@ details.topic summary:hover { color: var(--accent); }
 .bubble:hover { border-color: var(--line-strong); }
 .chat-list .msg-day { background: transparent; border-bottom: 0; }
 .load-sentinel { padding: 14px 0; }
+.chat-scroll > [hidden] { display: none; }
 
 /* ---- selection action bar ---- */
 .sel-bar {
