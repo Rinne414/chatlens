@@ -128,3 +128,8 @@
   .kb-facets[open] > summary { margin-bottom: 10px; }
   .kb-facets-body { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 }
+.kb-facet-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.kb-facet-list.long { max-height: calc(50vh / var(--zoom)); overflow-y: auto; }
+.kb-facet-filter { margin: 0 4px 4px; height: 30px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel); color: var(--ink); font: inherit; font-size: 12px; }
+.kb-facet-filter:focus { outline: none; border-color: var(--accent); }
+.kb-facet-list > [hidden] { display: none; }

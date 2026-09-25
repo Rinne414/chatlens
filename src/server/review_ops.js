@@ -64,9 +64,9 @@ const backfill = ({ day }) => {
   return { ...result, started: tick.started, reason: tick.reason ?? null };
 };
 
-const search = ({ q }) => {
+const search = ({ q, messageOffset = 0 }) => {
   const query = String(q ?? "").slice(0, MAX_QUERY_LENGTH);
-  return review.search(state.getStore(), { query });
+  return review.search(state.getStore(), { query, messageOffset });
 };
 
 module.exports = { getCalendar, getDay, backfill, search };

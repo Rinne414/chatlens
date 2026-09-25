@@ -68,6 +68,21 @@ test("people, topics and lists come from the store and the cached summaries", ()
   });
 });
 
+test("a chosen day narrows every section to that day", () => {
+  withStore((db) => {
+    seed(db);
+    const dayStart = MONDAY_9PM - 21 * 3600;
+    const result = groupInsights(db, null, { groupId: "12345", nowUnix: NOW, fromUnix: dayStart, toUnix: MONDAY_9PM + 90 });
+    assert.deepEqual(result.range, { fromUnix: dayStart, toUnix: MONDAY_9PM + 90 });
+    assert.equal(result.totals.messages, 2);
+    assert.deepEqual(result.people.active.map((row) => [row.name, row.count]), [["Alice", 2]]);
+    assert.deepEqual(result.timeline[0].items.map((item) => item.title), ["晚上的话题", "早些的话题"]);
+    const nothing = groupInsights(db, null, { groupId: "12345", nowUnix: NOW, fromUnix: dayStart - 86400, toUnix: dayStart });
+    assert.equal(nothing.totals.messages, 0);
+    assert.deepEqual(nothing.timeline, []);
+  });
+});
+
 test("answer credit splits names joined by slashes and commas", () => {
   assert.deepEqual(answerers([{ qa: [{ answerer: "A、B" }, { answerer: "A / C" }] }]).map((row) => [row.name, row.count]),
     [["A", 2], ["B", 1], ["C", 1]]);

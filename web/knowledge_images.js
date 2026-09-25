@@ -207,20 +207,49 @@ const toggleFacetExpanded = (id) => {
   renderKnowledgeFacets();
 };
 
-const facetSection = (id, title, rows, hint = "") => {
+const FACET_FILTER_MIN = 20;
+
+// A sidebar section shared by 咒语库 and 画廊: the first few rows, "显示全部"
+// for the complete list, and a filter box once that list is long. Filtering
+// hides rows in place, so typing never loses focus to a re-render.
+const facetBlock = ({ id, title, rows, expanded, onToggle, hint = "" }) => {
   if (rows.length === 0) {
     return null;
   }
-  const expanded = app.knowledgeTab.expandedFacets.has(id);
-  const shown = expanded ? rows : rows.slice(0, KB_FACET_PREVIEW);
+  const list = el("div", { class: expanded && rows.length > FACET_FILTER_MIN ? "kb-facet-list long" : "kb-facet-list" },
+    expanded ? rows : rows.slice(0, KB_FACET_PREVIEW));
+  const filter = expanded && rows.length > FACET_FILTER_MIN
+    ? el("input", {
+      type: "search",
+      class: "kb-facet-filter",
+      placeholder: `在 ${briefNumber(rows.length)} 项里找…`,
+      "aria-label": `筛选${title}`,
+      oninput: (event) => {
+        const needle = event.target.value.trim().toLowerCase();
+        for (const row of list.children) {
+          row.hidden = needle !== "" && !row.textContent.toLowerCase().includes(needle);
+        }
+      },
+    })
+    : null;
   return el("section", { class: "kb-facet", id: `kb-facet-${id}` },
     el("h3", { title: hint }, title),
-    shown,
+    filter,
+    list,
     rows.length > KB_FACET_PREVIEW
-      ? el("button", { class: "kb-facet-more", type: "button", onclick: () => toggleFacetExpanded(id) },
-        expanded ? "收起" : `显示全部 ${rows.length} 项`)
+      ? el("button", { class: "kb-facet-more", type: "button", onclick: onToggle },
+        expanded ? "收起" : `显示全部 ${briefNumber(rows.length)} 项`)
       : null);
 };
+
+const facetSection = (id, title, rows, hint = "") => facetBlock({
+  id,
+  title,
+  rows,
+  hint,
+  expanded: app.knowledgeTab.expandedFacets.has(id),
+  onToggle: () => toggleFacetExpanded(id),
+});
 
 const tokenFacetRows = (rows, field) => {
   const { tokenizeQuery, quoteValue } = window.KbTokens;

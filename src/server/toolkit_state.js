@@ -8,8 +8,6 @@ const { summarizeCatchup } = require("../run_catchup");
 const { normalizeLlmError, readLlmError, readLlmUnused } = require("../llm_status");
 const { resolvePasteCursor: resolvePasteCursorMatch } = require("../paste_cursor");
 const { formatHkt } = require("../unviewed_range");
-const picksExport = require("../picks_export");
-
 const toolRoot = path.resolve(__dirname, "..", "..");
 const configPath = path.join(toolRoot, "config", "defaults.json");
 const configExamplePath = path.join(toolRoot, "config", "defaults.example.json");
@@ -460,29 +458,6 @@ const getStoreTimeline = (query) => {
   };
 };
 
-const getGalleryRange = (query) => {
-  const groupIds = [...new Set(String(query.groupIds ?? "").split(",").map((value) => value.trim()).filter(Boolean))];
-  if (groupIds.length === 0 || groupIds.some((groupId) => !/^\d+$/u.test(groupId))) {
-    throw new Error("groupIds must contain at least one numeric group id");
-  }
-  if (groupIds.length > 50) {
-    throw new Error("groupIds cannot contain more than 50 groups");
-  }
-  const fromUnix = Number.parseInt(query.fromUnix, 10);
-  const toUnix = Number.parseInt(query.toUnix, 10);
-  if (!Number.isFinite(fromUnix) || !Number.isFinite(toUnix) || fromUnix <= 0 || fromUnix >= toUnix) {
-    throw new Error(`Invalid gallery range: ${query.fromUnix}-${query.toUnix}`);
-  }
-  return { fromUnix, toUnix, activity: messageStore.getRangeActivity(getStore(), groupIds, fromUnix, toUnix) };
-};
-
-const getGalleryEventActivity = (body) => ({
-  activity: messageStore.getEventActivity(getStore(), body.events),
-});
-
-// Matches the queryMessages server-side clamp; larger selections keep the oldest 500.
-const QUICK_SUMMARY_MAX_MESSAGES = 500;
-
 // Beijing time (UTC+8), matching every other timestamp the pipeline and UI
 // show; machine-local time here made quick-summary citations look shifted on
 // non-UTC+8 machines.
@@ -504,12 +479,20 @@ const prepareQuickSummary = ({ groupId, fromUnix, toUnix }) => {
   }
 
   const db = getStore();
-  const { messages } = messageStore.queryMessages(db, {
-    groupId: normalizedGroupId,
-    fromUnix: from,
-    toUnix: to + 1,
-    limit: 500,
-  });
+  // Every message of the selection, page by page: the summarizer splits a
+  // long selection into parts itself, so nothing is dropped here.
+  const messages = [];
+  for (let page = null; page === null || page.hasMore;) {
+    const last = messages.at(-1);
+    page = messageStore.queryMessages(db, {
+      groupId: normalizedGroupId,
+      fromUnix: from,
+      toUnix: to + 1,
+      limit: 500,
+      ...(last === undefined ? {} : { afterSentAt: last.sentAt, afterRowId: last.rowId }),
+    });
+    messages.push(...page.messages);
+  }
   const textMessages = messages.filter((message) => message.isMedia !== 1 && message.text.trim().length > 0);
   if (textMessages.length === 0) {
     throw new Error("选中的范围内没有文本消息。");
@@ -526,7 +509,7 @@ const prepareQuickSummary = ({ groupId, fromUnix, toUnix }) => {
     JSON.stringify({
       groupId: normalizedGroupId,
       groupName,
-      messages: textMessages.slice(-QUICK_SUMMARY_MAX_MESSAGES).map((message) => ({
+      messages: textMessages.map((message) => ({
         hkt: toLocalStamp(message.sentAt),
         speaker: message.speaker,
         text: message.text,
@@ -538,30 +521,9 @@ const prepareQuickSummary = ({ groupId, fromUnix, toUnix }) => {
   return { inputPath, outputPath, count: textMessages.length, groupId: normalizedGroupId, groupName };
 };
 
-const resolveRunsWebPath = (webPath) => {
-  if (typeof webPath !== "string" || !webPath.startsWith("/runs/")) {
-    return null;
-  }
-  const config = loadConfig();
-  let relative;
-  try {
-    relative = decodeURIComponent(webPath.slice("/runs/".length));
-  } catch {
-    return null;
-  }
-  const resolved = path.resolve(config.runsDir, relative);
-  const rootCheck = path.relative(path.resolve(config.runsDir), resolved);
-  if (rootCheck.startsWith("..") || path.isAbsolute(rootCheck)) {
-    return null;
-  }
-  return resolved;
-};
-
-// Copies the run-folder media files byte-for-byte (these are already 1:1 copies of
-// the QQNT cache originals — no re-encoding happens anywhere in the pipeline).
 // Destination for a knowledge-base export. Deliberately derived, never taken
 // from the request: the caller only picks a label, so no input can escape
-// reportsDir. Mirrors exportMediaSelection's naming so both land side by side.
+// reportsDir.
 const resolveKnowledgeExportDir = (label) => {
   const config = loadConfig();
   const now = new Date();
@@ -577,105 +539,6 @@ const resolveKnowledgeExportDir = (label) => {
     exportDir = path.join(config.reportsDir, `${base}-${suffix}`);
   }
   return exportDir;
-};
-
-const createMediaExportDir = (config) => {
-  const now = new Date();
-  const pad = (value) => String(value).padStart(2, "0");
-  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  let exportDir = path.join(config.reportsDir, `media-export-${stamp}`);
-  for (let suffix = 2; fs.existsSync(exportDir); suffix += 1) {
-    exportDir = path.join(config.reportsDir, `media-export-${stamp}-${suffix}`);
-  }
-  fs.mkdirSync(exportDir, { recursive: true });
-  return exportDir;
-};
-
-const resolveMediaExportDir = (config, existingFolder) => {
-  if (existingFolder === null || existingFolder === undefined || existingFolder === "") {
-    return createMediaExportDir(config);
-  }
-  if (typeof existingFolder !== "string") {
-    throw new TypeError("Media export folder must be a path returned by the toolkit.");
-  }
-  const resolved = path.resolve(existingFolder);
-  const relative = path.relative(path.resolve(config.reportsDir), resolved);
-  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative) || !path.basename(resolved).startsWith("media-export-")) {
-    throw new Error("Media export folder is outside the reports directory.");
-  }
-  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
-    throw new Error(`Media export folder does not exist: ${resolved}`);
-  }
-  return resolved;
-};
-
-const listGalleryPicks = () => {
-  const config = loadConfig();
-  return picksExport.listPicks(toolRoot, config.reportsDir);
-};
-
-const saveGalleryPicks = (webPaths) => {
-  if (!Array.isArray(webPaths) || webPaths.length === 0) {
-    throw new Error("没有选中任何媒体文件。");
-  }
-  const config = loadConfig();
-  const byPath = new Map((buildMediaIndex().items ?? []).map((item) => [item.webPath, item]));
-  const items = webPaths.map((webPath) => {
-    const meta = byPath.get(webPath) ?? {};
-    return {
-      sourcePath: resolveRunsWebPath(webPath),
-      webPath,
-      contentKey: meta.contentKey ?? "",
-      groupId: meta.groupId ?? "",
-      groupName: meta.groupName ?? "",
-      speaker: meta.speaker ?? "",
-      hkt: meta.hkt ?? "",
-      kind: meta.kind ?? "file",
-    };
-  });
-  return picksExport.savePicks({
-    toolRoot,
-    reportsDir: config.reportsDir,
-    items,
-  });
-};
-
-const exportMediaSelection = (webPaths, existingFolder) => {
-  if (!Array.isArray(webPaths) || webPaths.length === 0) {
-    throw new Error("没有选中任何媒体文件。");
-  }
-
-  const config = loadConfig();
-  const exportDir = resolveMediaExportDir(config, existingFolder);
-
-  let copied = 0;
-  const failed = [];
-  const usedNames = new Set(fs.readdirSync(exportDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name.toLowerCase()));
-  for (const webPath of webPaths) {
-    const sourcePath = resolveRunsWebPath(webPath);
-    if (sourcePath === null || !fs.existsSync(sourcePath)) {
-      failed.push(String(webPath));
-      continue;
-    }
-    const baseName = path.basename(sourcePath);
-    let targetName = baseName;
-    let collision = 1;
-    while (usedNames.has(targetName.toLowerCase())) {
-      targetName = `${collision}_${baseName}`;
-      collision += 1;
-    }
-    usedNames.add(targetName.toLowerCase());
-    try {
-      fs.copyFileSync(sourcePath, path.join(exportDir, targetName));
-      copied += 1;
-    } catch {
-      failed.push(String(webPath));
-    }
-  }
-
-  return { folder: exportDir, copied, failed };
 };
 
 const saveReadMark = ({ groupId, sentAt, rowId, toLatest }) => {
@@ -903,15 +766,10 @@ module.exports = {
   resolvePasteCursor,
   getStoreOverview,
   getStoreTimeline,
-  getGalleryRange,
-  getGalleryEventActivity,
   saveReadMark,
   advanceLocalReadMarks: (groupIds) => messageStore.advanceLocalReadMarks(getStore(), groupIds),
   buildMediaIndex,
   finalizeMediaIndex,
   prepareQuickSummary,
-  exportMediaSelection,
-  listGalleryPicks,
   resolveKnowledgeExportDir,
-  saveGalleryPicks,
 };

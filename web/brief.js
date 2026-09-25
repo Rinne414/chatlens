@@ -13,6 +13,7 @@ const briefState = {
   busy: false,
   notice: null,
   showAllMentions: false,
+  imagesShown: null,
   showQuiet: false,
   expanded: {},
   timer: null,
@@ -23,6 +24,9 @@ const BRIEF_POLL_ACTIVE_MS = 5000;
 const BRIEF_STALE_MS = 60000;
 const BRIEF_MENTION_PREVIEW = 6;
 const BRIEF_PANEL_PREVIEW = { things: 5, qa: 4, topics: 4 };
+const BRIEF_IMAGE_PREVIEW = 12;
+const BRIEF_IMAGE_MORE = 48;
+const BRIEF_GROUP_TOPICS = 4;
 const BRIEF_WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 const BRIEF_KIND_LABELS = { model: "模型", tool: "工具", tutorial: "教程", resource: "资源", news: "新闻", event: "活动", other: "新东西" };
 const BRIEF_MENTION_LABELS = { at: "@你", reply: "回复你", atAll: "@全体", name: "提到你" };
@@ -394,12 +398,23 @@ const briefImages = (data) => {
   if (data.images.length === 0) {
     return null;
   }
+  const shownCount = briefState.imagesShown ?? BRIEF_IMAGE_PREVIEW;
+  const rest = data.images.length - shownCount;
   return el("section", { class: "brief-section" },
-    el("h3", { class: "brief-section-title" }, "好图", el("span", { class: "brief-sub" }, "被求 tag、反复转发的排在前面")),
-    el("div", { class: "brief-images" }, data.images.map((image) =>
+    el("h3", { class: "brief-section-title" }, "好图", el("span", { class: "brief-count" }, data.images.length), el("span", { class: "brief-sub" }, "被求 tag、反复转发的排在前面")),
+    el("div", { class: "brief-images" }, data.images.slice(0, shownCount).map((image) =>
       el("button", { class: "brief-image", title: `${image.groupName} · ${image.speaker}`, onclick: () => briefOpenImage(image) },
         el("img", { src: knowledgeThumbUrl(image.hash), alt: "", loading: "lazy", decoding: "async" }),
-        image.asks > 0 ? el("span", { class: "brief-image-badge" }, `${image.asks} 人求 tag`) : null))));
+        image.asks > 0 ? el("span", { class: "brief-image-badge" }, `${image.asks} 人求 tag`) : null))),
+    rest > 0
+      ? el("button", {
+          class: "btn small ghost brief-more",
+          onclick: () => {
+            briefState.imagesShown = shownCount + BRIEF_IMAGE_MORE;
+            renderBriefView();
+          },
+        }, `再看 ${Math.min(rest, BRIEF_IMAGE_MORE)} 张（还有 ${briefNumber(rest)} 张）`)
+      : null);
 };
 
 const briefGroupRow = (group) =>
@@ -417,7 +432,9 @@ const briefGroupRow = (group) =>
           ? el("p", { class: "brief-group-summary" }, group.summary)
           : el("p", { class: "brief-group-summary pending" }, group.unsummarized > 0 ? `${briefNumber(group.unsummarized)} 条新消息，攒够一段后自动总结` : "还没有总结"),
         group.topics.length > 0
-          ? el("div", { class: "brief-group-topics" }, group.topics.map((topic) => el("span", { class: "tag plain" }, topic)))
+          ? el("div", { class: "brief-group-topics" },
+            group.topics.slice(0, BRIEF_GROUP_TOPICS).map((topic) => el("span", { class: "tag plain" }, topic)),
+            group.topics.length > BRIEF_GROUP_TOPICS ? el("span", { class: "tag plain more" }, `+${group.topics.length - BRIEF_GROUP_TOPICS} 个话题`) : null)
           : null)));
 
 const briefGroups = (data) => {

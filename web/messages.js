@@ -403,7 +403,10 @@ const quickSummaryResultNodes = (result) => [
             `${action.status === "resolved" ? "✅" : "⏳"} ${action.text}`,
             action.resolution ? el("span", { class: "ev" }, `处理：${action.resolution}`) : null))))
     : null,
-  el("p", { class: "card-sub", style: "margin:10px 0 0" }, `基于 ${result.messageCount ?? "?"} 条文本消息 · ${result.model ?? ""}`),
+  el("p", { class: "card-sub", style: "margin:10px 0 0" },
+    `基于全部 ${result.messageCount ?? "?"} 条文本消息`,
+    result.parts > 1 ? `（分 ${result.parts} 段总结后合并）` : "",
+    ` · ${result.model ?? ""}`),
 ];
 
 const summarizeSelection = async () => {

@@ -10,7 +10,6 @@ const CATEGORY_KEYS = ["aiImages", "askedImages", "images", "videos", "files", "
 const DEFAULT_CATEGORIES = { aiImages: true, askedImages: true, images: true, videos: true, files: true, voice: false, stickers: false, logs: true };
 const KIND_LABELS = { image: "图片", video: "视频", file: "文件", audio: "语音", emoji: "表情" };
 const KIND_CATEGORY = { video: "videos", file: "files", audio: "voice", emoji: "stickers" };
-const MISSING_SAMPLES = 30;
 
 // Windows rejects these characters and names, and silently drops trailing dots
 // and spaces; group names and nicknames routinely contain all of them.
@@ -258,7 +257,7 @@ const summarizeBackup = (items, { logs = new Map() } = {}) => {
     }
     counts.thumbOnly += status === "thumb" ? 1 : 0;
     counts.compressed += status === "compressed" ? 1 : 0;
-    if (["missing", "thumb", "compressed"].includes(status) && group.missingSamples.length < MISSING_SAMPLES) {
+    if (["missing", "thumb", "compressed"].includes(status)) {
       group.missingSamples.push({ hkt: item.hkt, speaker: item.speaker, kind: item.kind, status });
     }
     group.ai += item.category === "aiImages" ? 1 : 0;

@@ -11,13 +11,19 @@ const { trends } = require("../trends");
 const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map();
 
-const getTrends = ({ days, fresh = false }) => {
-  const key = String(days);
+// `days` back from now, or an explicit fromUnix..toUnix window.
+const getTrends = ({ days, fromUnix = null, toUnix = null, fresh = false }) => {
+  const explicit = Number.isFinite(fromUnix) && Number.isFinite(toUnix) && toUnix > fromUnix;
+  const key = explicit ? `${fromUnix}-${toUnix}` : String(days);
   const hit = cache.get(key);
   if (!fresh && hit !== undefined && Date.now() - hit.at < CACHE_MS) {
     return hit.value;
   }
-  const value = galleryOps.withReadOnlyStore((db) => trends(db, { nowUnix: Math.floor(Date.now() / 1000), days }));
+  const value = galleryOps.withReadOnlyStore((db) => trends(db, {
+    nowUnix: Math.floor(Date.now() / 1000),
+    days,
+    ...(explicit ? { fromUnix, toUnix } : {}),
+  }));
   cache.set(key, { at: Date.now(), value });
   return value;
 };

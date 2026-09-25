@@ -164,7 +164,7 @@ const loadKnowledgeResults = async ({ append = false } = {}) => {
 const loadKnowledgeRequests = async () => {
   replaceKnowledgeTab({ loading: true, error: null });
   try {
-    const requests = await api("/api/knowledge/requests?limit=200");
+    const requests = await api("/api/knowledge/requests?limit=all");
     replaceKnowledgeTab({ requests, loading: false });
   } catch (error) {
     replaceKnowledgeTab({ loading: false, error: error.message });

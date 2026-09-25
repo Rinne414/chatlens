@@ -304,6 +304,8 @@ const handleApi = async (request, response, url) => {
     if (request.method === "GET" && url.pathname === "/api/trends") {
       sendJson(response, 200, trendsOps.getTrends({
         days: url.searchParams.get("days") ?? "3",
+        fromUnix: Number(url.searchParams.get("fromUnix")),
+        toUnix: Number(url.searchParams.get("toUnix")),
         fresh: url.searchParams.get("fresh") === "1",
       }));
       return;
@@ -320,7 +322,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/group") {
-      sendJson(response, 200, groupOps.getGroupInsights(url.searchParams.get("groupId") ?? ""));
+      sendJson(response, 200, groupOps.getGroupInsights(url.searchParams));
       return;
     }
 
@@ -334,15 +336,6 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
-    if (request.method === "GET" && url.pathname === "/api/gallery-range") {
-      sendJson(response, 200, state.getGalleryRange(Object.fromEntries(url.searchParams)));
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/gallery-event-activity") {
-      sendJson(response, 200, state.getGalleryEventActivity(await readBody(request)));
-      return;
-    }
 
     if (request.method === "POST" && url.pathname === "/api/readmark") {
       const body = await readBody(request);
@@ -499,32 +492,6 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/api/media-export") {
-      const body = await readBody(request);
-      const result = state.exportMediaSelection(body.paths, body.folder ?? null);
-      if (body.openFolder === true) {
-        openLocalPath(result.folder);
-      }
-      sendJson(response, 200, result);
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/picks") {
-      sendJson(response, 200, state.listGalleryPicks());
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/picks/save") {
-      const body = await readBody(request);
-      const result = state.saveGalleryPicks(body.paths);
-      if (body.openFolder === true && result.folders.length === 1) {
-        openLocalPath(result.folders[0]);
-      } else if (body.openFolder === true && result.folders.length > 1) {
-        openLocalPath(path.join(state.loadConfig().reportsDir, "picks"));
-      }
-      sendJson(response, 200, result);
-      return;
-    }
 
     if (request.method === "POST" && url.pathname === "/api/quick-summary") {
       const body = await readBody(request);
@@ -767,7 +734,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/review/search") {
-      sendJson(response, 200, reviewOps.search({ q: url.searchParams.get("q") }));
+      sendJson(response, 200, reviewOps.search({ q: url.searchParams.get("q"), messageOffset: url.searchParams.get("messageOffset") ?? 0 }));
       return;
     }
 

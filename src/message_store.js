@@ -339,86 +339,6 @@ const getCoverageHealth = (db, groupIds, fromUnix, toUnix) => {
   };
 };
 
-const getRangeActivity = (db, groupIds, fromUnix, toUnix) => {
-  const normalizedGroupIds = [...new Set(groupIds.map(String))];
-  if (normalizedGroupIds.length === 0) {
-    throw new Error("At least one group id is required to calculate range activity");
-  }
-  if (!Number.isFinite(fromUnix) || !Number.isFinite(toUnix) || fromUnix >= toUnix) {
-    throw new Error(`Invalid range activity window: ${fromUnix}-${toUnix}`);
-  }
-  const groupParams = Object.fromEntries(normalizedGroupIds.map((groupId, index) => [`group${index}`, groupId]));
-  const placeholders = normalizedGroupIds.map((_, index) => `@group${index}`).join(", ");
-  const rows = db.prepare(`
-    SELECT group_id AS groupId,
-           COUNT(*) AS messageCount,
-           SUM(CASE WHEN is_media = 1 THEN 1 ELSE 0 END) AS mediaMessageCount
-    FROM messages
-    WHERE group_id IN (${placeholders})
-      AND sent_at >= @fromUnix
-      AND sent_at < @toUnix
-    GROUP BY group_id
-  `).all({ ...groupParams, fromUnix, toUnix });
-  const activityByGroup = new Map(rows.map((row) => [row.groupId, row]));
-  const durationSeconds = toUnix - fromUnix;
-  return normalizedGroupIds.map((groupId) => {
-    const coveredSeconds = getCoverage(db, groupId).reduce(
-      (total, range) => total + overlapSeconds(range.startUnix, range.endUnix, fromUnix, toUnix),
-      0,
-    );
-    const activity = activityByGroup.get(groupId);
-    return {
-      groupId,
-      messageCount: activity?.messageCount ?? 0,
-      mediaMessageCount: activity?.mediaMessageCount ?? 0,
-      coveredSeconds,
-      coverageRatio: coveredSeconds / durationSeconds,
-    };
-  });
-};
-
-const getEventActivity = (db, events) => {
-  if (!Array.isArray(events) || events.length === 0 || events.length > 400) {
-    throw new Error("Event activity requires 1-400 events");
-  }
-  const query = db.prepare(`
-    SELECT COUNT(*) AS messageCount,
-           SUM(CASE WHEN is_media = 1 THEN 1 ELSE 0 END) AS mediaMessageCount,
-           COUNT(DISTINCT speaker) AS speakerCount,
-           MIN(sent_at) AS firstMessageUnix,
-           MAX(sent_at) AS lastMessageUnix
-    FROM messages
-    WHERE group_id = @groupId
-      AND sent_at >= @fromUnix
-      AND sent_at < @toUnix
-  `);
-  return events.map((event) => {
-    const id = String(event.id ?? "");
-    const groupId = String(event.groupId ?? "");
-    const fromUnix = Number(event.fromUnix);
-    const toUnix = Number(event.toUnix);
-    if (id.length === 0 || !/^\d+$/u.test(groupId) || !Number.isFinite(fromUnix) || !Number.isFinite(toUnix) || fromUnix >= toUnix) {
-      throw new Error(`Invalid gallery event activity request: ${id}/${groupId}/${fromUnix}-${toUnix}`);
-    }
-    const activity = query.get({ groupId, fromUnix, toUnix });
-    const durationSeconds = toUnix - fromUnix;
-    const coveredSeconds = getCoverage(db, groupId).reduce(
-      (total, range) => total + overlapSeconds(range.startUnix, range.endUnix, fromUnix, toUnix),
-      0,
-    );
-    return {
-      id,
-      messageCount: activity.messageCount,
-      mediaMessageCount: activity.mediaMessageCount ?? 0,
-      speakerCount: activity.speakerCount,
-      firstMessageUnix: activity.firstMessageUnix ?? null,
-      lastMessageUnix: activity.lastMessageUnix ?? null,
-      coverageRatio: coveredSeconds / durationSeconds,
-      missingSeconds: durationSeconds - coveredSeconds,
-    };
-  });
-};
-
 const overlapSeconds = (leftStart, leftEnd, rightStart, rightEnd) =>
   Math.max(0, Math.min(leftEnd, rightEnd) - Math.max(leftStart, rightStart));
 
@@ -679,7 +599,7 @@ const escapeLike = (value) => String(value).replace(/[\\%_]/gu, (match) => `\\${
 
 // Messages (not sent by me) that @ me, reply to one of my messages, @all, or
 // say one of my display names. Newest first; `kind` is the strongest reason.
-const getMentions = (db, { fromUnix, toUnix, groupIds, identity, limit = 60 }) => {
+const getMentions = (db, { fromUnix, toUnix, groupIds, identity }) => {
   const uins = identity?.uins ?? [];
   const names = identity?.names ?? [];
   if (uins.length === 0 && names.length === 0) {
@@ -715,7 +635,6 @@ const getMentions = (db, { fromUnix, toUnix, groupIds, identity, limit = 60 }) =
         ${groupFilter}
         AND (${reasons.join(" OR ")})
       ORDER BY m.sent_at DESC, m.row_id DESC
-      LIMIT ${Math.max(1, Math.min(200, Number(limit) || 60))}
     `)
     .all(params);
 
@@ -752,8 +671,6 @@ module.exports = {
   queryMessages,
   getCoverage,
   getCoverageHealth,
-  getRangeActivity,
-  getEventActivity,
   getCoverageTimeline,
   getCoverageEnds,
   getStoredGroups,

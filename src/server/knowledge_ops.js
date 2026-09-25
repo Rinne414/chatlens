@@ -905,7 +905,7 @@ const promptRequests = (toolRoot, { onlyAnswered = false, limit } = {}) => {
       ${onlyAnswered ? `WHERE ${answeredRequestCondition(capabilities, "r.")}` : ""}
       ORDER BY r.ask_sent_at DESC
       LIMIT @limit
-    `).all({ limit: clampLimit(limit) })
+    `).all({ limit: limit === "all" ? -1 : clampLimit(limit) })
       .map((row) => decorateRequestAnswer(row, answerMediaAvailability));
     return { available: true, items: rows };
   } finally {
@@ -1023,8 +1023,8 @@ const computeOverview = (toolRoot) => {
 // so the counts and the search agree on what each scope means.
 const SCOPE_QUERIES = { prompt: "has:prompt", sender: "has:sender", all: "" };
 // No tag facet: counting tags means grouping ~400k rows (measured 3.6 s);
-// tags stay reachable through search (tag:...).
-const FACET_LIMITS = { checkpoints: 12, loras: 16, groups: 30, senders: 24 };
+// tags stay reachable through search (tag:...). The other lists are complete:
+// the page shows the first few and lets the user open and filter the rest.
 const FACET_CACHE_MS = 60 * 1000;
 const FACET_CACHE_SIZE = 30;
 const facetCache = new Map();
@@ -1085,19 +1085,19 @@ const computeFacets = (toolRoot, { query = "", scope = "prompt", generator = "",
       checkpoints: rows(`
         SELECT i.checkpoint AS value, COUNT(*) AS count FROM images i
         WHERE i.checkpoint <> '' ${scoped.clause}
-        GROUP BY i.checkpoint ORDER BY count DESC LIMIT ${FACET_LIMITS.checkpoints}`),
+        GROUP BY i.checkpoint ORDER BY count DESC`),
       loras: rows(`
         SELECT l.lora_name AS value, COUNT(DISTINCT l.hash) AS count
         FROM image_loras l JOIN images i ON i.hash = l.hash
-        WHERE 1 = 1 ${scoped.clause} GROUP BY l.lora_name ORDER BY count DESC LIMIT ${FACET_LIMITS.loras}`),
+        WHERE 1 = 1 ${scoped.clause} GROUP BY l.lora_name ORDER BY count DESC`),
       groups: rows(`
         SELECT s.group_id AS value, MAX(s.group_name) AS label, COUNT(DISTINCT s.hash) AS count
         FROM sightings s JOIN images i ON i.hash = s.hash
-        WHERE 1 = 1 ${scoped.clause} GROUP BY s.group_id ORDER BY count DESC LIMIT ${FACET_LIMITS.groups}`),
+        WHERE 1 = 1 ${scoped.clause} GROUP BY s.group_id ORDER BY count DESC`),
       senders: rows(`
         SELECT s.speaker AS value, COUNT(DISTINCT s.hash) AS count
         FROM sightings s JOIN images i ON i.hash = s.hash
-        WHERE s.speaker <> '' ${scoped.clause} GROUP BY s.speaker ORDER BY count DESC LIMIT ${FACET_LIMITS.senders}`),
+        WHERE s.speaker <> '' ${scoped.clause} GROUP BY s.speaker ORDER BY count DESC`),
     };
   } finally {
     db.close();

@@ -178,7 +178,9 @@ const status = () => {
 // AI pictures whose original is not saved, expiring within 7 days first.
 const expiring = () => {
   const now = service.unix();
-  const items = store.expiringAi(db(), { now, limit: 300 });
+  // Every one of them (SQLite LIMIT -1): a capped list hid the ones a user
+  // might be looking for.
+  const items = store.expiringAi(db(), { now, limit: -1 });
   return {
     items: items.map((item) => ({ ...item, daysLeft: Math.max(0, Math.floor((item.expiresAt - now) / 86400)) })),
     total: store.countExpiringAi(db(), { now }),

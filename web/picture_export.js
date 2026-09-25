@@ -7,7 +7,6 @@
    caller shows the status with pictureExportStatus(owner). */
 
 const PICTURE_EXPORT_BATCH = 5;
-const PICTURE_EXPORT_MAX = 1000;
 const PICTURE_EXPORT_REASONS = {
   gone: "腾讯已删除",
   "no-rkey": "QQ 没在运行，拿不到图片钥匙",
@@ -72,7 +71,7 @@ const runPictureExport = async (md5s, owner) => {
   if (pictureExport.running) {
     return;
   }
-  const chosen = [...new Set(md5s)].slice(0, PICTURE_EXPORT_MAX);
+  const chosen = [...new Set(md5s)];
   Object.assign(pictureExport, { owner, running: true, stop: false, done: 0, total: chosen.length, exported: 0, prompts: 0, failed: {}, folder: null, path: null, error: null });
   renderPictureExportStatus();
   try {

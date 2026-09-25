@@ -29,6 +29,9 @@ const mountWall = (container, options) => {
   }
   activeWalls.get(options.key)?.destroy();
   const { layoutWall, visibleIndexes } = window.WallLayout;
+  // A wall inside its own scroll box (options.scrollerSelector) windows
+  // against that box instead of the page.
+  const scroller = options.scrollerSelector ? container.closest(options.scrollerSelector) : null;
   const nodes = new Map();
   let entries = options.entries;
   let layout = null;
@@ -69,8 +72,9 @@ const mountWall = (container, options) => {
     // getBoundingClientRect and innerHeight are in zoomed (visual) pixels; the
     // layout is in the page's own CSS pixels.
     const zoom = wallZoom();
-    const viewport = window.innerHeight / zoom;
-    const top = -container.getBoundingClientRect().top / zoom;
+    const box = scroller?.getBoundingClientRect() ?? null;
+    const viewport = (box === null ? window.innerHeight : box.height) / zoom;
+    const top = ((box === null ? 0 : box.top) - container.getBoundingClientRect().top) / zoom;
     const buffer = viewport * WALL_BUFFER_SCREENS;
     const wanted = visibleIndexes(layout.boxes, top - buffer, top + viewport + buffer);
     const keep = new Set(wanted);
@@ -126,6 +130,7 @@ const mountWall = (container, options) => {
     },
     destroy: () => {
       window.removeEventListener("scroll", schedule);
+      scroller?.removeEventListener("scroll", schedule);
       resizeObserver?.disconnect();
       if (frame !== null) {
         cancelAnimationFrame(frame);
@@ -141,10 +146,11 @@ const mountWall = (container, options) => {
   relayout();
   paint();
   window.addEventListener("scroll", schedule, { passive: true });
+  scroller?.addEventListener("scroll", schedule, { passive: true });
   resizeObserver?.observe(container);
 };
 
-// options: { key, entries, mode, targetSize, gap, cardHeight, renderEntry, onNearEnd }
+// options: { key, entries, mode, targetSize, gap, cardHeight, renderEntry, onNearEnd, scrollerSelector }
 // entries: [{ kind: "tile", ratio, ... } | { kind: "header", height, ... }]
 const imageWall = (options) => {
   const container = el("div", {

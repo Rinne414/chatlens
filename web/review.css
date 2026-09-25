@@ -157,3 +157,4 @@
   .review-cal-day, .review-day.loading { transition: none; }
   .review-cal-day:not(:disabled):hover { transform: none; }
 }
+.review-more { justify-self: center; margin-top: 8px; }

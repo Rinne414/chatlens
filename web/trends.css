@@ -4,6 +4,10 @@
 .tr-page.is-loading { opacity: .6; }
 .tr-intro { margin: 0; color: var(--muted); font-size: 13.5px; }
 .tr-list { display: grid; gap: 12px; }
+.tr-more { justify-self: center; }
+.trends-dates { display: inline-flex; gap: 6px; align-items: center; padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); font-size: 12.5px; color: var(--muted); }
+.trends-dates.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.trends-dates input { border: 0; background: none; color: var(--ink); font: inherit; font-size: 12.5px; }
 
 .tr-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .tr-card.picture { grid-template-columns: 120px minmax(0, 1fr); }

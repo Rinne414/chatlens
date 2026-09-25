@@ -17,7 +17,7 @@ const GALLERY_SIZE_MAX = 380;
 const GALLERY_PAGE = 120;
 const GALLERY_HEADER_HEIGHT = 46;
 const GALLERY_EXPIRY_WARN_DAYS = 7;
-const GALLERY_DAY_CHOICES = [[1, "今天"], [3, "3 天"], [7, "7 天"], [31, "31 天"]];
+const GALLERY_DAY_CHOICES = [[1, "今天"], [3, "3 天"], [7, "7 天"], [31, "31 天"], [0, "全部"]];
 const GALLERY_KINDS = [["images", "图片"], ["stickers", "表情包"], ["all", "全部"]];
 const GALLERY_SORTS = [["recent", "最新发的"], ["spread", "传得最广"]];
 const GIF_PICTURE_FORMAT = 2000;
@@ -384,19 +384,13 @@ const toggleGalleryFacet = (id) => {
   }
 };
 
-const galleryFacetSection = (id, title, rows) => {
-  if (rows.length === 0) {
-    return null;
-  }
-  const expanded = app.gallery.expandedFacets.has(id);
-  return el("section", { class: "kb-facet" },
-    el("h3", {}, title),
-    expanded ? rows : rows.slice(0, KB_FACET_PREVIEW),
-    rows.length > KB_FACET_PREVIEW
-      ? el("button", { class: "kb-facet-more", type: "button", onclick: () => toggleGalleryFacet(id) },
-        expanded ? "收起" : `显示全部 ${rows.length} 项`)
-      : null);
-};
+const galleryFacetSection = (id, title, rows) => facetBlock({
+  id: `g-${id}`,
+  title,
+  rows,
+  expanded: app.gallery.expandedFacets.has(id),
+  onToggle: () => toggleGalleryFacet(id),
+});
 
 const galleryFacetSections = () => {
   const facets = app.gallery.facets;
@@ -483,7 +477,7 @@ const galleryWall = () => {
     return el("div", { class: "wall-empty" },
       "这个范围里没有图片。可以把时间放宽，或去掉上面的条件。",
       el("br"),
-      el("span", { class: "kb-meta" }, "画廊显示后台记录下来的群图片（最近 31 天，腾讯只保留这么久）。"));
+      el("span", { class: "kb-meta" }, "画廊显示后台记录下来的所有群图片；超过 31 天的只剩已保存的缩略图和预览，腾讯那边的原图取不到了。"));
   }
   return imageWall({
     key: GALLERY_WALL_KEY,

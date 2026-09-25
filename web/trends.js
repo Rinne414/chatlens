@@ -6,21 +6,33 @@
    with who brought it up first (事件), when it reached each group (传播) and
    what each group said about it (对比). */
 
-const TRENDS_DAY_CHOICES = [[1, "今天"], [3, "3 天"], [7, "7 天"]];
+const TRENDS_DAY_CHOICES = [[1, "今天"], [3, "3 天"], [7, "7 天"], [30, "30 天"]];
+const TRENDS_PAGE = 30;
 const TRENDS_KINDS = [["all", "全部"], ["thing", "新东西"], ["link", "链接"], ["picture", "图片"]];
 const TRENDS_ORIGIN = { view: "trends", label: "热点" };
 
-app.trends = { days: 3, kind: "all", data: null, loading: false, error: null, open: new Set() };
+// range: null (use `days`) or { fromDay, toDay } picked by the user.
+app.trends = { days: 3, range: null, kind: "all", data: null, loading: false, error: null, open: new Set(), shown: TRENDS_PAGE };
 
 const replaceTrends = (patch) => {
   app.trends = { ...app.trends, ...patch };
 };
 
+const trendsQuery = () => {
+  const range = app.trends.range;
+  if (range === null) {
+    return `days=${app.trends.days}`;
+  }
+  const fromUnix = hktToUnix(`${range.fromDay} 00:00`);
+  const toUnix = hktToUnix(`${range.toDay} 00:00`) + 86400;
+  return `fromUnix=${fromUnix}&toUnix=${toUnix}`;
+};
+
 const loadTrends = async ({ fresh = false } = {}) => {
-  replaceTrends({ loading: true, error: null });
+  replaceTrends({ loading: true, error: null, shown: TRENDS_PAGE });
   renderTrendsView();
   try {
-    const data = await api(`/api/trends?days=${app.trends.days}${fresh ? "&fresh=1" : ""}`);
+    const data = await api(`/api/trends?${trendsQuery()}${fresh ? "&fresh=1" : ""}`);
     replaceTrends({ data, loading: false });
   } catch (error) {
     replaceTrends({ loading: false, error: error.message });
@@ -30,7 +42,7 @@ const loadTrends = async ({ fresh = false } = {}) => {
 
 const openTrendsView = () => {
   showView("trends");
-  if (app.trends.data === null || app.trends.data.days !== app.trends.days) {
+  if (app.trends.data === null) {
     loadTrends();
     return;
   }
@@ -165,22 +177,40 @@ const trendCard = (event, data) => {
       open ? trendCompare(event) : null));
 };
 
+const trendsDateInputs = () => {
+  const today = unixToHkt(Math.floor(Date.now() / 1000)).slice(0, 10);
+  const range = app.trends.range ?? { fromDay: unixToHkt(Math.floor(Date.now() / 1000) - 6 * 86400).slice(0, 10), toDay: today };
+  const apply = (patch) => {
+    const next = { ...range, ...patch };
+    if (next.fromDay > next.toDay) {
+      return;
+    }
+    replaceTrends({ range: next, open: new Set() });
+    loadTrends();
+  };
+  return el("span", { class: app.trends.range === null ? "trends-dates" : "trends-dates active" },
+    el("input", { type: "date", value: range.fromDay, max: today, "aria-label": "开始日期", onchange: (event) => apply({ fromDay: event.target.value }) }),
+    el("span", {}, "至"),
+    el("input", { type: "date", value: range.toDay, max: today, "aria-label": "结束日期", onchange: (event) => apply({ toDay: event.target.value }) }));
+};
+
 const trendsToolbar = (data) => el("div", { class: "gallery-toolbar" },
   el("div", { class: "wall-modes", role: "group", "aria-label": "时间范围" }, TRENDS_DAY_CHOICES.map(([days, label]) => el("button", {
-    class: app.trends.days === days ? "wall-mode active" : "wall-mode",
+    class: app.trends.range === null && app.trends.days === days ? "wall-mode active" : "wall-mode",
     type: "button",
-    "aria-pressed": String(app.trends.days === days),
+    "aria-pressed": String(app.trends.range === null && app.trends.days === days),
     onclick: () => {
-      replaceTrends({ days, open: new Set() });
+      replaceTrends({ days, range: null, open: new Set() });
       loadTrends();
     },
   }, label))),
+  trendsDateInputs(),
   el("div", { class: "wall-modes", role: "group", "aria-label": "类型" }, TRENDS_KINDS.map(([kind, label]) => el("button", {
     class: app.trends.kind === kind ? "wall-mode active" : "wall-mode",
     type: "button",
     "aria-pressed": String(app.trends.kind === kind),
     onclick: () => {
-      replaceTrends({ kind });
+      replaceTrends({ kind, shown: TRENDS_PAGE });
       renderTrendsView();
     },
   }, label))),
@@ -202,5 +232,17 @@ const renderTrendsView = () => {
       ? el("p", { class: "kb-meta" }, "正在整理…")
       : events.length === 0
         ? el("div", { class: "wall-empty" }, "这段时间没有在几个群里同时出现的东西。可以把时间放宽。")
-        : el("div", { class: "tr-list" }, events.map((event) => trendCard(event, data)))));
+        : [
+          el("div", { class: "tr-list" }, events.slice(0, app.trends.shown).map((event) => trendCard(event, data))),
+          events.length > app.trends.shown
+            ? el("button", {
+              class: "btn tr-more",
+              type: "button",
+              onclick: () => {
+                replaceTrends({ shown: app.trends.shown + TRENDS_PAGE });
+                renderTrendsView();
+              },
+            }, `再显示 ${Math.min(TRENDS_PAGE, events.length - app.trends.shown)} 条（共 ${briefNumber(events.length)} 条）`)
+            : null,
+        ]));
 };

@@ -12,11 +12,16 @@ const { groupInsights, timelineBetween } = require("../group_insights");
 
 const knowledgePath = () => path.join(state.toolRoot, "store", "knowledge.db");
 
-const getGroupInsights = (groupId) => {
+const getGroupInsights = (params) => {
   const db = briefingStore.ensureBriefingSchema(state.getStore());
   const kb = fs.existsSync(knowledgePath()) ? new Database(knowledgePath(), { readonly: true, fileMustExist: true }) : null;
   try {
-    return groupInsights(db, kb, { groupId, nowUnix: Math.floor(Date.now() / 1000) });
+    return groupInsights(db, kb, {
+      groupId: params.get("groupId") ?? "",
+      nowUnix: Math.floor(Date.now() / 1000),
+      fromUnix: Number(params.get("fromUnix")),
+      toUnix: Number(params.get("toUnix")),
+    });
   } finally {
     kb?.close();
   }

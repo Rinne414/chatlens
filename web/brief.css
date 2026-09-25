@@ -338,3 +338,4 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
   .brief-mention, .brief-image img { transition: none; }
   .brief-pulse { animation: none; }
 }
+.brief-group-topics .tag.more { color: var(--muted); }

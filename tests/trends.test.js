@@ -97,11 +97,14 @@ test("a picture posted in two groups is an event", () => {
   });
 });
 
-test("the window is clamped to 1..7 days and the spark covers it", () => {
+test("any window works, the last N days or explicit dates, with no cap", () => {
   withStore((db) => {
     seed(db);
-    const result = trends(db, { nowUnix: NOW, days: 30 });
-    assert.equal(result.days, 7);
-    assert.ok(result.events.every((event) => event.spark.length === 28));
+    const month = trends(db, { nowUnix: NOW, days: 30 });
+    assert.equal(month.days, 30);
+    assert.ok(month.events.every((event) => event.spark.length === 60));
+    // Only Bob's (group 2) and Carol's (group 3) messages fall inside.
+    const window = trends(db, { nowUnix: NOW, fromUnix: NOW - 4 * HOUR, toUnix: NOW - 1.5 * HOUR });
+    assert.deepEqual(window.events.find((event) => event.id === "thing:anima").groups.map((group) => group.groupId), ["2", "3"]);
   });
 });

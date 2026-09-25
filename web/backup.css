@@ -99,8 +99,8 @@ button.backup-status:hover { border-color: var(--accent); }
 .backup-rescue-head h2 { margin: 0 0 4px; font-size: 16px; }
 .backup-rescue-head .card-sub { margin: 0; }
 .backup-rescue-progress { margin: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
-.backup-rescue-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
-.backup-rescue-tile { position: relative; aspect-ratio: 1 / 1; border-radius: 8px; overflow: hidden; background: var(--line); }
+.backup-rescue-scroll { max-height: calc(56vh / var(--zoom)); overflow-y: auto; padding-right: 4px; }
+.backup-rescue-tile { border-radius: 8px; overflow: hidden; background: var(--line); }
 .backup-rescue-tile.picked { outline: 3px solid var(--accent); outline-offset: -3px; }
 .backup-rescue-open { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
 .backup-rescue-open img { width: 100%; height: 100%; object-fit: cover; display: block; }

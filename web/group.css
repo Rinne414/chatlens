@@ -63,9 +63,11 @@ div.gp-topic .gp-topic-sum, div.gp-topic strong { grid-column: 1 / -1; }
 /* 30-day bars: one series, 2px gaps, rounded data ends on the baseline */
 .gp-bars { margin: 0; }
 .gp-bars-plot { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 96px; padding-top: 14px; border-bottom: 1px solid var(--line-strong); }
-.gp-bar { flex: 1; min-width: 2px; border-radius: 4px 4px 0 0; background: var(--accent); opacity: .85; transition: opacity var(--dur); }
-.gp-bar:hover { opacity: 1; }
-.gp-bar.empty { background: none; }
+.gp-bar { flex: 1; min-width: 2px; padding: 0; border: 0; border-radius: 4px 4px 0 0; background: color-mix(in srgb, var(--accent) 32%, var(--panel)); cursor: pointer; transition: background var(--dur); }
+.gp-bar.in-range { background: var(--accent); }
+.gp-bar:hover { background: color-mix(in srgb, var(--accent) 70%, var(--ink)); }
+.gp-bar.empty { background: var(--line); }
+.gp-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .gp-axis-max { position: absolute; top: -2px; left: 0; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .gp-axis-days { display: flex; justify-content: space-between; margin-top: 4px; color: var(--muted); font-size: 10.5px; }
 
@@ -107,3 +109,8 @@ button.gp-rank-name:hover { color: var(--accent); text-decoration: underline; }
   .gp-head-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .gp-rank li { grid-template-columns: minmax(0, 110px) minmax(0, 1fr) auto; }
 }
+
+/* date range */
+.gp-range { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; }
+.gp-range-label { color: var(--accent); font-weight: 700; }
+.gp-more { margin-top: 6px; }

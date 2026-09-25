@@ -12,13 +12,12 @@
 const gallery = require("./gallery_store");
 
 const DAY_SECONDS = 86400;
-const MAX_EVENTS = 40;
-const MAX_CANDIDATE_NAMES = 400;
+// Spark resolution: 4 bars a day, but never finer than the strip can draw.
+const SPARK_MAX_BUCKETS = 60;
 const MIN_ASCII_KEY = 3;
 const MIN_CJK_KEY = 2;
 const GENERIC_SHARE = 0.02;
 const SOLO_GROUP_MENTIONS = 12;
-const SPREAD_PICTURES = 12;
 const SAMPLE_CHARS = 140;
 const URL_PATTERN = /https?:\/\/[^\s<>"'，。！？、）)\]】》]+/giu;
 const TRAILING_PUNCTUATION = /[.,;:!?'"~。，！？、）)】》]+$/u;
@@ -84,23 +83,23 @@ const clip = (text) => {
 
 /* ---------- gathering ---------- */
 
-const windowMessages = (db, fromUnix, groupIds) => {
+const windowMessages = (db, fromUnix, toUnix, groupIds) => {
   const filter = groupIds === null ? "" : `AND m.group_id IN (SELECT value FROM json_each(@groups))`;
   return db.prepare(`
     SELECT m.group_id AS groupId, m.row_id AS rowId, m.sent_at AS sentAt, m.speaker, m.text,
            COALESCE(g.name, '') AS groupName
     FROM messages m LEFT JOIN group_names g ON g.group_id = m.group_id
-    WHERE m.sent_at >= @fromUnix AND m.is_media = 0 AND m.text <> '' ${filter}
+    WHERE m.sent_at >= @fromUnix AND m.sent_at < @toUnix AND m.is_media = 0 AND m.text <> '' ${filter}
     ORDER BY m.sent_at, m.row_id
-  `).all({ fromUnix, groups: JSON.stringify(groupIds ?? []) });
+  `).all({ fromUnix, toUnix, groups: JSON.stringify(groupIds ?? []) });
 };
 
-const windowPartials = (db, fromUnix, groupIds) => {
+const windowPartials = (db, fromUnix, toUnix, groupIds) => {
   const filter = groupIds === null ? "" : `AND group_id IN (SELECT value FROM json_each(@groups))`;
   return db.prepare(`
     SELECT group_id AS groupId, partial_json AS json FROM summary_chunks
-    WHERE status = 'done' AND partial_json IS NOT NULL AND end_sent_at >= @fromUnix ${filter}
-  `).all({ fromUnix, groups: JSON.stringify(groupIds ?? []) })
+    WHERE status = 'done' AND partial_json IS NOT NULL AND end_sent_at >= @fromUnix AND start_sent_at < @toUnix ${filter}
+  `).all({ fromUnix, toUnix, groups: JSON.stringify(groupIds ?? []) })
     .map((row) => ({ groupId: row.groupId, partial: parsePartial(row.json) }))
     .filter((row) => row.partial !== null);
 };
@@ -192,21 +191,49 @@ const nameCandidates = (partials) => {
       byKey.set(key, entry);
     }
   }
-  return [...byKey.values()].sort((left, right) => right.seen - left.seen).slice(0, MAX_CANDIDATE_NAMES);
+  return [...byKey.values()].sort((left, right) => right.seen - left.seen);
+};
+
+// Every candidate name in every message in one pass: names are indexed by
+// their first two characters, so each text position looks up only the few
+// names that could start there. (Testing every name against every message
+// made the number of names a cost that needed a cap.)
+const matchNames = (candidates, messages) => {
+  const byPrefix = new Map();
+  for (const candidate of candidates) {
+    const prefix = candidate.key.slice(0, 2);
+    byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), candidate]);
+  }
+  const hits = new Map(candidates.map((candidate) => [candidate, []]));
+  messages.forEach((message, index) => {
+    const text = normalizeName(message.text);
+    const found = new Set();
+    for (let position = 0; position < text.length - 1; position += 1) {
+      for (const candidate of byPrefix.get(text.slice(position, position + 2)) ?? []) {
+        if (!found.has(candidate) && text.startsWith(candidate.key, position)) {
+          found.add(candidate);
+        }
+      }
+    }
+    for (const candidate of found) {
+      hits.get(candidate).push(index);
+    }
+  });
+  return hits;
 };
 
 const thingEvents = (messages, partials) => {
   const candidates = nameCandidates(partials);
-  const normalizedTexts = messages.map((message) => normalizeName(message.text));
+  const hits = matchNames(candidates, messages);
   return candidates.flatMap((candidate) => {
     const pattern = namePattern(candidate.name);
     const groups = new Map();
-    // The cheap substring test first; the exact pattern only on its hits.
-    normalizedTexts.forEach((text, index) => {
-      if (text.includes(candidate.key) && (pattern === null || pattern.test(messages[index].text))) {
+    // The one-pass match first; the exact pattern only on its hits.
+    for (const index of hits.get(candidate)) {
+      if (pattern === null || pattern.test(messages[index].text)) {
         addMention(groups, messages[index]);
       }
-    });
+    }
     const total = [...groups.values()].reduce((sum, record) => sum + record.mentions, 0);
     // A "name" that half the messages contain is a common word, not a thing.
     if (total === 0 || total > messages.length * GENERIC_SHARE + 50) {
@@ -226,13 +253,12 @@ const thingEvents = (messages, partials) => {
   });
 };
 
-const pictureEvents = (db, fromUnix, toUnix, groupIds) => {
-  const page = gallery.listPictures(db, { fromUnix, toUnix, sort: "spread", limit: SPREAD_PICTURES * 3 });
-  return page.items
-    .filter((item) => item.groups >= 2 && (groupIds === null || groupIds.includes(item.origin?.groupId)))
-    .slice(0, SPREAD_PICTURES)
+const pictureEvents = (db, fromUnix, toUnix, groupIds) =>
+  gallery.spreadPictures(db, { fromUnix, toUnix })
+    .map((md5) => gallery.pictureDetail(db, md5))
+    .filter((detail) => detail !== null && (groupIds === null || groupIds.includes(detail.occurrences[0]?.groupId)))
     .map((item) => {
-      const detail = gallery.pictureDetail(db, item.md5);
+      const detail = item;
       const groups = new Map();
       for (const posting of detail.occurrences) {
         addMention(groups, { ...posting, text: "" });
@@ -247,14 +273,12 @@ const pictureEvents = (db, fromUnix, toUnix, groupIds) => {
         generator: item.generator,
       }, groups);
     });
-};
 
 /* ---------- ranking ---------- */
 
 // A picture travelling is mostly a reaction meme; an AI picture travelling is
 // what an AI-art reader wants to see, so it keeps the full weight.
-const GROUP_WEIGHT = { thing: 10, link: 10, picture: 6 };
-const MAX_PICTURE_EVENTS = 8;
+const GROUP_WEIGHT = { thing: 10, link: 10, picture: 4 };
 
 const groupWeight = (event) =>
   (event.kind === "picture" ? (event.ai ? GROUP_WEIGHT.thing : GROUP_WEIGHT.picture) : GROUP_WEIGHT[event.kind] ?? GROUP_WEIGHT.thing);
@@ -267,8 +291,6 @@ const score = (event, nowUnix) =>
 
 // "qwen", "Qwen Image" and "qwen image 2.1" are one story: a named thing whose
 // key contains a higher-ranked thing's key is listed under it as related.
-const MAX_RELATED = 6;
-
 const foldRelated = (ranked) => {
   const kept = [];
   for (const event of ranked) {
@@ -277,7 +299,7 @@ const foldRelated = (ranked) => {
       : undefined;
     if (parent === undefined) {
       kept.push({ ...event, related: [] });
-    } else if (parent.related.length < MAX_RELATED) {
+    } else {
       parent.related.push({ title: event.title, groupCount: event.groupCount, totalMentions: event.totalMentions });
     }
   }
@@ -295,25 +317,26 @@ const sparkOf = (times, fromUnix, nowUnix, buckets) => {
   return counts;
 };
 
-const trends = (db, { nowUnix, days = 3, groupIds = null }) => {
-  const span = Math.min(7, Math.max(1, Number.parseInt(days, 10) || 3));
-  const fromUnix = nowUnix - span * DAY_SECONDS;
+// The last `days` days, or an explicit fromUnix..toUnix window.
+const trends = (db, { nowUnix, days = 3, fromUnix: from = null, toUnix: to = null, groupIds = null }) => {
+  const explicit = Number.isFinite(from) && Number.isFinite(to) && to > from;
+  const toUnix = explicit ? to : nowUnix + 60;
+  const fromUnix = explicit ? from : nowUnix - Math.max(1, Number.parseInt(days, 10) || 3) * DAY_SECONDS;
+  const span = Math.max(1, Math.round((toUnix - fromUnix) / DAY_SECONDS));
   const ids = Array.isArray(groupIds) && groupIds.length > 0 ? groupIds.map(String) : null;
-  const messages = windowMessages(db, fromUnix, ids);
-  const partials = windowPartials(db, fromUnix, ids);
+  const messages = windowMessages(db, fromUnix, toUnix, ids);
+  const partials = windowPartials(db, fromUnix, toUnix, ids);
   const events = [
     ...thingEvents(messages, partials),
     ...linkEvents(messages, partials),
-    ...pictureEvents(db, fromUnix, nowUnix + 60, ids),
+    ...pictureEvents(db, fromUnix, toUnix, ids),
   ];
-  let pictures = 0;
+  const buckets = Math.min(SPARK_MAX_BUCKETS, span * 4);
   const ranked = foldRelated(events
-    .map((event) => ({ ...event, score: score(event, nowUnix) }))
+    .map((event) => ({ ...event, score: score(event, Math.min(nowUnix, toUnix)) }))
     .sort((left, right) => right.score - left.score))
-    .filter((event) => event.kind !== "picture" || (pictures += 1) <= MAX_PICTURE_EVENTS)
-    .slice(0, MAX_EVENTS)
-    .map(({ times, ...event }) => ({ ...event, spark: sparkOf(times, fromUnix, nowUnix, span * 4) }));
-  return { days: span, fromUnix, toUnix: nowUnix, messages: messages.length, summarizedChunks: partials.length, events: ranked };
+    .map(({ times, key, ...event }) => ({ ...event, spark: sparkOf(times, fromUnix, toUnix, buckets) }));
+  return { days: span, fromUnix, toUnix, messages: messages.length, summarizedChunks: partials.length, events: ranked };
 };
 
 module.exports = { trends, normalizeName, normalizeUrl, keyIsSpecific, namePattern };

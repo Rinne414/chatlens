@@ -11,8 +11,6 @@ const Database = require("better-sqlite3-multiple-ciphers");
 const state = require("./toolkit_state");
 const gallery = require("../gallery_store");
 
-const MAX_DAYS = 31;
-
 const storePath = () => path.join(state.toolRoot, "store", "messages.db");
 const knowledgePath = () => path.join(state.toolRoot, "store", "knowledge.db");
 
@@ -30,7 +28,7 @@ const withReadOnlyStore = (work) => {
 
 const nowUnix = () => Math.floor(Date.now() / 1000);
 
-// `days` (1..31) or an explicit fromUnix/toUnix pair.
+// `days` (0 = everything recorded) or an explicit fromUnix/toUnix pair.
 const rangeFrom = (params) => {
   const from = Number(params.get("fromUnix"));
   const to = Number(params.get("toUnix"));
@@ -38,7 +36,10 @@ const rangeFrom = (params) => {
     return { fromUnix: from, toUnix: to };
   }
   const days = Number.parseInt(params.get("days") ?? "7", 10);
-  return gallery.rangeForDays(Number.isInteger(days) ? Math.min(MAX_DAYS, Math.max(1, days)) : 7, nowUnix());
+  if (days === 0) {
+    return { fromUnix: 0, toUnix: nowUnix() + 60 };
+  }
+  return gallery.rangeForDays(Number.isInteger(days) && days > 0 ? days : 7, nowUnix());
 };
 
 const filterFrom = (params) => ({

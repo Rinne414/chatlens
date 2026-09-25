@@ -14,7 +14,6 @@
 const DAY_SECONDS = 86400;
 const MAX_LIMIT = 240;
 const DEFAULT_LIMIT = 120;
-const MAX_FACET_SENDERS = 30;
 const CONTEXT_MESSAGES = 6;
 const KINDS = new Set(["images", "stickers", "all"]);
 const SORTS = new Set(["recent", "spread"]);
@@ -215,7 +214,7 @@ const galleryFacets = (db, options) => {
            MAX(m.speaker) AS label, COUNT(DISTINCT p.md5) AS count
     FROM pictures p JOIN messages m ON m.group_id = p.group_id AND m.row_id = p.row_id
     WHERE ${bySender.where} AND m.speaker <> ''
-    GROUP BY value ORDER BY count DESC LIMIT ${MAX_FACET_SENDERS}
+    GROUP BY value ORDER BY count DESC
   `).all(bySender.args);
   return { kinds, ai, spread, groups, senders };
 };
@@ -269,6 +268,14 @@ const messageContext = (db, { groupId, rowId, sentAt }) => {
   return { messages: [...before, ...after], focusRowId: String(rowId ?? "") };
 };
 
+// Every non-sticker picture posted in the window that has been posted in more
+// than one group (counting all its postings), for 热点.
+const spreadPictures = (db, { fromUnix, toUnix }) => db.prepare(`
+  SELECT p.md5 FROM pictures p
+  WHERE p.sent_at >= ? AND p.sent_at < ? AND p.sticker = 0
+  GROUP BY p.md5 HAVING ${SPREAD_GROUPS} > 1
+`).all(fromUnix, toUnix).map((row) => row.md5);
+
 const rangeForDays = (days, nowUnix) => ({ fromUnix: nowUnix - days * DAY_SECONDS, toUnix: nowUnix + 60 });
 
-module.exports = { listPictures, galleryFacets, pictureDetail, messageContext, rangeForDays, hasKnowledge };
+module.exports = { listPictures, galleryFacets, pictureDetail, messageContext, spreadPictures, rangeForDays, hasKnowledge };

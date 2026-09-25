@@ -25,7 +25,7 @@ const BACKUP_PRESETS = [
   { id: "logs", label: "只存聊天记录", hint: "每个群每天一个文本文件", keys: ["logs"] },
 ];
 const BACKUP_RESCUE_BATCH = 5;
-const BACKUP_RESCUE_PREVIEW = 30;
+const BACKUP_RESCUE_TILE = 96;
 
 const backupState = {
   setup: null,
@@ -326,7 +326,7 @@ const backupMissingList = (report) => {
     return null;
   }
   return el("details", { class: "backup-missing" },
-    el("summary", {}, "看看缺的是哪些（每个群最多列 30 个）"),
+    el("summary", {}, "看看缺的是哪些"),
     groups.map((group) => el("div", {},
       el("strong", {}, group.groupName || group.groupId),
       el("ul", {}, group.missingSamples.map((sample) => el("li", {},
@@ -498,7 +498,7 @@ const backupRescueSelection = (items) => {
   const count = backupState.picked.size;
   return el("div", { class: "backup-rescue-select", id: "backup-rescue-select" },
     el("button", { class: "btn small", type: "button", onclick: () => setRescuePicked(new Set(items.map((item) => item.md5))) },
-      `全选这批 ${briefNumber(items.length)} 张`),
+      `全选（${briefNumber(items.length)} 张）`),
     count === 0 ? null : el("button", { class: "btn small", type: "button", onclick: () => setRescuePicked(new Set()) }, "清除"),
     el("button", {
       class: "btn small primary",
@@ -532,11 +532,13 @@ const backupRescue = () => {
     items.length === 0 ? null : backupRescueSelection(items),
     items.length === 0
       ? el("p", { class: "backup-ok" }, "✓ 现在没有待保存的 AI 原图。")
-      : el("div", { class: "backup-rescue-grid" }, items.slice(0, BACKUP_RESCUE_PREVIEW).map(backupRescueTile)),
-    items.length > BACKUP_RESCUE_PREVIEW
-      ? el("p", { class: "kb-meta" }, `还有 ${briefNumber(items.length - BACKUP_RESCUE_PREVIEW)} 张没列出来，「全部保存」和「全选这批」会包括它们。`)
-      : null,
-    (expiring.total ?? 0) > items.length
-      ? el("p", { class: "kb-meta" }, `一共 ${briefNumber(expiring.total)} 张，一次最多处理 ${items.length} 张；这批存完再点一次。`)
-      : null);
+      : el("div", { class: "backup-rescue-scroll" }, imageWall({
+        key: "rescue",
+        entries: items.map((item) => ({ kind: "tile", ratio: 1, item })),
+        mode: "grid",
+        targetSize: BACKUP_RESCUE_TILE,
+        gap: 8,
+        scrollerSelector: ".backup-rescue-scroll",
+        renderEntry: (entry) => backupRescueTile(entry.item),
+      })));
 };

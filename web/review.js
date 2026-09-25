@@ -163,6 +163,7 @@ const runReviewSearch = async (query) => {
     return;
   }
   reviewState.searching = true;
+  reviewState.summaryShown = REVIEW_HIT_STEP;
   renderReviewView();
   try {
     reviewState.results = await api(`/api/review/search?q=${encodeURIComponent(reviewState.query)}`);
@@ -256,8 +257,25 @@ const reviewMessageHit = (hit, terms) =>
       el("div", { class: "review-hit-head" }, el("strong", {}, hit.speaker), el("span", { class: "brief-meta" }, reviewHitMeta(hit))),
       el("p", {}, reviewMark(hit.text, terms))));
 
+const REVIEW_HIT_STEP = 50;
+
+// More raw-message hits: the next page from the server, appended.
+const loadMoreReviewMessages = async () => {
+  const results = reviewState.results;
+  try {
+    const page = await api(`/api/review/search?q=${encodeURIComponent(reviewState.query)}&messageOffset=${results.messages.items.length}`);
+    reviewState.results = { ...results, messages: { ...results.messages, items: [...results.messages.items, ...page.messages.items] } };
+  } catch (error) {
+    reviewState.error = error.message;
+  }
+  renderReviewView();
+};
+
+const moreHitsButton = (label, onclick) => el("button", { class: "btn small review-more", type: "button", onclick }, label);
+
 const reviewResults = () => {
   const { terms, summaries, messages } = reviewState.results;
+  const summaryShown = reviewState.summaryShown ?? REVIEW_HIT_STEP;
   const empty = summaries.total === 0 && messages.total === 0;
   return el("section", { class: "review-results" },
     el("header", { class: "review-results-head" },
@@ -269,13 +287,22 @@ const reviewResults = () => {
       ? el("section", { class: "brief-section" },
           el("h3", { class: "brief-section-title" }, "AI 整理里", el("span", { class: "brief-sub" }, "点一条看当时的聊天，点日期看那天的整理")),
           reviewDayChips(summaries.byDay),
-          el("ul", { class: "review-hit-list" }, summaries.items.map((hit) => reviewSummaryHit(hit, terms))))
+          el("ul", { class: "review-hit-list" }, summaries.items.slice(0, summaryShown).map((hit) => reviewSummaryHit(hit, terms))),
+          summaries.items.length > summaryShown
+            ? moreHitsButton(`再显示 ${Math.min(REVIEW_HIT_STEP, summaries.items.length - summaryShown)} 处（共 ${briefNumber(summaries.items.length)} 处）`, () => {
+              reviewState.summaryShown = summaryShown + REVIEW_HIT_STEP;
+              renderReviewView();
+            })
+            : null)
       : null,
     messages.total > 0
       ? el("section", { class: "brief-section" },
-          el("h3", { class: "brief-section-title" }, "原文里", el("span", { class: "brief-sub" }, messages.total > messages.items.length ? `最近 ${messages.items.length} 条` : "")),
+          el("h3", { class: "brief-section-title" }, "原文里", el("span", { class: "brief-sub" }, `已显示 ${briefNumber(messages.items.length)} / ${briefNumber(messages.total)} 条`)),
           reviewDayChips(messages.byDay),
-          el("ul", { class: "review-hit-list" }, messages.items.map((hit) => reviewMessageHit(hit, terms))))
+          el("ul", { class: "review-hit-list" }, messages.items.map((hit) => reviewMessageHit(hit, terms))),
+          messages.total > messages.items.length
+            ? moreHitsButton(`再显示更多（还有 ${briefNumber(messages.total - messages.items.length)} 条）`, loadMoreReviewMessages)
+            : null)
       : null);
 };
 

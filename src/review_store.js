@@ -14,9 +14,9 @@ const { interleave } = require("./briefing_view");
 
 const BEIJING_OFFSET_SECONDS = 8 * 3600;
 const DAY_SECONDS = 86400;
-const MAX_SEARCH_CHUNKS = 400;
-const MAX_SUMMARY_HITS = 80;
-const MAX_MESSAGE_HITS = 60;
+// Raw-message hits come a page at a time (a common word can match tens of
+// thousands); every page is reachable. Summary hits come complete.
+const MESSAGE_PAGE = 200;
 const MAX_TERMS = 5;
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
@@ -352,7 +352,7 @@ const searchSummaries = (db, terms) => {
            c.start_sent_at AS startSentAt, c.end_sent_at AS endSentAt, c.partial_json AS partialJson
     FROM summary_chunks c LEFT JOIN group_names n ON n.group_id = c.group_id
     WHERE c.status = 'done' AND ${where}
-    ORDER BY c.end_sent_at DESC LIMIT ${MAX_SEARCH_CHUNKS}
+    ORDER BY c.end_sent_at DESC
   `).all(...terms.map((term) => `%${escapeLike(term)}%`));
   return chunks.flatMap((chunk) => {
     const partial = parsePartial(chunk.partialJson);
@@ -360,7 +360,7 @@ const searchSummaries = (db, terms) => {
   });
 };
 
-const searchMessages = (db, terms) => {
+const searchMessages = (db, terms, offset = 0) => {
   const where = terms.map(() => "m.text LIKE ? ESCAPE '\\'").join(" AND ");
   const params = terms.map((term) => `%${escapeLike(term)}%`);
   const hits = db.prepare(`
@@ -368,8 +368,8 @@ const searchMessages = (db, terms) => {
            m.speaker, m.text
     FROM messages m LEFT JOIN group_names n ON n.group_id = m.group_id
     WHERE m.is_media = 0 AND ${where}
-    ORDER BY m.sent_at DESC LIMIT ${MAX_MESSAGE_HITS}
-  `).all(...params);
+    ORDER BY m.sent_at DESC LIMIT ${MESSAGE_PAGE} OFFSET ?
+  `).all(...params, Math.max(0, Number.parseInt(offset, 10) || 0));
   const byDay = db.prepare(`
     SELECT (m.sent_at + ${BEIJING_OFFSET_SECONDS}) / ${DAY_SECONDS} AS dayNumber, COUNT(*) AS count
     FROM messages m WHERE m.is_media = 0 AND ${where}
@@ -382,7 +382,7 @@ const searchMessages = (db, terms) => {
   };
 };
 
-const search = (db, { query }) => {
+const search = (db, { query, messageOffset = 0 }) => {
   briefingStore.ensureBriefingSchema(db);
   const terms = searchTerms(query);
   if (terms.length === 0) {
@@ -398,9 +398,9 @@ const search = (db, { query }) => {
     summaries: {
       total: summaryHits.length,
       byDay: [...summaryDays.entries()].map(([day, count]) => ({ day, count })),
-      items: summaryHits.slice(0, MAX_SUMMARY_HITS),
+      items: summaryHits,
     },
-    messages: searchMessages(db, terms),
+    messages: searchMessages(db, terms, messageOffset),
   };
 };
 

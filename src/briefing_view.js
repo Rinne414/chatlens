@@ -9,12 +9,8 @@ const Database = require("better-sqlite3-multiple-ciphers");
 const messageStore = require("./message_store");
 const briefingStore = require("./briefing_store");
 
-const MAX_NEW_THINGS = 12;
-const MAX_QA = 10;
-const MAX_HOT_TOPICS = 8;
-const MAX_IMAGES = 12;
-const MAX_IMAGE_CANDIDATES = 60;
-const MAX_MENTIONS = 40;
+// Everything in the window is returned; the page shows a short preview of
+// each section and expands to the rest on request.
 const IMPORTANCE_RANK = { high: 3, medium: 2, low: 1 };
 
 const groupActivity = (db, fromUnix, toUnix) =>
@@ -68,9 +64,9 @@ const crossGroupHighlights = (groups) => {
       (IMPORTANCE_RANK[right.importance] ?? 0) - (IMPORTANCE_RANK[left.importance] ?? 0)
       || (right.messageCountEstimate ?? 0) - (left.messageCountEstimate ?? 0));
   return {
-    newThings: newThings.slice(0, MAX_NEW_THINGS),
-    qa: qa.slice(0, MAX_QA),
-    hotTopics: hotTopics.slice(0, MAX_HOT_TOPICS).map((topic) => ({
+    newThings,
+    qa,
+    hotTopics: hotTopics.map((topic) => ({
       title: topic.title,
       summary: topic.summary,
       importance: topic.importance,
@@ -103,8 +99,7 @@ const popularImages = (knowledgeDbPath, fromUnix, toUnix, isAvailable = () => tr
       -- reposted all day; keep one only if someone asked for its prompt.
       HAVING i.generator <> 'stripped' OR asks > 0
       ORDER BY asks DESC, sentAt DESC
-      LIMIT ${MAX_IMAGE_CANDIDATES}
-    `).all(fromUnix, toUnix).filter((image) => isAvailable(image.hash)).slice(0, MAX_IMAGES);
+    `).all(fromUnix, toUnix).filter((image) => isAvailable(image.hash));
   } catch {
     // An older knowledge.db without these tables simply has no gallery yet.
     return [];
@@ -139,7 +134,7 @@ const buildBriefing = ({ db, knowledgeDbPath, watchlist, nowUnix, extraSelfUins 
   }).sort((left, right) => (right.textMessages + right.mediaMessages) - (left.textMessages + left.mediaMessages));
 
   const identity = messageStore.getSelfIdentity(db, extraSelfUins);
-  const mentions = messageStore.getMentions(db, { fromUnix: windowStart, toUnix: nowUnix + 60, identity, limit: MAX_MENTIONS });
+  const mentions = messageStore.getMentions(db, { fromUnix: windowStart, toUnix: nowUnix + 60, identity });
   const chunkStats = briefingStore.chunkStatsInWindow(db, windowStart);
 
   return {
@@ -160,7 +155,7 @@ const buildBriefing = ({ db, knowledgeDbPath, watchlist, nowUnix, extraSelfUins 
     groups: groups.map(({ brief, ...group }) => ({
       ...group,
       summary: brief?.summary ?? null,
-      topics: (brief?.topics ?? []).slice(0, 4).map((topic) => topic.title),
+      topics: (brief?.topics ?? []).map((topic) => topic.title),
       coverage: brief?.coverage ?? null,
     })),
     status,
