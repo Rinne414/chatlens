@@ -85,6 +85,7 @@ const DETAILED = {
     maxReduceChunks: 40,
     maxMapPerRun: 120,
     mapConcurrency: 4,
+    reduceConcurrency: 3,
     dailyLlmCallLimit: 3000,
   },
   quick: { maxMessages: 400, maxTokens: 8192, points: "5-20" },

@@ -17,7 +17,7 @@ const GALLERY_SIZE_MAX = 380;
 const GALLERY_PAGE = 120;
 const GALLERY_HEADER_HEIGHT = 46;
 const GALLERY_EXPIRY_WARN_DAYS = 7;
-const GALLERY_DAY_CHOICES = [[1, "今天"], [3, "3 天"], [7, "7 天"], [31, "31 天"], [0, "全部"]];
+const GALLERY_DAY_CHOICES = [[3, "3 天"], [7, "7 天"], [31, "31 天"], [0, "全部"]];
 const GALLERY_KINDS = [["images", "图片"], ["stickers", "表情包"], ["all", "全部"]];
 const GALLERY_SORTS = [["recent", "最新发的"], ["spread", "传得最广"]];
 const GIF_PICTURE_FORMAT = 2000;
@@ -27,6 +27,8 @@ const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 app.gallery = {
   days: 7,
   range: null,
+  // Time cursor (gallery_nav.js): show pictures from before this moment.
+  until: null,
   kind: "images",
   ai: false,
   sort: "recent",
@@ -44,6 +46,10 @@ app.gallery = {
   detail: null,
   selecting: false,
   selected: new Set(),
+  // The tile clicked last, for shift-click ranges.
+  lastPicked: null,
+  saveTarget: null,
+  editingSaveDir: false,
 };
 
 const replaceGallery = (patch) => {
@@ -65,11 +71,12 @@ const galleryWallSize = () => {
 const galleryFilterParams = () => {
   const tab = app.gallery;
   const params = new URLSearchParams({ kind: tab.kind, ai: tab.ai ? "1" : "0", groupId: tab.groupId, sender: tab.sender });
-  if (tab.range !== null) {
-    params.set("fromUnix", String(tab.range.fromUnix));
-    params.set("toUnix", String(tab.range.toUnix));
+  const bounds = galleryTimeBounds(tab);
+  if (bounds.days === undefined) {
+    params.set("fromUnix", String(bounds.fromUnix));
+    params.set("toUnix", String(bounds.toUnix));
   } else {
-    params.set("days", String(tab.days));
+    params.set("days", String(bounds.days));
   }
   return params;
 };
@@ -151,8 +158,18 @@ const loadMoreGallery = () => {
 };
 
 // Entry points kept under the names the rest of the app already calls.
+const loadGallerySaveTarget = async () => {
+  try {
+    replaceGallery({ saveTarget: await api("/api/pictures/save-dir") });
+  } catch {
+    replaceGallery({ saveTarget: null });
+  }
+};
+
 const openMediaView = (forceRefresh) => {
   showView("media");
+  galleryNav.dismissed = false;
+  loadGallerySaveTarget();
   if (forceRefresh === true || app.gallery.results === null) {
     loadGallery();
     return;
@@ -164,6 +181,7 @@ const openMediaView = (forceRefresh) => {
 const openGalleryRange = ({ groupId, fromUnix, toUnix }) => {
   replaceGallery({
     range: { fromUnix, toUnix },
+    until: null,
     groupId: /^\d+$/u.test(String(groupId ?? "")) ? String(groupId) : "",
     sender: "",
     senderLabel: "",
@@ -243,7 +261,16 @@ const refreshGallerySelection = () => {
 
 // One tile changes in place (no re-draw, so no flicker); bulk changes
 // re-draw the visible tiles through refreshGallerySelection.
-const toggleGallerySelected = (md5, tile) => {
+const toggleGallerySelected = (md5, tile, event = null) => {
+  const items = app.gallery.results?.items ?? [];
+  const index = items.findIndex((item) => item.md5 === md5);
+  if (event?.shiftKey && app.gallery.lastPicked !== null && index >= 0) {
+    const [from, to] = [app.gallery.lastPicked, index].sort((left, right) => left - right);
+    replaceGallery({ lastPicked: index });
+    selectGalleryItems(items.slice(from, to + 1));
+    return;
+  }
+  replaceGallery({ lastPicked: index >= 0 ? index : null });
   const next = new Set(app.gallery.selected);
   const selected = !next.has(md5);
   if (selected) {
@@ -284,12 +311,43 @@ const gallerySelectionNodes = () => {
       class: "btn small primary",
       type: "button",
       disabled: count === 0 || pictureExport.running,
-      title: "把原图复制到 reports 下的新文件夹；带咒语的 AI 图附同名 .txt",
+      title: "把原图复制到下面的文件夹；带咒语的 AI 图附同名 .txt",
       onclick: () => runPictureExport([...app.gallery.selected], "gallery"),
-    }, `导出原图到文件夹（${briefNumber(count)}）`),
-    el("span", { class: "kb-meta" }, "腾讯只保留 31 天，更早的图取不到原图。"),
+    }, `保存原图到文件夹（${briefNumber(count)}）`),
+    el("span", { class: "kb-meta" }, "按住 Shift 点另一张可以连选；腾讯只保留 31 天，更早的图取不到原图。"),
+    gallerySaveTargetRow(),
     pictureExportStatus("gallery"),
   ];
+};
+
+const saveGalleryDir = async (dir) => {
+  try {
+    replaceGallery({ saveTarget: await api("/api/pictures/save-dir", { method: "POST", body: JSON.stringify({ dir }) }), editingSaveDir: false });
+  } catch (error) {
+    alert(error.message);
+  }
+  refreshGallerySelection();
+};
+
+// "保存到：…" with a way to pick a fixed folder (or go back to dated folders).
+const gallerySaveTargetRow = () => {
+  const target = app.gallery.saveTarget;
+  if (target === null) {
+    return null;
+  }
+  if (app.gallery.editingSaveDir) {
+    const input = el("input", { type: "text", value: target.saveDir ?? "", placeholder: "例如 D:\\图片\\QQ好图", style: "width:320px" });
+    return el("div", { class: "gallery-save-target" },
+      el("span", {}, "保存到："), input,
+      el("button", { class: "btn small primary", type: "button", onclick: () => saveGalleryDir(input.value) }, "保存"),
+      target.saveDir === null ? null : el("button", { class: "btn small", type: "button", onclick: () => saveGalleryDir("") }, "改回每次新建文件夹"),
+      el("button", { class: "btn small", type: "button", onclick: () => { replaceGallery({ editingSaveDir: false }); refreshGallerySelection(); } }, "取消"));
+  }
+  return el("div", { class: "gallery-save-target" },
+    el("span", {}, "保存到："),
+    el("code", {}, target.saveDir ?? `${target.fallbackRoot}\\picture-export-<时间>（每次新建一个文件夹）`),
+    el("button", { class: "btn small", type: "button", onclick: () => { replaceGallery({ editingSaveDir: true }); refreshGallerySelection(); } },
+      target.saveDir === null ? "改成固定文件夹" : "更改"));
 };
 
 const gallerySelectBox = (item) => el("label", {
@@ -300,14 +358,21 @@ const gallerySelectBox = (item) => el("label", {
   type: "checkbox",
   checked: app.gallery.selected.has(item.md5),
   "aria-label": "选中这张图",
-  onchange: (event) => toggleGallerySelected(item.md5, event.target.closest(".wall-tile")),
+  onclick: (event) => {
+    event.stopPropagation();
+    if (event.shiftKey) {
+      event.preventDefault();
+      toggleGallerySelected(item.md5, event.target.closest(".wall-tile"), event);
+    }
+  },
+  onchange: (event) => toggleGallerySelected(item.md5, event.target.closest(".wall-tile"), event),
 }));
 
 const galleryTile = (item, index) => wallTile({
   src: pictureUrl(item.md5, "thumb"),
   alt: item.sticker ? "表情" : "图片",
   onOpen: (event) => (app.gallery.selecting
-    ? toggleGallerySelected(item.md5, event.currentTarget.closest(".wall-tile"))
+    ? toggleGallerySelected(item.md5, event.currentTarget.closest(".wall-tile"), event)
     : openGalleryDetail(index)),
   badges: galleryBadges(item),
   corner: app.gallery.selecting ? el("div", { class: "wall-corner" }, gallerySelectBox(item)) : null,
@@ -331,17 +396,25 @@ const renderGalleryEntry = (entry) =>
 
 const galleryRangeLabel = () => {
   const range = app.gallery.range;
-  return range === null ? "" : `${unixToHkt(range.fromUnix).slice(5, 16)} – ${unixToHkt(range.toUnix).slice(5, 16)}`;
+  if (range === null) {
+    return "";
+  }
+  return range.preset === "custom"
+    ? `${unixToHkt(range.fromUnix).slice(5, 10)} – ${unixToHkt(range.toUnix - 1).slice(5, 10)}`
+    : `${unixToHkt(range.fromUnix).slice(5, 16)} – ${unixToHkt(range.toUnix).slice(5, 16)}`;
 };
 
 const galleryToolbar = () => el("div", { class: "gallery-toolbar" },
   el("div", { class: "wall-modes", role: "group", "aria-label": "时间范围" },
+    galleryCalendarButtons(),
     GALLERY_DAY_CHOICES.map(([days, label]) => el("button", {
       class: app.gallery.range === null && app.gallery.days === days ? "wall-mode active" : "wall-mode",
       type: "button",
       "aria-pressed": String(app.gallery.range === null && app.gallery.days === days),
-      onclick: () => applyGalleryFilter({ days, range: null }),
-    }, label))),
+      onclick: () => applyGalleryFilter({ days, range: null, until: null }),
+    }, label)),
+    galleryDatePicker()),
+  galleryJumpControl(),
   el("div", { class: "wall-modes", role: "group", "aria-label": "类型" },
     GALLERY_KINDS.map(([kind, label]) => el("button", {
       class: app.gallery.kind === kind ? "wall-mode active" : "wall-mode",
@@ -356,7 +429,10 @@ const galleryToolbar = () => el("div", { class: "gallery-toolbar" },
 const galleryConditions = () => {
   const tab = app.gallery;
   const chips = [
-    tab.range === null ? null : { text: `时间：${galleryRangeLabel()}`, remove: () => applyGalleryFilter({ range: null }) },
+    tab.range === null || tab.range.preset === "today" || tab.range.preset === "yesterday"
+      ? null
+      : { text: `时间：${galleryRangeLabel()}`, remove: () => applyGalleryFilter({ range: null }) },
+    galleryCursorChip(),
     tab.groupId === "" ? null : { text: `群：${pictureGroupName(tab.groupId)}`, remove: () => applyGalleryFilter({ groupId: "" }) },
     tab.sender === "" ? null : { text: `发图人：${tab.senderLabel || tab.sender}`, remove: () => applyGalleryFilter({ sender: "", senderLabel: "" }) },
   ].filter((chip) => chip !== null);
@@ -508,15 +584,15 @@ const renderMediaView = () => {
           el("strong", { id: "gallery-count", class: "kb-count" }, galleryCountText()),
           el("span", { class: "kb-results-spacer" }),
           el("button", {
-            class: tab.selecting ? "btn small active" : "btn small",
+            class: tab.selecting ? "btn small active" : "btn small primary",
             type: "button",
             "aria-pressed": String(tab.selecting),
-            title: "选几张图，一起导出原图",
+            title: "选几张图，一起把原图保存到文件夹",
             onclick: () => {
-              replaceGallery({ selecting: !tab.selecting });
+              replaceGallery({ selecting: !tab.selecting, lastPicked: null });
               renderMediaView();
             },
-          }, tab.selecting ? "完成选择" : "多选"),
+          }, tab.selecting ? "完成选择" : "☑ 多选保存"),
           wallControls({
             mode: galleryWallMode(),
             modes: GALLERY_MODES,
@@ -532,7 +608,8 @@ const renderMediaView = () => {
               renderMediaView();
             },
           })),
-        tab.selecting ? el("div", { id: "gallery-selection", class: "gallery-selection" }, gallerySelectionNodes()) : null,
+        galleryReturnBanner(),
         galleryWall(),
+        tab.selecting ? el("div", { id: "gallery-selection", class: "gallery-selection" }, gallerySelectionNodes()) : null,
         el("div", { id: "gallery-foot", class: "wall-foot" }, galleryFootText())))));
 };

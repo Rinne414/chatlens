@@ -51,6 +51,14 @@ test("strips characters Windows forbids in filenames", () => {
   assert.equal(sanitizeStem('a<b>c:d"e/f\\g|h?i*j', "fallback"), "a_b_c_d_e_f_g_h_i_j");
 });
 
+test("drops invisible and unassigned characters some nicknames carry", () => {
+  const invisible = String.fromCodePoint(0xfff4);
+  const bidi = String.fromCodePoint(0x2067);
+  const zeroWidth = String.fromCodePoint(0x200b);
+  assert.equal(sanitizeStem(invisible, "fallback"), "fallback");
+  assert.equal(sanitizeStem(`${bidi}青苇${zeroWidth}`, "fallback"), "青苇");
+});
+
 test("falls back when a name sanitises to nothing", () => {
   assert.equal(sanitizeStem("///", "fallback"), "___", "forbidden chars become underscores, which is a usable name");
   assert.equal(sanitizeStem("", "fallback"), "fallback");

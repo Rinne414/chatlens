@@ -37,12 +37,18 @@ const sendImage = (response, filePath, extraHeaders = {}) => {
   fs.createReadStream(filePath).pipe(response);
 };
 
+// RFC 6266: an ASCII fallback plus the real (Chinese) name.
+const disposition = (md5, filePath) => {
+  const name = exportOps.downloadName(md5, filePath);
+  return `inline; filename="${md5}${path.extname(name)}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+};
+
 const servePicture = async (response, url) => {
   const md5 = String(url.searchParams.get("md5") ?? "").toLowerCase();
   const size = url.searchParams.get("size") ?? "thumb";
   const result = await jobs.resolvePicture(md5, size);
   if (result.filePath !== undefined) {
-    sendImage(response, result.filePath);
+    sendImage(response, result.filePath, { "content-disposition": disposition(md5, result.filePath) });
     return;
   }
   if (result.fallback) {
@@ -87,6 +93,12 @@ const handlePictureApi = async (request, response, url, { sendJson, sendError, r
       return true;
     case "POST /api/pictures/export":
       sendJson(response, 200, await exportOps.exportPictures(await readBody(request)));
+      return true;
+    case "GET /api/pictures/save-dir":
+      sendJson(response, 200, exportOps.getSaveTarget());
+      return true;
+    case "POST /api/pictures/save-dir":
+      sendJson(response, 200, exportOps.setSaveDir(await readBody(request)));
       return true;
     case "POST /api/pictures/export/open":
       sendJson(response, 200, exportOps.openExportFolder(await readBody(request)));

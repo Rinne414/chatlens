@@ -222,7 +222,7 @@ const usageByGroupDay = (db, { sinceUnix, fromDay, toDay, prices }) => {
     SELECT at, purpose, model, prompt_tokens AS promptTokens, cached_tokens AS cachedTokens, completion_tokens AS completionTokens,
            reasoning_tokens AS reasoningTokens, messages, billing, list_cost_usd AS listCostUsd, group_id AS groupId, chunk_day AS day
     FROM llm_usage
-    WHERE at >= ? AND chunk_day IS NOT NULL AND chunk_day >= ? AND chunk_day <= ? AND purpose IN ('map', 'redo')
+    WHERE at >= ? AND chunk_day IS NOT NULL AND chunk_day >= ? AND chunk_day <= ? AND purpose IN ('map', 'redo', 'reduce')
   `).all(sinceUnix, fromDay, toDay);
   const buckets = new Map();
   for (const row of rows) {

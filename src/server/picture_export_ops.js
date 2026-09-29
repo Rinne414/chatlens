@@ -1,9 +1,10 @@
 "use strict";
 
 // POST /api/pictures/export: copies up to MAX_PER_REQUEST chosen pictures'
-// originals into reports/picture-export-<time>/. The page sends a long
+// originals into the user's save folder (设置 in 画廊, config.pictures.saveDir)
+// or, without one, a new reports/picture-export-<time>/. The page sends a long
 // selection in small batches (so it can show progress and stop), passing back
-// the folder name the first batch created. Nothing is kept in the store: an
+// the folder token the first batch used. Nothing is kept in the store: an
 // original fetched from Tencent for this goes to a temp file and is removed.
 
 const fs = require("node:fs");
@@ -15,13 +16,24 @@ const pictureStore = require("../picture_store");
 const platform = require("../platform");
 const { promptFor, sidecarText } = require("../knowledge_export");
 const { newFolderName, isFolderName, extensionOf, fileStem, uniqueName } = require("../picture_export");
+const { validateTargetDir } = require("./backup_ops");
 
 const MAX_PER_REQUEST = 10;
 const MD5 = /^[a-f0-9]{32}$/u;
 
+const SAVE_DIR_TOKEN = "save-dir";
+
 const exportRoot = () => state.loadConfig().reportsDir;
 
+const saveDir = () => {
+  const dir = String(state.loadConfig().pictures?.saveDir ?? "").trim();
+  return dir.length > 0 ? dir : null;
+};
+
 const folderPath = (name) => {
+  if (name === SAVE_DIR_TOKEN && saveDir() !== null) {
+    return saveDir();
+  }
   if (!isFolderName(name)) {
     throw new Error("导出文件夹名无效。");
   }
@@ -66,7 +78,8 @@ const exportOne = async (directory, md5) => {
 const exportPictures = async ({ md5s, folder = null }) => {
   const wanted = [...new Set((Array.isArray(md5s) ? md5s : []).map((md5) => String(md5).toLowerCase()).filter((md5) => MD5.test(md5)))]
     .slice(0, MAX_PER_REQUEST);
-  const name = folder === null || folder === "" ? newFolderName(Math.floor(Date.now() / 1000)) : String(folder);
+  const fresh = saveDir() !== null ? SAVE_DIR_TOKEN : newFolderName(Math.floor(Date.now() / 1000));
+  const name = folder === null || folder === "" ? fresh : String(folder);
   const directory = folderPath(name);
   fs.mkdirSync(directory, { recursive: true });
   const results = [];
@@ -85,4 +98,33 @@ const openExportFolder = ({ folder }) => {
   return { opened: true };
 };
 
-module.exports = { exportPictures, openExportFolder, MAX_PER_REQUEST };
+// Where 「保存原图到文件夹」 writes: the chosen folder, or a new dated folder
+// under reports/ when none is chosen.
+const getSaveTarget = () => ({
+  saveDir: saveDir(),
+  fallbackRoot: exportRoot(),
+});
+
+// "" goes back to the dated folders under reports/.
+const setSaveDir = ({ dir }) => {
+  const raw = state.loadRawConfig();
+  const value = String(dir ?? "").trim();
+  const next = value.length === 0 ? "" : validateTargetDir(value, state.loadConfig(), "保存文件夹");
+  if (next !== "") {
+    fs.mkdirSync(next, { recursive: true });
+  }
+  state.writeConfig({ ...raw, pictures: { ...(raw.pictures ?? {}), saveDir: next } });
+  return getSaveTarget();
+};
+
+// A browser's "save image as" name: the same when / where / who name the
+// exports use, so saved pictures never pile up as image.png, image (1).png.
+const downloadName = (md5, filePath) => {
+  try {
+    return `${fileStem(md5, firstPosting(md5))}${extensionOf(filePath)}`;
+  } catch {
+    return `${md5}${path.extname(filePath)}`;
+  }
+};
+
+module.exports = { exportPictures, openExportFolder, getSaveTarget, setSaveDir, downloadName, MAX_PER_REQUEST };

@@ -120,6 +120,14 @@ const mountWall = (container, options) => {
       relayout();
       schedule();
     },
+    // The first entry whose box reaches below the top of the viewport.
+    topIndex: () => {
+      const zoom = wallZoom();
+      const box = scroller?.getBoundingClientRect() ?? null;
+      const top = ((box === null ? 0 : box.top) - container.getBoundingClientRect().top) / zoom;
+      const index = layout.boxes.findIndex((entryBox) => entryBox.y + entryBox.h > top);
+      return index < 0 ? null : index;
+    },
     // Rebuilds the visible tiles, e.g. after badges arrive.
     repaint: () => {
       for (const node of nodes.values()) {
@@ -186,6 +194,9 @@ const wallSetEntries = (key, entries) => {
 const wallRepaint = (key) => {
   activeWalls.get(key)?.repaint();
 };
+
+// Index of the entry at the top of the screen, or null without a wall.
+const wallTopIndex = (key) => activeWalls.get(key)?.topIndex() ?? null;
 
 /* ---------- building blocks for tiles ---------- */
 

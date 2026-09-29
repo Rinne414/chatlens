@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const STORAGE_CATEGORIES = new Set([
+  "qq-account",
   "qq-databases",
   "qq-media-cache",
   "tool-config",
@@ -11,6 +12,7 @@ const STORAGE_CATEGORIES = new Set([
   "message-store",
   "knowledge-store",
   "knowledge-media",
+  "picture-cache",
   "coverage-checkpoints",
   "database-mirror",
   "temporary-files",
@@ -106,6 +108,11 @@ const activityBlockReason = (activity) => {
 
 const pathExists = (targetPath) => targetPath.length > 0 && fs.existsSync(targetPath);
 
+// The folder that holds nt_qq (nt_db and nt_data) for this account, e.g.
+// .../Tencent Files/<QQ号>; on Linux the QQ config folder. "" without a path.
+const qqAccountDir = (context) =>
+  (context.config.ntDbDir.length === 0 ? "" : path.dirname(path.dirname(path.resolve(context.config.ntDbDir))));
+
 const publicItem = (item, activity) => {
   const runningReason = CLEANABLE_CATEGORIES.has(item.id) ? activityBlockReason(activity) : null;
   const blockedReason = runningReason ?? item.cleanupBlockedReason;
@@ -135,11 +142,28 @@ const storageCatalog = (context) => {
   const knowledgePaths = ["knowledge.db", "knowledge.db-wal", "knowledge.db-shm", "export-ledger.json"]
     .map((name) => path.join(storeDir, name));
   const knowledgeMediaDir = path.join(storeDir, "media-objects");
+  const pictureCacheDir = path.join(storeDir, "pictures");
   const mirrorDir = path.join(storeDir, "db-mirror");
+  const accountDir = qqAccountDir(context);
   const temporaryTargets = collectTemporaryTargets(context, false).targets;
   const runCleanupError = cleanableRootError(context, context.config.runsDir, "runsDir");
   const reportCleanupError = cleanableRootError(context, context.config.reportsDir, "reportsDir");
   return [
+    {
+      id: "qq-account",
+      section: "protected",
+      label: "QQ 账号文件夹（全部）",
+      description: "QQ 在这台电脑上为这个账号存的全部数据：下面的数据库和媒体缓存，加上收到的文件、日志等。看「QQ 一共占多少」就看这一项。",
+      paths: accountDir === "" ? [] : [accountDir],
+      exists: pathExists(accountDir),
+      openPath: accountDir,
+      policy: "protected",
+      policyLabel: "请在 QQ 内管理",
+      cleanupCategory: null,
+      cleanupImpact: "这是 QQ 自己的数据，只能在 QQ 里清理。",
+      cleanupBlockedReason: "QQ 账号文件夹只能查看。",
+      measurement: "manual",
+    },
     {
       id: "qq-databases",
       section: "protected",
@@ -243,6 +267,21 @@ const storageCatalog = (context) => {
       cleanupCategory: null,
       cleanupImpact: "删除会让已经保住的咒语库图片再次失去预览，且远程文件可能无法重新下载。",
       cleanupBlockedReason: "持久媒体副本不提供在线删除。",
+      measurement: "manual",
+    },
+    {
+      id: "picture-cache",
+      section: "important",
+      label: "群图片缓存",
+      description: "后台自动取的群图片缩略图、AI 图预览和看过的大图。有上限（设置页「群图片」可调），到上限自动从最旧的清起；永久保存的原图不在这里，在上面的媒体副本里。",
+      paths: [pictureCacheDir],
+      exists: pathExists(pictureCacheDir),
+      openPath: pictureCacheDir,
+      policy: "keep",
+      policyLabel: "自动管理",
+      cleanupCategory: null,
+      cleanupImpact: "由图片上限自动清理；想少占一些，在设置页调低上限。",
+      cleanupBlockedReason: "群图片缓存按上限自动清理，不在这里删除。",
       measurement: "manual",
     },
     {
@@ -395,6 +434,13 @@ const categoryItem = (context, category) => {
 
 const categoryMeasurePaths = (context, category) => {
   const storeDir = path.join(context.toolRoot, "store");
+  if (category === "qq-account") {
+    const accountDir = qqAccountDir(context);
+    return accountDir === "" ? [] : [accountDir];
+  }
+  if (category === "picture-cache") {
+    return [path.join(storeDir, "pictures")];
+  }
   if (category === "qq-databases") {
     return context.config.ntDbDir.length === 0 ? [] : [context.config.ntDbDir];
   }

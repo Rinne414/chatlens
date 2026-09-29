@@ -439,7 +439,7 @@ const hktToUnix = (text) => {
 /* ---------- navigation ---------- */
 
 // Views reached from a page rather than the rail highlight their parent entry.
-const NAV_PARENT = { run: "brief", reader: "brief", history: "settings", watchlist: "settings", storage: "settings" };
+const NAV_PARENT = { run: "brief", reader: "brief", history: "settings", watchlist: "settings" };
 
 // Run when the user leaves a view: overlays belong to the view that opened them.
 const VIEW_LEAVE_HOOKS = [];

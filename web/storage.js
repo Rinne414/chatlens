@@ -208,11 +208,26 @@ el("div", { class: "storage-policy" },
     : null),
 storageActions(item));
 
+const STORAGE_QQ_IDS = new Set(["qq-account", "qq-databases", "qq-media-cache"]);
+
+// Everything, one item after another (the QQ folders can take minutes).
+const storageMeasureAll = async (requestId) => {
+  for (const item of storageState.overview?.items ?? []) {
+    if (requestId !== storageState.requestId) {
+      return;
+    }
+    await storageMeasureCategory(item.id);
+  }
+};
+
+// QQ's total: the whole account folder once it is measured, else its parts.
+const storageQqTotal = () => (storageState.measurements.has("qq-account")
+  ? { bytes: storageMeasuredBytes(["qq-account"]), note: "整个 QQ 账号文件夹" }
+  : { bytes: storageMeasuredBytes(["qq-databases", "qq-media-cache"]), note: storageState.measurements.has("qq-media-cache") ? "数据库 + 媒体缓存（点「全部计算」看整个文件夹）" : "只算了数据库，点「全部计算」" });
+
 const storageSummary = (overview) => {
-  const toolIds = overview.items
-    .filter((item) => item.id !== "qq-databases" && item.id !== "qq-media-cache")
-    .map((item) => item.id);
-  const qqIds = ["qq-databases", "qq-media-cache"];
+  const toolIds = overview.items.filter((item) => !STORAGE_QQ_IDS.has(item.id)).map((item) => item.id);
+  const qq = storageQqTotal();
   const measuredCount = overview.items.filter((item) => storageState.measurements.has(item.id)).length;
   const volumeNodes = overview.volumes.map((volume) =>
     volume.error === null
@@ -230,9 +245,9 @@ const storageSummary = (overview) => {
       el("strong", {}, formatBytes(storageMeasuredBytes(toolIds))),
       el("small", {}, `${measuredCount}/${overview.items.length} 项已有结果`)),
     el("div", { class: "storage-summary-cell" },
-      el("span", {}, "QQ 已计算占用"),
-      el("strong", {}, formatBytes(storageMeasuredBytes(qqIds))),
-      el("small", {}, storageState.measurements.has("qq-media-cache") ? "包含媒体缓存" : "媒体缓存尚未计算")),
+      el("span", {}, "QQ 占用"),
+      el("strong", {}, formatBytes(qq.bytes)),
+      el("small", {}, qq.note)),
     volumeNodes);
 };
 
@@ -266,7 +281,7 @@ const renderStorageView = () => {
     el("div", { class: "storage-toolbar", "data-testid": "storage-view" },
       el("div", {},
         el("strong", {}, "容量计算不会读取文件内容，也不会跟随目录链接。"),
-        el("span", {}, "QQ 媒体缓存可能包含大量小文件，因此只在你点击该行的刷新按钮后计算。")),
+        el("span", {}, "QQ 的文件夹、媒体缓存和图片可能有大量小文件，所以只在你点「全部计算」或该行的刷新按钮后计算。")),
       el("button", {
         class: "btn small",
         "data-testid": "storage-refresh",
@@ -277,7 +292,14 @@ const renderStorageView = () => {
           renderStorageView();
           await storageRefreshAutomatic(storageState.requestId);
         },
-      }, "↻ 刷新工具占用")),
+      }, "↻ 刷新工具占用"),
+      el("button", {
+        class: "btn small primary",
+        "data-testid": "storage-measure-all",
+        disabled: storageState.measuring.size > 0,
+        title: "逐项计算包括 QQ 文件夹在内的全部占用，可能要几分钟",
+        onclick: () => storageMeasureAll(storageState.requestId),
+      }, "全部计算")),
     notice,
     storageSummary(overview),
     sections);

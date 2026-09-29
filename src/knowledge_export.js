@@ -85,6 +85,9 @@ const RESERVED_NAMES = new Set([
 
 const sanitizeStem = (value, fallback) => {
   const cleaned = String(value ?? "")
+    // Invisible format marks (bidi, zero-width) and unassigned / private-use
+    // characters some nicknames carry would only confuse a file name.
+    .replace(/[\p{Cf}\p{Cn}\p{Co}]/gu, "")
     .replace(/[\u0000-\u001F<>:"/\\|?*]/gu, "_")
     .replace(/\s+/gu, " ")
     .replace(/[. ]+$/u, "")

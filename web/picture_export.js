@@ -42,6 +42,7 @@ const pictureExportStatusNodes = (owner) => {
   }
   return [
     el("span", {}, pictureExportText()),
+    !pictureExport.running && pictureExport.path ? el("code", { class: "picture-export-path" }, pictureExport.path) : null,
     pictureExport.running
       ? el("button", { class: "btn small", type: "button", onclick: () => { pictureExport.stop = true; } }, "停下")
       : pictureExport.folder === null

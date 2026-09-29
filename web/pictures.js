@@ -9,7 +9,7 @@
 const PICTURE_MD5 = /^[a-f0-9]{32}$/u;
 const PICTURE_BUDGETS = [2, 5, 10, 20, 50, 100];
 const KEEP_TEXT = {
-  kept: "原图已保存到本机。",
+  kept: "原图已永久保存在本工具里（清理空间时不会删）。要拿出来用，点「下载原图」或在画廊「多选保存」到文件夹。",
   gone: "腾讯服务器已经删除这张图。",
   "no-rkey": "拿不到 QQ 的图片钥匙，请确认 QQ 正在运行。",
   unavailable: "暂时下载不到这张图。",

@@ -425,28 +425,7 @@ const briefHighlights = (data) => {
       briefPanel("topics", "大家在聊", hotTopics, briefTopic)));
 };
 
-const briefImages = (data) => {
-  if (data.images.length === 0) {
-    return null;
-  }
-  const shownCount = briefState.imagesShown ?? BRIEF_IMAGE_PREVIEW;
-  const rest = data.images.length - shownCount;
-  return el("section", { class: "brief-section" },
-    el("h3", { class: "brief-section-title" }, "好图", el("span", { class: "brief-count" }, data.images.length), el("span", { class: "brief-sub" }, "被求 tag、反复转发的排在前面")),
-    el("div", { class: "brief-images" }, data.images.slice(0, shownCount).map((image) =>
-      el("button", { class: "brief-image", title: `${image.groupName} · ${image.speaker}`, onclick: () => briefOpenImage(image) },
-        el("img", { src: knowledgeThumbUrl(image.hash), alt: "", loading: "lazy", decoding: "async" }),
-        image.asks > 0 ? el("span", { class: "brief-image-badge" }, `${image.asks} 人求 tag`) : null))),
-    rest > 0
-      ? el("button", {
-          class: "btn small ghost brief-more",
-          onclick: () => {
-            briefState.imagesShown = shownCount + BRIEF_IMAGE_MORE;
-            renderBriefView();
-          },
-        }, `再看 ${Math.min(rest, BRIEF_IMAGE_MORE)} 张（还有 ${briefNumber(rest)} 张）`)
-      : null);
-};
+// 图片 (好图 / 全部图片 + multi-select) lives in web/brief_pictures.js.
 
 const briefGroupRow = (group) =>
   el("li", { class: "brief-group" },

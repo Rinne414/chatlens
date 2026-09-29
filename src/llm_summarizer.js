@@ -814,12 +814,12 @@ const summarizeLines = async (client, analysis, lines, partMeta, purpose = "map"
 
 // Merge already-produced partials. Validated HERE so a reduce that returns
 // malformed JSON also falls back to the deterministic merge.
-const reducePartials = async (client, analysis, partials, provider, purpose = "reduce") => {
+const reducePartials = async (client, analysis, partials, provider, purpose = "reduce", callMeta = {}) => {
   if (partials.length === 1) {
     return { summary: normalizeLlmSummary(partials[0], provider), mode: "single" };
   }
   try {
-    const raw = await callLlm(client, (detail) => ({ ...buildReducePrompt(analysis, partials, detail), maxTokens: profileFor(detail).reduce.maxTokens }), { purpose, validate: validateSummary });
+    const raw = await callLlm(client, (detail) => ({ ...buildReducePrompt(analysis, partials, detail), maxTokens: profileFor(detail).reduce.maxTokens }), { purpose, validate: validateSummary, ...callMeta });
     return { summary: normalizeLlmSummary(raw, provider), mode: "mapreduce" };
   } catch (error) {
     console.warn(`llm reduce failed, using deterministic merge: ${error.message}`);
@@ -879,12 +879,12 @@ const buildBriefMergePrompt = (analysis, partials) => ({
 // merged locally from the already-paid-for chunk summaries (measured: ~5k
 // output tokens -> under 1k). The detailed level runs the full model merge,
 // so topics keep their details and quotes and Q&A is resolved across chunks.
-const mergeBriefPartials = async (client, analysis, partials, provider, purpose = "reduce") => {
+const mergeBriefPartials = async (client, analysis, partials, provider, purpose = "reduce", callMeta = {}) => {
   if (partials.length === 1) {
     return { summary: normalizeLlmSummary(partials[0], provider), mode: "single" };
   }
   if (profileFor(currentDetail(client)).briefMerge === "full") {
-    return reducePartials(client, analysis, partials, provider, purpose);
+    return reducePartials(client, analysis, partials, provider, purpose, callMeta);
   }
   const local = {
     ...deterministicMerge(partials),
@@ -893,7 +893,7 @@ const mergeBriefPartials = async (client, analysis, partials, provider, purpose 
       .slice(0, BRIEF_NEW_THINGS),
   };
   try {
-    const raw = await callLlm(client, () => ({ ...buildBriefMergePrompt(analysis, partials), maxTokens: BRIEF_MERGE_MAX_TOKENS }), { purpose, validate: requireSummaryText });
+    const raw = await callLlm(client, () => ({ ...buildBriefMergePrompt(analysis, partials), maxTokens: BRIEF_MERGE_MAX_TOKENS }), { purpose, validate: requireSummaryText, ...callMeta });
     const topics = arrayOf(raw.topics).slice(0, BRIEF_MERGE_TOPICS).map((topic) => ({ ...topic, details: [], evidence: [] }));
     return { summary: normalizeLlmSummary({ ...local, summary: raw.summary, topics }, provider), mode: "brief-merge" };
   } catch (error) {

@@ -81,7 +81,7 @@ const galleryDetailMeta = (detail) => {
   return [
     item.width > 0 ? `${item.width}×${item.height}` : "",
     item.size > 0 ? formatByteSize(item.size) : "",
-    item.kept ? "原图已保存到本机" : days === null ? "" : `腾讯还保留约 ${days} 天`,
+    item.kept ? "原图已永久保存在本工具里" : days === null ? "" : `腾讯还保留约 ${days} 天`,
   ].filter((part) => part !== "").join(" · ");
 };
 
@@ -93,11 +93,20 @@ const galleryDetailActions = (detail) => {
     detail.size === "original" || item.gone
       ? null
       : el("button", { class: "btn small primary", type: "button", onclick: () => galleryDetailPatch(item.md5, { size: "original", notice: "正在向腾讯取原图…" }) }, "看原图"),
+    item.gone
+      ? null
+      : el("a", {
+        class: "btn small primary",
+        href: pictureUrl(item.md5, "original"),
+        download: "",
+        title: "下载到浏览器的下载文件夹，文件名是「时间_群_发图人_编号」，不会和别的图重名",
+      }, "下载原图"),
     item.kept || item.gone
       ? null
       : el("button", {
         class: "btn small",
         type: "button",
+        title: "把原图永久存在本工具里（store/media-objects），腾讯删掉之后也能看；不会出现在你的文件夹里",
         onclick: async () => {
           galleryDetailPatch(item.md5, { notice: "正在保存原图…" });
           try {
@@ -107,7 +116,7 @@ const galleryDetailActions = (detail) => {
             galleryDetailPatch(item.md5, { notice: error.message });
           }
         },
-      }, "保存原图"),
+      }, "在工具里永久保存"),
     item.ai
       ? el("button", { class: "btn small", type: "button", onclick: () => downloadPictureWorkflow(item.md5).catch((error) => alert(error.message)) }, "下载工作流")
       : null,

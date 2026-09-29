@@ -410,3 +410,13 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .ai-redo-day { cursor: pointer; font-weight: 600; }
 .ai-redo-day:hover { background: var(--accent-soft); }
 .ai-redo-group td:first-child { padding-left: 26px; color: var(--muted); }
+
+/* 图片: 好图 / 全部图片 + multi-select (web/brief_pictures.js) */
+.brief-picture-tabs { display: inline-flex; gap: 6px; }
+.brief-picture-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.brief-image.picked { outline: 3px solid var(--accent); outline-offset: -3px; }
+.brief-image.picked img { opacity: .82; }
+.brief-image-check { position: absolute; top: 6px; left: 6px; display: grid; place-items: center; width: 22px; height: 22px; border: 2px solid #fff; border-radius: 6px; background: rgba(0, 0, 0, .35); color: #fff; font-size: 13px; font-weight: 700; }
+.brief-image-check.on { background: var(--accent); border-color: var(--accent); }
+.brief-picture-selection { position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, .12); font-size: 13px; }
+.brief-picture-selection code { font-size: 12px; word-break: break-all; }

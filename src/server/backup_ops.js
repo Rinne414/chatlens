@@ -32,20 +32,20 @@ const isInside = (parent, child) => {
 
 // The backup folder must never be inside QQ's own account folder (it holds
 // nt_qq with both the database and nt_data) or the tool's store.
-const validateTargetDir = (targetDir, config) => {
+const validateTargetDir = (targetDir, config, label = "备份文件夹") => {
   const value = String(targetDir ?? "").trim();
   if (value.length === 0 || !path.isAbsolute(value)) {
-    throw new Error("请填写完整的备份文件夹路径，例如 D:\\QQ备份。");
+    throw new Error(`请填写完整的${label}路径，例如 D:\\QQ备份。`);
   }
   const qqRoots = [config.ntDbDir, config.ntDataDir]
     .map((dir) => String(dir ?? "").trim())
     .filter((dir) => dir.length > 0)
     .map((dir) => path.dirname(path.dirname(path.resolve(dir))));
   if (qqRoots.some((root) => isInside(root, value))) {
-    throw new Error("备份文件夹不能放在 QQ 自己的数据目录里，请换一个位置。");
+    throw new Error(`${label}不能放在 QQ 自己的数据目录里，请换一个位置。`);
   }
   if (isInside(path.join(state.toolRoot, "store"), value)) {
-    throw new Error("备份文件夹不能放在工具的 store 目录里。");
+    throw new Error(`${label}不能放在工具的 store 目录里。`);
   }
   return path.resolve(value);
 };

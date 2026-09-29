@@ -37,6 +37,7 @@ const DEFAULTS = {
   maxMapPerRun: 40,
   // Detailed-level job chunks (redo / backfill) per run; see mapPendingChunks.
   maxJobPerRun: 40,
+  reduceConcurrency: 1,
   dailyLlmCallLimit: 400,
 };
 
@@ -266,14 +267,16 @@ const reduceBriefs = async (db, client, groupIds, { now, force = false, log = ()
   const options = { ...DEFAULTS, ...overrides };
   const windowStart = briefingSince(db, now);
   const outcome = { updated: 0, unchanged: 0, cleared: 0, deferred: 0, skippedForBudget: 0, blockedBy: null };
-  for (const groupId of groupIds) {
+  // Groups merge independently; the detailed level runs a few at once
+  // (its full merges take a minute or two each).
+  const reduceGroup = async (groupId) => {
     const all = store.doneChunksInWindow(db, groupId, windowStart);
     if (all.length === 0) {
       if (store.getGroupBrief(db, groupId) !== null) {
         store.deleteGroupBrief(db, groupId);
         outcome.cleared += 1;
       }
-      continue;
+      return;
     }
     const chunks = all.slice(-options.maxReduceChunks);
     // A chunk redone at the detailed level changes the key, so its group is
@@ -282,20 +285,20 @@ const reduceBriefs = async (db, client, groupIds, { now, force = false, log = ()
     const existing = store.getGroupBrief(db, groupId);
     if (existing !== null && existing.windowStart === windowStart && existing.chunkKey === chunkKey) {
       outcome.unchanged += 1;
-      continue;
+      return;
     }
     const recentlyMerged = existing !== null && existing.windowStart === windowStart
       && now - existing.updatedAt < options.reduceIntervalSeconds;
     if (recentlyMerged && !force) {
       outcome.deferred += 1;
-      continue;
+      return;
     }
     if (chunks.length > 1) {
       const blocked = allowSpend(db, now, options);
       if (blocked !== null) {
         outcome.skippedForBudget += 1;
         outcome.blockedBy = blocked;
-        continue;
+        return;
       }
     }
     const partials = chunks.map((chunk) => JSON.parse(chunk.partialJson));
@@ -306,12 +309,13 @@ const reduceBriefs = async (db, client, groupIds, { now, force = false, log = ()
       parsedTextMessages: messages,
     };
     let reduced;
+    const callMeta = { groupId, day: formatHkt(chunks.at(-1).endSentAt).slice(0, 10) };
     try {
-      reduced = await mergeBriefPartials(client, context, partials, { model: currentModel(client) });
+      reduced = await mergeBriefPartials(client, context, partials, { model: currentModel(client) }, "reduce", callMeta);
     } catch (error) {
       // One group's bad data must not stop the other groups' briefs.
       log(`briefing reduce failed group=${groupId}: ${error.message.slice(0, 200)}`);
-      continue;
+      return;
     }
     const { summary, mode } = reduced;
     store.saveGroupBrief(db, groupId, {
@@ -332,7 +336,8 @@ const reduceBriefs = async (db, client, groupIds, { now, force = false, log = ()
     });
     outcome.updated += 1;
     log(`briefing reduce group=${groupId} chunks=${chunks.length} mode=${mode}`);
-  }
+  };
+  await runLimited(groupIds, options.reduceConcurrency, reduceGroup);
   return outcome;
 };
 
