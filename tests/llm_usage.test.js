@@ -73,10 +73,13 @@ test("custom price rows come first and invalid ones are ignored", () => {
 
 test("usageFromResponse reads DeepSeek and OpenAI-style cache fields", () => {
   assert.deepEqual(usage.usageFromResponse({ prompt_tokens: 100, prompt_cache_hit_tokens: 40, completion_tokens: 7 }),
-    { promptTokens: 100, cachedTokens: 40, completionTokens: 7 });
+    { promptTokens: 100, cachedTokens: 40, completionTokens: 7, reasoningTokens: 0 });
   assert.deepEqual(usage.usageFromResponse({ prompt_tokens: 100, prompt_tokens_details: { cached_tokens: 30 }, completion_tokens: 5 }),
-    { promptTokens: 100, cachedTokens: 30, completionTokens: 5 });
-  assert.deepEqual(usage.usageFromResponse(undefined), { promptTokens: 0, cachedTokens: 0, completionTokens: 0 });
+    { promptTokens: 100, cachedTokens: 30, completionTokens: 5, reasoningTokens: 0 });
+  // xAI reports reasoning apart from completion.
+  assert.deepEqual(usage.usageFromResponse({ prompt_tokens: 3525, completion_tokens: 219, completion_tokens_details: { reasoning_tokens: 484 } }),
+    { promptTokens: 3525, cachedTokens: 0, completionTokens: 219, reasoningTokens: 484 });
+  assert.deepEqual(usage.usageFromResponse(undefined), { promptTokens: 0, cachedTokens: 0, completionTokens: 0, reasoningTokens: 0 });
 });
 
 test("summarizeUsage totals by period, projects a month and prices 1000 messages", () => {
@@ -136,4 +139,39 @@ test("providerExtras turns off thinking only for known hosts", () => {
   assert.deepEqual(providerExtras(new URL("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")), { reasoning_effort: "minimal" });
   assert.deepEqual(providerExtras(new URL("https://notdeepseek.com/v1/chat/completions")), {});
   assert.deepEqual(providerExtras(new URL("http://127.0.0.1:11434/v1/chat/completions")), {});
+  // Grok: low reasoning at the standard level, medium when detailed.
+  assert.deepEqual(providerExtras(new URL("https://api.x.ai/v1/chat/completions")), { reasoning_effort: "low" });
+  assert.deepEqual(providerExtras(new URL("https://api.x.ai/v1/chat/completions"), "detailed"), { reasoning_effort: "medium" });
+});
+
+test("subscription-paid calls are counted apart and never enter the money budget", () => {
+  const db = openTemp();
+  const at = beijing(2026, 9, 29, 20);
+  const tokens = { prompt_tokens: 1_000_000, completion_tokens: 100_000 };
+  usage.recordUsage(db, { at, purpose: "map", model: "deepseek-v4-flash", host: "api.deepseek.com", usage: tokens, messages: 400 });
+  usage.recordUsage(db, {
+    at, purpose: "map", model: "grok-4.7", host: "api.x.ai", messages: 400, billing: "subscription",
+    usage: { ...tokens, cost_in_usd_ticks: 60_293_500 },
+  });
+  const prices = pricing.priceTable({});
+  const summary = usage.summarizeUsage(db, { nowUnix: at + 60, days: 7, prices });
+  assert.equal(summary.today.calls, 2);
+  assert.equal(summary.today.subscriptionCalls, 1);
+  assert.equal(summary.today.subscriptionListUsd, 0.006);
+  assert.equal(summary.today.unpricedCalls, 0);
+  // Only the DeepSeek call costs money: off-peak 1M * ¥2 / 2 + 100k * ¥8 / 2.
+  assert.deepEqual(summary.today.cost, { CNY: 1.4 });
+  assert.equal(usage.todaySpend(db, { nowUnix: at + 60, prices, currency: "CNY" }), 1.4);
+});
+
+test("an older usage table gains the billing columns in place", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "llm-usage-old-"));
+  const db = messageStore.openStore(path.join(dir, "messages.db"));
+  db.prepare(`CREATE TABLE llm_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, purpose TEXT NOT NULL, model TEXT NOT NULL,
+    host TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, cached_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0, messages INTEGER NOT NULL DEFAULT 0)`).run();
+  db.prepare("INSERT INTO llm_usage (at, purpose, model) VALUES (1, 'map', 'deepseek-v4-flash')").run();
+  usage.ensureUsageSchema(db);
+  const row = db.prepare("SELECT billing, list_cost_usd AS listCostUsd FROM llm_usage").get();
+  assert.deepEqual({ ...row }, { billing: "api", listCostUsd: null });
 });

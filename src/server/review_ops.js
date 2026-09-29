@@ -5,7 +5,7 @@
 
 const state = require("./toolkit_state");
 const background = require("./background");
-const secrets = require("../secrets");
+const { isLlmConfigured: llmConfigured } = require("../llm_route");
 const engine = require("../briefing_engine");
 const review = require("../review_store");
 const { summarizeUsage } = require("../llm_usage");
@@ -17,10 +17,6 @@ const DAY_SECONDS = 86400;
 
 const nowUnix = () => Math.floor(Date.now() / 1000);
 
-const llmConfigured = (config) =>
-  String(config.llm?.baseUrl ?? "").trim().length > 0
-  && String(config.llm?.model ?? "").trim().length > 0
-  && secrets.hasSecret("llmKey");
 
 const getCalendar = ({ from, to }) => {
   const db = state.getStore();

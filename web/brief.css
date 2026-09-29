@@ -339,3 +339,74 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
   .brief-pulse { animation: none; }
 }
 .brief-group-topics .tag.more { color: var(--muted); }
+
+/* 设置 → Grok 订阅: the device-code sign-in */
+.grok-login { padding: 12px 14px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); }
+.grok-login a.btn { text-decoration: none; }
+.grok-code { margin: 0 0 10px; font: 700 28px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 3px; color: var(--accent); user-select: all; }
+
+/* 设置 → AI 详细度 */
+.ai-detail { margin: 4px 0 14px; }
+.ai-subhead { margin: 0 0 8px; font-size: 14px; }
+.ai-detail-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+.ai-detail-choices .bg-toggle.on { border-color: var(--accent); background: var(--accent-soft); }
+
+/* 大家在聊: a detailed-level topic expands in place */
+.brief-topic.open .brief-row-button p { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.brief-topic-more { float: right; color: var(--accent); font-size: 12px; }
+.brief-topic-detail { padding: 2px 10px 10px 12px; font-size: 13px; line-height: 1.6; }
+.brief-topic-detail ul { margin: 4px 0 8px; padding-left: 18px; }
+.brief-topic-quotes li { color: var(--muted); }
+
+/* 每日总览 / 周报 / 月报 (web/digest.js) */
+.digest-card .brief-section-title { flex-wrap: wrap; }
+.digest-switch { display: inline-flex; gap: 6px; margin-left: auto; }
+.digest-body { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+.digest-headline { margin: 0 0 6px; font-size: 17px; font-weight: 700; line-height: 1.5; }
+.digest-summary { margin: 0 0 14px; font-size: 14px; line-height: 1.8; color: var(--ink); }
+.digest-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 4px 28px; }
+.digest-block h4 { display: flex; align-items: center; gap: 8px; margin: 8px 0 6px; font-size: 13px; letter-spacing: .1em; }
+.digest-block ul { list-style: none; margin: 0 0 6px; padding: 0; }
+.digest-block li { padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.digest-block li:first-child { border-top: 0; padding-top: 2px; }
+.digest-block li p { margin: 3px 0 4px; line-height: 1.6; }
+.digest-groups { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.digest-volume { display: flex; justify-content: space-between; gap: 12px; }
+.digest-meta { margin: 10px 0 0; }
+.digest-actions { margin-top: 10px; flex-wrap: wrap; }
+.digest-reports { margin-top: 18px; }
+.digest-reports h4 { margin: 0 0 6px; font-size: 13px; letter-spacing: .1em; }
+.digest-reports ul { list-style: none; margin: 0; padding: 0; }
+.digest-report-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 7px 10px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.digest-report-row:hover, .digest-report-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.digest-report-row .brief-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-report > .btn { margin-bottom: 10px; }
+
+/* 问群聊 (web/ask.js) */
+.ask-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; max-width: 1320px; margin: 0 auto; }
+@media (min-width: 1100px) { .ask-page { grid-template-columns: minmax(0, 1fr) 300px; } }
+.ask-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.ask-input { width: 100%; min-height: 84px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--ink); font: inherit; font-size: 15px; line-height: 1.6; resize: vertical; box-sizing: border-box; }
+.ask-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask-empty { padding: 18px; border: 1px dashed var(--line-strong); border-radius: var(--radius); color: var(--muted); line-height: 1.7; }
+.ask-result { padding: 18px 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.ask-question { margin: 0 0 8px; font-size: 17px; }
+.ask-answer { margin: 0 0 12px; font-size: 14px; line-height: 1.85; white-space: pre-wrap; }
+.ask-citations h4, .ask-history h4 { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 6px; font-size: 13px; letter-spacing: .1em; }
+.ask-citations ul, .ask-history ul { list-style: none; margin: 0; padding: 0; }
+.ask-citation { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 10px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ask-citation:hover { background: var(--accent-soft); }
+.ask-citation-text { line-height: 1.6; }
+.ask-follow { margin-top: 12px; }
+.ask-history li { display: flex; align-items: flex-start; gap: 4px; border-radius: 8px; }
+.ask-history li.on, .ask-history li:hover { background: var(--accent-soft); }
+.ask-history-row { flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; min-width: 0; }
+.ask-history-delete { border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 6px 8px; }
+.ask-history-delete:hover { color: var(--risk); }
+
+/* 设置 → AI 详细度: the detailed job report (web/ai_redo.js) */
+.ai-redo .ai-tiles { margin: 8px 0; }
+.ai-redo-table { font-size: 13px; }
+.ai-redo-day { cursor: pointer; font-weight: 600; }
+.ai-redo-day:hover { background: var(--accent-soft); }
+.ai-redo-group td:first-child { padding-left: 26px; color: var(--muted); }

@@ -1,45 +1,23 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { clearLlmError, clearLlmUnused, writeLlmError, writeLlmUnused } = require("./llm_status");
-const { createClient, summarizeMessages, setUsageRecorder } = require("./llm_summarizer");
+const { createClient, currentModel, summarizeMessages, setUsageRecorder } = require("./llm_summarizer");
 const { createStoreRecorder } = require("./llm_usage");
-const { readSecretSync } = require("./secrets");
+const { resolveLlmRoute, markGrokUnavailable } = require("./llm_route");
+const { loadConfig } = require("./server/toolkit_state");
 
 // CLI used by the manual summary pipeline: summarizes one analysis dir and
-// writes llm-summary.json (+ merges it into analysis.json).
+// writes llm-summary.json (+ merges it into analysis.json). Which LLM, and its
+// credential, comes from the saved config (src/llm_route.js).
 
 const parseArgs = (argv) => {
-  if (argv.length !== 10) {
-    throw new Error(
-      "Usage: node llm_adapter.js <analysisJson> <messagesJson> <outputJson> <baseUrl> <model> <apiKeyEnv> <maxMessages> <maxChars>",
-    );
+  if (argv.length !== 5) {
+    throw new Error("Usage: node llm_adapter.js <analysisJson> <messagesJson> <outputJson>");
   }
-  const maxMessages = Number.parseInt(argv[8], 10);
-  const maxChars = Number.parseInt(argv[9], 10);
-  if (!Number.isInteger(maxMessages) || maxMessages <= 0) {
-    throw new Error(`Invalid maxMessages. It must be a positive integer. maxMessages=${argv[8]}`);
-  }
-  if (!Number.isInteger(maxChars) || maxChars <= 0) {
-    throw new Error(`Invalid maxChars. It must be a positive integer. maxChars=${argv[9]}`);
-  }
-  return {
-    analysisJson: argv[2],
-    messagesJson: argv[3],
-    outputJson: argv[4],
-    baseUrl: argv[5],
-    model: argv[6],
-    apiKeyEnv: argv[7],
-    maxMessages,
-    maxChars,
-  };
+  return { analysisJson: argv[2], messagesJson: argv[3], outputJson: argv[4] };
 };
 
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, "utf8"));
-
-const resolveApiKey = (apiKeyEnv) => {
-  const fromEnv = String(process.env[apiKeyEnv] ?? "").trim();
-  return fromEnv.length > 0 ? fromEnv : readSecretSync("llmKey").trim();
-};
 
 const main = async () => {
   const args = parseArgs(process.argv);
@@ -54,11 +32,11 @@ const main = async () => {
       console.log("llm skipped: no text messages in this window");
       return;
     }
-    const client = createClient({ baseUrl: args.baseUrl, apiKey: resolveApiKey(args.apiKeyEnv), model: args.model });
-    const provider = { baseUrl: args.baseUrl, model: args.model, apiKeyEnv: args.apiKeyEnv };
-    const { summary, coverage } = await summarizeMessages(client, analysis, messages, args, provider);
-
-    const llmSummary = { ...summary, coverage };
+    const route = await resolveLlmRoute(loadConfig());
+    const client = createClient(route.primary, { fallback: route.fallback, onFallback: (error) => markGrokUnavailable(error) });
+    const { summary, coverage } = await summarizeMessages(client, analysis, messages, route.primary, {});
+    // Labelled after the call: a fallback may have answered instead.
+    const llmSummary = { ...summary, provider: { ...summary.provider, model: currentModel(client) }, coverage };
     fs.writeFileSync(args.outputJson, JSON.stringify(llmSummary, null, 2), "utf8");
     fs.writeFileSync(args.analysisJson, JSON.stringify({ ...analysis, llmSummary }, null, 2), "utf8");
     clearLlmError(analysisDir);

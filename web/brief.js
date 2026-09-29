@@ -16,6 +16,7 @@ const briefState = {
   imagesShown: null,
   showQuiet: false,
   expanded: {},
+  openTopics: new Set(),
   timer: null,
   loadedAt: 0,
 };
@@ -343,20 +344,50 @@ const briefQa = (item) =>
     el("p", { class: "brief-a" }, item.answer ?? "还没有人回答"),
     el("span", { class: "brief-meta" }, [item.groupName, item.answerer ? `${item.answerer} 回答` : item.asker ? `${item.asker} 问` : ""].filter(Boolean).join(" · ")));
 
-const briefTopic = (topic) =>
-  el("li", { class: `brief-topic ${topic.importance}` },
+const briefTopicKey = (topic) => `${topic.groupId}|${topic.title}`;
+
+const briefOpenTopicGroup = (topic) => {
+  const group = briefState.data.groups.find((item) => item.groupId === topic.groupId);
+  if (group) {
+    briefOpenGroup(group);
+  }
+};
+
+// Detailed-level topics carry points and quotes: the row expands in place
+// (the chat is one click further). Standard topics open the chat directly.
+const briefTopic = (topic) => {
+  const hasMore = (topic.details?.length ?? 0) + (topic.evidence?.length ?? 0) > 0;
+  const key = briefTopicKey(topic);
+  const open = hasMore && briefState.openTopics.has(key);
+  return el("li", { class: `brief-topic ${topic.importance} ${open ? "open" : ""}` },
     el("button", {
       class: "brief-row-button",
+      "aria-expanded": hasMore ? String(open) : null,
       onclick: () => {
-        const group = briefState.data.groups.find((item) => item.groupId === topic.groupId);
-        if (group) {
-          briefOpenGroup(group);
+        if (!hasMore) {
+          briefOpenTopicGroup(topic);
+          return;
         }
+        const next = new Set(briefState.openTopics);
+        if (open) {
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
+        briefState.openTopics = next;
+        renderBriefView();
       },
     },
-      el("span", { class: "brief-meta" }, topic.groupName),
+      el("span", { class: "brief-meta" }, topic.groupName, hasMore ? el("span", { class: "brief-topic-more" }, open ? "收起" : "展开细节") : null),
       el("strong", {}, topic.title),
-      el("p", {}, topic.summary)));
+      el("p", {}, topic.summary)),
+    open
+      ? el("div", { class: "brief-topic-detail" },
+        topic.details.length > 0 ? el("ul", {}, topic.details.map((item) => el("li", {}, item))) : null,
+        topic.evidence.length > 0 ? el("ul", { class: "brief-topic-quotes" }, topic.evidence.map((item) => el("li", {}, item))) : null,
+        el("button", { class: "btn small ghost", onclick: () => briefOpenTopicGroup(topic) }, "去群里看"))
+      : null);
+};
 
 // One bento panel: a short preview so the page stays a quick read, with the
 // rest one click away.
@@ -516,6 +547,7 @@ const renderBriefView = () => {
           el("div", { class: "brief-main" },
             briefMasthead(data),
             briefMentions(data),
+            digestHomeSection(),
             briefHighlights(data),
             briefImages(data)),
           el("aside", { class: "brief-side" }, briefGroups(data)),

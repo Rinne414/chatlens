@@ -18,12 +18,15 @@ const { ensureBriefingSchema, getState, setState } = require("../briefing_store"
 const { REMOTE_LIFETIME_SECONDS, ingestPictures } = require("../picture_store");
 const { REPAIR_STATE_KEY } = require("../repair_picture_text");
 const engine = require("../briefing_engine");
-const { createClient, setUsageRecorder } = require("../llm_summarizer");
+const { createClient, currentModel, currentDetail, setUsageRecorder } = require("../llm_summarizer");
+const digestEngine = require("../digest_engine");
+const { ensureDigestSchema } = require("../digest_store");
 const { ensureUsageSchema, recordUsage, todaySpend } = require("../llm_usage");
 const { priceTable } = require("../llm_pricing");
-const { readSecretSync, hasSecret } = require("../secrets");
+const { readSecretSync } = require("../secrets");
 const { lowerOwnPriority } = require("../platform");
-const { resolveLlmOptions } = require("./llm_options");
+const { isLlmConfigured, resolveLlmRoute, markGrokUnavailable } = require("../llm_route");
+const { profileFor } = require("../llm_profiles");
 const common = require("./common");
 
 const OVERLAP_SECONDS = 600;
@@ -112,7 +115,7 @@ const pictureTextRepairDone = () => {
 };
 
 const briefingEnabled = (config, values) =>
-  values["no-llm"] !== true && config.background?.autoSummarize !== false && hasSecret("llmKey");
+  values["no-llm"] !== true && config.background?.autoSummarize !== false && isLlmConfigured(config);
 
 // Optional daily money budget from 设置 (config.background.dailyBudget):
 // once today's estimated spend reaches it, the briefing stops calling the LLM.
@@ -126,13 +129,59 @@ const moneyBudgetCheck = (db, config, now) => {
   return () => (todaySpend(db, { nowUnix: now, prices, currency: budget.currency }) >= amount ? "money-budget" : null);
 };
 
-const runBriefing = async ({ config, groupIds, now, force }) => {
-  let llm;
+// The detail level fixes the engine's chunk size, waits and merge cadence;
+// at the standard level the user's own 合并频率 / 等待 settings apply.
+const engineOptions = (config, detail) => {
+  const profile = profileFor(detail);
+  if (!profile.userTunable) {
+    return profile.engine;
+  }
+  const intervalMinutes = Number(config.background?.reduceIntervalMinutes);
+  const tailWaitMinutes = Number(config.background?.tailWaitMinutes);
+  return {
+    ...(Number.isFinite(tailWaitMinutes) && tailWaitMinutes >= 60 ? { tailMaxAgeSeconds: tailWaitMinutes * 60 } : {}),
+    ...(Number.isFinite(intervalMinutes) && intervalMinutes >= 0 ? { reduceIntervalSeconds: intervalMinutes * 60 } : {}),
+  };
+};
+
+// 每日总览 / 周报 / 月报 after the briefing: each call passes the same pause,
+// daily-cap and money gate, plus a per-run cap so a month's backlog of day
+// overviews is spread over several refreshes.
+const runDigests = async (db, client, { now, gate }) => {
+  let calls = 0;
+  const maxCalls = profileFor(currentDetail(client)).digest.maxScheduledCalls;
+  const digestGate = () => {
+    if (calls >= maxCalls) {
+      return "digest-run-cap";
+    }
+    const blocked = engine.allowSpend(db, now, { ...engine.DEFAULTS, ...gate });
+    if (blocked === null) {
+      calls += 1;
+    }
+    return blocked;
+  };
   try {
-    llm = resolveLlmOptions(config);
+    const outcome = await digestEngine.runScheduledDigests(ensureDigestSchema(db), client, { now, gate: digestGate });
+    for (const item of outcome.filter((entry) => entry.status === "done" || entry.status === "failed")) {
+      common.info(`digest ${item.kind} ${item.period} ${item.status}${item.error ? `: ${item.error}` : ""}`);
+    }
+    return outcome;
+  } catch (error) {
+    common.warn(`总览/周报生成失败：${error.message}`);
+    return [];
+  }
+};
+
+const runBriefing = async ({ config, groupIds, now, force }) => {
+  let route;
+  try {
+    route = await resolveLlmRoute(config);
   } catch (error) {
     common.warn(`跳过自动总结：${error.message}`);
     return { skipped: "llm-not-configured" };
+  }
+  if (route.grokSkipped !== null) {
+    common.warn(`Grok 暂时不可用，本次改用 ${route.primary.model}：${route.grokSkipped}`);
   }
   const db = ensureUsageSchema(ensureBriefingSchema(messageStore.openStore(common.storeDbPath)));
   setUsageRecorder((entry) => {
@@ -143,19 +192,27 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
     }
   });
   try {
-    const client = createClient(llm);
-    const intervalMinutes = Number(config.background?.reduceIntervalMinutes);
-    const tailWaitMinutes = Number(config.background?.tailWaitMinutes);
-    const gate = {
-      ...(Number.isFinite(tailWaitMinutes) && tailWaitMinutes >= 60 ? { tailMaxAgeSeconds: tailWaitMinutes * 60 } : {}),
-      spendCheck: moneyBudgetCheck(db, config, now),
-      ...(Number.isFinite(intervalMinutes) && intervalMinutes >= 0 ? { reduceIntervalSeconds: intervalMinutes * 60 } : {}),
-    };
+    const client = createClient(route.primary, { fallback: route.fallback, onFallback: (error) => markGrokUnavailable(error) });
+    const gate = { ...engineOptions(config, route.primary.detail), spendCheck: moneyBudgetCheck(db, config, now) };
     const created = engine.closeChunks(db, groupIds, { now, force, ...gate });
     common.progress(`briefing-chunks:${created}`);
     const map = await engine.mapPendingChunks(db, client, { now, log: common.info, ...gate });
     const reduce = await engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate });
-    return { chunksCreated: created, map, reduce, budget: engine.budgetStatus(db, now), pause: engine.pauseStatus(db, now) };
+    const digests = await runDigests(db, client, { now, gate });
+    return {
+      chunksCreated: created,
+      map,
+      reduce,
+      digests,
+      budget: engine.budgetStatus(db, now, profileFor(route.primary.detail).engine.dailyLlmCallLimit),
+      pause: engine.pauseStatus(db, now),
+      llm: {
+        model: currentModel(client),
+        usedFallback: client.state.usingFallback || route.grokSkipped !== null,
+        // Calls the primary could not answer (e.g. Grok declining adult chat) that the fallback did.
+        answeredByFallback: client.state.answeredByFallback,
+      },
+    };
   } finally {
     setUsageRecorder(null);
     db.close();

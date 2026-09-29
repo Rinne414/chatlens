@@ -277,7 +277,7 @@ const dayReview = (db, { day, now }) => {
 
 /* ---------- 补齐: turn a day's uncovered messages into chunks ---------- */
 
-const planBackfill = (db, { day, now, groupIds = null }) => {
+const planBackfill = (db, { day, now, groupIds = null, maxMessages }) => {
   const bounds = dayBounds(day);
   const activity = groupActivity(db, bounds).filter((row) => groupIds === null || groupIds.includes(row.groupId));
   const plans = [];
@@ -286,7 +286,7 @@ const planBackfill = (db, { day, now, groupIds = null }) => {
     const messages = dayTextMessages(db, row.groupId, bounds).filter((message) => message.sentAt < cutoff);
     const tags = tagCoverage(messages, chunksOverlapping(db, row.groupId, bounds));
     for (const run of uncoveredRuns(messages, tags)) {
-      for (const slice of engine.planChunks(run, { now, force: true })) {
+      for (const slice of engine.planChunks(run, { now, force: true, ...(maxMessages ? { maxMessages } : {}) })) {
         const part = run.slice(slice.from, slice.to);
         plans.push({
           groupId: row.groupId,
@@ -302,12 +302,14 @@ const planBackfill = (db, { day, now, groupIds = null }) => {
   return plans;
 };
 
-const backfillDay = (db, { day, now }) => {
+// asDetailedJob: part of a detailed-level job (only the detailed provider
+// summarizes it, at its chunk size) rather than an ordinary 补齐.
+const backfillDay = (db, { day, now, asDetailedJob = false, maxMessages }) => {
   briefingStore.ensureBriefingSchema(db);
-  const plans = planBackfill(db, { day, now });
+  const plans = planBackfill(db, { day, now, maxMessages });
   db.transaction(() => {
     for (const plan of plans) {
-      briefingStore.insertChunk(db, { ...plan, createdAt: now });
+      briefingStore.insertChunk(db, { ...plan, createdAt: now, redo: asDetailedJob ? 1 : 0 });
     }
   })();
   return { chunks: plans.length, messages: plans.reduce((total, plan) => total + plan.messageCount, 0) };

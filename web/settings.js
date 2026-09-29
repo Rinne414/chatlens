@@ -69,6 +69,15 @@ const saveDetectedQqPath = async (candidate) => {
   return { ntDbDirExists: result.ntDbDirExists };
 };
 
+// Grok (signed in and selected) or a complete API-key provider.
+const aiReadiness = (status) => {
+  if (status.grok?.selected && status.grok.loggedIn) {
+    return { label: "AI 总结", ok: true, detail: `Grok 订阅 · ${status.grok.model}` };
+  }
+  const apiReady = status.llmKeySaved && status.llm.model.length > 0;
+  return { label: "AI 总结", ok: apiReady, detail: apiReady ? status.llm.model : "未配置完整" };
+};
+
 const renderSettingsView = () => {
   const status = settingsState.status;
   if (status === null) {
@@ -92,7 +101,7 @@ const renderSettingsView = () => {
   const readiness = [
     { label: "QQ 数据库", ok: status.ntDbDirExists, detail: status.ntDbDirExists ? "路径可用" : "路径不可用" },
     { label: "解密密钥", ok: status.ntqqKeySaved, detail: status.ntqqKeySaved ? "已保存" : "未保存" },
-    { label: "AI 总结", ok: status.llmKeySaved && status.llm.model.length > 0, detail: status.llmKeySaved && status.llm.model.length > 0 ? status.llm.model : "未配置完整" },
+    aiReadiness(status),
     { label: "后台刷新", ok: background?.settings?.enabled === true && !background?.lastError, detail: backgroundDetail() },
   ];
   const readinessCard = el("div", { class: "system-readiness", "data-testid": "system-readiness" },
@@ -374,7 +383,7 @@ const renderSettingsView = () => {
       el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。"),
       el("li", {}, "外部流量：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图按 md5 校验，图片钥匙只留在内存里）；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本信息。")));
 
-  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderMoreLinks(), pathsCard, keysCard, llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, aboutCard);
+  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderMoreLinks(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, aboutCard);
 };
 
 /* --- pages that moved off the rail --- */

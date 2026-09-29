@@ -116,7 +116,7 @@ test("background briefing: chunk once, map once, reduce per group, then serve a 
     // 2002: 8 messages two hours old -> one tail chunk.
     assert.equal(engine.closeChunks(db, groups, { now: NOW }), 3);
     const map = await engine.mapPendingChunks(db, client, { now: NOW });
-    assert.deepEqual(map, { done: 3, failed: 0, skippedForBudget: 0, blockedBy: null });
+    assert.deepEqual(map, { done: 3, failed: 0, skippedForBudget: 0, blockedBy: null, jobDone: 0, jobDeferred: 0, jobKeptOld: 0 });
     const reduce = await engine.reduceBriefs(db, client, groups, { now: NOW });
     assert.equal(reduce.updated, 2);
     // Only the group with two chunks needed a reduce call.

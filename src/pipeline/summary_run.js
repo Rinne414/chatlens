@@ -15,7 +15,7 @@ const { loadConfig } = require("../server/toolkit_state");
 const messageStore = require("../message_store");
 const { writeLlmError, writeLlmUnused, clearLlmUnused } = require("../llm_status");
 const { readSecretSync } = require("../secrets");
-const { resolveLlmOptions, llmEnv } = require("./llm_options");
+const { isLlmConfigured } = require("../llm_route");
 const common = require("./common");
 
 const SINCE_RECORD_OVERLAP_SECONDS = 600;
@@ -114,28 +114,25 @@ const resolveRange = (values, config, groupIds) => {
   return { startUnix: now - days * 86400, endUnix: now, label: `last-${days}d` };
 };
 
-const tryResolveLlm = (config, explicit) => {
-  try {
-    return resolveLlmOptions(config);
-  } catch (error) {
-    if (explicit) {
-      throw error;
-    }
-    // LLM came from config defaults: a missing key must not block the run.
-    common.warn(`本次跳过 AI 总结（${error.message}），报告将使用本地分组。`);
-    return null;
+// The adapter child resolves the LLM and its credential itself
+// (src/llm_route.js); here we only decide whether to call it at all.
+const llmReady = (config, explicit) => {
+  if (isLlmConfigured(config)) {
+    return true;
   }
+  const reason = "还没有配置 AI 服务（在「设置」页登录 Grok 或保存 LLM API key）";
+  if (explicit) {
+    throw new Error(`${reason}。`);
+  }
+  // LLM came from config defaults: a missing key must not block the run.
+  common.warn(`本次跳过 AI 总结（${reason}），报告将使用本地分组。`);
+  return false;
 };
 
-const llmArgs = (analysisDir, llm) => [
+const llmArgs = (analysisDir) => [
   path.join(analysisDir, "analysis.json"),
   path.join(analysisDir, "messages.json"),
   path.join(analysisDir, "llm-summary.json"),
-  llm.baseUrl,
-  llm.model,
-  llm.apiKeyEnv,
-  llm.maxMessages,
-  llm.maxChars,
 ];
 
 const markLlmFailure = (analysisDir, code) => {
@@ -153,12 +150,12 @@ const summarizeGroups = async ({ groupIds, exportPath, analysisDir, llm, llmOpti
       const groupDir = path.join(analysisDir, "groups", groupId);
       fs.mkdirSync(groupDir, { recursive: true });
       await common.runNodeScriptOrThrow("analyze_export.js", [exportPath, groupDir, groupId], { env, quiet: true }, `分析群 ${groupId} 失败`);
-      if (llm === null) {
+      if (!llm) {
         writeLlmUnused(groupDir);
         common.progress(`group-llm-done:${groupId}`);
         continue;
       }
-      const outcome = await common.runNodeScript("llm_adapter.js", llmArgs(groupDir, llm), { env });
+      const outcome = await common.runNodeScript("llm_adapter.js", llmArgs(groupDir), { env });
       if (outcome.code === 0) {
         common.progress(`group-llm-done:${groupId}`);
       } else {
@@ -169,12 +166,12 @@ const summarizeGroups = async ({ groupIds, exportPath, analysisDir, llm, llmOpti
     }
     return;
   }
-  if (llm === null) {
+  if (!llm) {
     writeLlmUnused(analysisDir);
     return;
   }
   common.progress("llm-start");
-  const outcome = await common.runNodeScript("llm_adapter.js", llmArgs(analysisDir, llm), { env });
+  const outcome = await common.runNodeScript("llm_adapter.js", llmArgs(analysisDir), { env });
   if (outcome.code === 0) {
     common.progress("llm-done");
     return;
@@ -267,10 +264,9 @@ const main = async () => {
   fs.mkdirSync(path.dirname(exportPath), { recursive: true });
   fs.mkdirSync(analysisDir, { recursive: true });
 
-  const llm = useLlm ? tryResolveLlm(config, llmFlag === true) : null;
+  const llm = useLlm && llmReady(config, llmFlag === true);
   const env = {
     NTQQ_DB_KEY: readSecretSync("ntqqKey"),
-    ...llmEnv(llm),
     ...(values["group-starts"] ? { QQ_GROUP_STARTS_JSON: path.resolve(values["group-starts"]) } : {}),
   };
 

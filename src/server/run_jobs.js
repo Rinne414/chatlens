@@ -9,6 +9,7 @@ const {
 const { loadState: loadCoverageRepairState } = require("../coverage_repair");
 const { loadConfig, getStoreOverview, advanceLocalReadMarks, toolRoot } = require("./toolkit_state");
 const { resolveSummaryRange } = require("../unviewed_range");
+const { isLlmConfigured } = require("../llm_route");
 const platform = require("../platform");
 
 const MAX_LOG_LINES = 4000;
@@ -634,14 +635,12 @@ const cleanupQuickFiles = (job) => {
   }
 };
 
-const startQuickSummaryJob = ({ inputPath, outputPath, meta, llm }) => {
+const startQuickSummaryJob = ({ inputPath, outputPath, meta }) => {
   if (quickJob !== null && quickJob.status === "running") {
     throw new Error("已有一个选段总结在进行中，请稍候。");
   }
-  const baseUrl = String(llm?.baseUrl ?? "").trim();
-  const model = String(llm?.model ?? "").trim();
-  if (baseUrl.length === 0 || model.length === 0) {
-    throw new Error("config 缺少 llm.baseUrl / llm.model，无法调用 LLM。");
+  if (!isLlmConfigured(loadConfig())) {
+    throw new Error("还没有配置 AI 服务：请在「设置」页登录 Grok 或保存 LLM API key。");
   }
 
   quickCounter += 1;
@@ -658,11 +657,10 @@ const startQuickSummaryJob = ({ inputPath, outputPath, meta, llm }) => {
     logTail: [],
   };
 
-  // The child decrypts the saved LLM key itself (src/secrets.js) when the
-  // env var is unset, so the key never passes through this process.
+  // The child resolves the LLM and decrypts its credential itself
+  // (src/llm_route.js), so no key or token passes through this process.
   const script = path.join(toolRoot, "src", "llm_quick_summary.js");
-  const apiKeyEnv = String(llm?.apiKeyEnv ?? "").trim() || "DEEPSEEK_API_KEY";
-  const child = spawn(process.execPath, [script, inputPath, outputPath, baseUrl, model, apiKeyEnv], { cwd: toolRoot, windowsHide: true });
+  const child = spawn(process.execPath, [script, inputPath, outputPath], { cwd: toolRoot, windowsHide: true });
   const consume = (chunk) => {
     for (const line of chunk.toString("utf8").split(/\r?\n/u)) {
       if (line.trim().length > 0) {

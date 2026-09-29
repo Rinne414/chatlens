@@ -303,8 +303,8 @@ const app = {
   },
 };
 
-const VIEW_TITLES = { brief: "简报", review: "回顾", trends: "热点", group: "群", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
-const NAV_ICONS = { brief: "📰", review: "📅", trends: "🔥", group: "👥", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
+const VIEW_TITLES = { brief: "简报", review: "回顾", ask: "问群聊", trends: "热点", group: "群", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
+const NAV_ICONS = { brief: "📰", review: "📅", ask: "🔎", trends: "🔥", group: "👥", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
 const KIND_ICONS = { image: "📷", video: "🎬", sticker: "😃", face: "😃", emoji: "😃", audio: "🎵", file: "📎" };
 const KIND_LABELS = { image: "图片", video: "视频", sticker: "表情", face: "表情", emoji: "表情", audio: "语音", file: "文件" };
 
@@ -2377,6 +2377,8 @@ const renderCurrentView = () => {
     renderBriefView();
   } else if (app.view === "review") {
     renderReviewView();
+  } else if (app.view === "ask") {
+    renderAskView();
   } else if (app.view === "trends") {
     renderTrendsView();
   } else if (app.view === "group") {
@@ -2410,6 +2412,10 @@ const openView = (name) => {
   }
   if (name === "review") {
     openReviewView();
+    return;
+  }
+  if (name === "ask") {
+    openAskView();
     return;
   }
   if (name === "trends") {

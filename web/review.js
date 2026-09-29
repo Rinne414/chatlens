@@ -31,6 +31,8 @@ const reviewState = {
   expanded: {},
   pollTimer: null,
   polls: 0,
+  // A weekly / monthly report open in the main column: { kind, period }.
+  report: null,
 };
 
 /* ---------- dates (Beijing days as "YYYY-MM-DD") ---------- */
@@ -130,7 +132,14 @@ const openReviewView = async (preset = {}) => {
   await loadReviewDay(preset.day ?? reviewState.day ?? reviewDefaultDay());
 };
 
+const reviewPickReport = (kind, period) => {
+  reviewState.report = { kind, period };
+  reviewState.resultsOpen = false;
+  renderReviewView();
+};
+
 const reviewPickDay = (day) => {
+  reviewState.report = null;
   reviewState.resultsOpen = false;
   reviewState.notice = null;
   reviewState.expanded = {};
@@ -495,6 +504,7 @@ const reviewDayContent = () => {
   }
   return el("div", { class: `review-day ${reviewState.loading ? "loading" : ""}` },
     reviewDayHead(data),
+    digestCard("day", data.day, { title: "这天的各群总览", emptyText: "这一天还没有跨群总览。有 AI 摘要的日子都可以生成。" }),
     reviewHighlights(data),
     data.groups.length > 0
       ? el("section", { class: "brief-section" },
@@ -570,9 +580,21 @@ const renderReviewView = () => {
     return;
   }
   const showResults = reviewState.resultsOpen && reviewState.results !== null;
+  const report = reviewState.report;
+  const selected = report === null ? null : digestKey(report.kind, report.period);
+  const main = showResults
+    ? reviewResults()
+    : report !== null
+      ? el("div", { class: "review-report" },
+        el("button", { class: "btn small ghost", onclick: () => { reviewState.report = null; renderReviewView(); } }, "‹ 回到这一天"),
+        digestCard(report.kind, report.period, { emptyText: "还没有生成。点下面的按钮，缺的每日总览会先补上，再写成报告。" }))
+      : reviewDayContent();
   setChildren(root, el("div", { class: "review-page" },
     reviewSearchBar(),
     reviewState.error ? el("div", { class: "notice risk review-error" }, reviewState.error) : null,
-    el("div", { class: "review-main" }, showResults ? reviewResults() : reviewDayContent()),
-    el("aside", { class: "review-side" }, reviewCalendar())));
+    el("div", { class: "review-main" }, main),
+    el("aside", { class: "review-side" },
+      reviewCalendar(),
+      digestReportList("week", reviewPickReport, selected),
+      digestReportList("month", reviewPickReport, selected))));
 };

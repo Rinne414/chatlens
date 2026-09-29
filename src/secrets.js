@@ -1,6 +1,7 @@
 "use strict";
 
-// Secret storage for the QQ database key and the LLM API key.
+// Secret storage for the QQ database key, the LLM API key and the Grok
+// subscription sign-in (src/grok_auth.js).
 //
 // Windows: DPAPI through PowerShell's ConvertFrom-SecureString — the exact
 // on-disk format every earlier version wrote, so saved keys keep working.
@@ -16,6 +17,8 @@ const platform = require("./platform");
 const SECRETS = {
   ntqqKey: { windowsFile: "ntqq-db-key.dpapi", file: "ntqq-db-key.secret", label: "QQ 数据库密钥" },
   llmKey: { windowsFile: "deepseek-api-key.dpapi", file: "llm-api-key.secret", label: "LLM API key" },
+  // JSON with the OAuth access + refresh tokens, so it is much longer than a key.
+  grokAuth: { windowsFile: "grok-auth.dpapi", file: "grok-auth.secret", label: "Grok 登录凭证", maxLength: 16384 },
   // Maintainer-only: signs release checksums (scripts/make_update_key.js).
   updateSigningKey: { windowsFile: "update-signing-key.dpapi", file: "update-signing-key.secret", label: "更新签名私钥" },
 };
@@ -46,10 +49,10 @@ const useSecretTool = () =>
   && process.env.CHATLENS_SECRET_DIR === undefined
   && platform.commandExists("secret-tool");
 
-const validateSecret = (value) => {
+const validateSecret = (value, maxLength = 512) => {
   const secret = String(value ?? "").trim();
-  if (secret.length < 8 || secret.length > 512) {
-    throw new Error("密钥长度不合理（应为 8-512 个字符）。");
+  if (secret.length < 8 || secret.length > maxLength) {
+    throw new Error(`密钥长度不合理（应为 8-${maxLength} 个字符）。`);
   }
   return secret;
 };
@@ -167,7 +170,7 @@ const writePrivateFile = (filePath, value) => {
 };
 
 const saveSecret = async (name, value) => {
-  const secret = validateSecret(value);
+  const secret = validateSecret(value, specFor(name).maxLength);
   const filePath = secretFilePath(name);
   if (platform.isWindows) {
     const result = await runAsync("powershell.exe", psArgs(DPAPI_WRITE_SCRIPT), {
@@ -191,6 +194,13 @@ const saveSecret = async (name, value) => {
   return { backend: "file", path: filePath };
 };
 
+const deleteSecret = async (name) => {
+  fs.rmSync(secretFilePath(name), { force: true });
+  if (useSecretTool()) {
+    await runAsync("secret-tool", ["clear", ...SECRET_TOOL_ATTRS(name)]);
+  }
+};
+
 // Where the secrets live, for the storage page. The keyring has no path.
 const describeSecretStorage = () => ({
   directory: secretDir(),
@@ -205,5 +215,6 @@ module.exports = {
   readSecret,
   readSecretSync,
   saveSecret,
+  deleteSecret,
   describeSecretStorage,
 };

@@ -27,12 +27,34 @@ const SCHEMA = [
   "CREATE INDEX IF NOT EXISTS idx_llm_usage_at ON llm_usage(at)",
 ];
 
+// Columns added after the table first shipped. billing = 'subscription' marks
+// calls a Grok subscription paid for (no money spent); list_cost_usd is the
+// provider-reported price those tokens would have cost (xAI cost_in_usd_ticks).
+// reasoning_tokens: xAI reports reasoning apart from completion_tokens (its
+// total = prompt + completion + reasoning), so it is kept in its own column.
+// group_id / chunk_day: which group and Beijing day a summary call was for.
+const ADDED_COLUMNS = [
+  ["billing", "TEXT NOT NULL DEFAULT 'api'"],
+  ["list_cost_usd", "REAL"],
+  ["reasoning_tokens", "INTEGER NOT NULL DEFAULT 0"],
+  ["group_id", "TEXT"],
+  ["chunk_day", "TEXT"],
+];
+
 const ensureUsageSchema = (db) => {
   for (const statement of SCHEMA) {
     db.prepare(statement).run();
   }
+  const existing = new Set(db.prepare("PRAGMA table_info(llm_usage)").all().map((column) => column.name));
+  for (const [name, definition] of ADDED_COLUMNS) {
+    if (!existing.has(name)) {
+      db.prepare(`ALTER TABLE llm_usage ADD COLUMN ${name} ${definition}`).run();
+    }
+  }
   return db;
 };
+
+const USD_TICKS = 1e10;
 
 // OpenAI-style usage, including DeepSeek's cache-hit field and the
 // prompt_tokens_details.cached_tokens used by OpenAI / Gemini.
@@ -40,14 +62,24 @@ const usageFromResponse = (usage) => ({
   promptTokens: Number(usage?.prompt_tokens) || 0,
   cachedTokens: Number(usage?.prompt_cache_hit_tokens ?? usage?.prompt_tokens_details?.cached_tokens) || 0,
   completionTokens: Number(usage?.completion_tokens) || 0,
+  reasoningTokens: Number(usage?.completion_tokens_details?.reasoning_tokens) || 0,
 });
 
-const recordUsage = (db, { at, purpose, model, host, usage, messages = 0 }) => {
+const recordUsage = (db, { at, purpose, model, host, usage, messages = 0, billing = "api", groupId = null, day = null }) => {
   const tokens = usageFromResponse(usage);
+  const ticks = Number(usage?.cost_in_usd_ticks);
   db.prepare(`
-    INSERT INTO llm_usage (at, purpose, model, host, prompt_tokens, cached_tokens, completion_tokens, messages)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(at, purpose, String(model ?? ""), String(host ?? ""), tokens.promptTokens, tokens.cachedTokens, tokens.completionTokens, messages);
+    INSERT INTO llm_usage (at, purpose, model, host, prompt_tokens, cached_tokens, completion_tokens, messages, billing, list_cost_usd,
+      reasoning_tokens, group_id, chunk_day)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    at, purpose, String(model ?? ""), String(host ?? ""), tokens.promptTokens, tokens.cachedTokens, tokens.completionTokens, messages,
+    billing === "subscription" ? "subscription" : "api",
+    Number.isFinite(ticks) && ticks >= 0 ? ticks / USD_TICKS : null,
+    tokens.reasoningTokens,
+    groupId === null ? null : String(groupId),
+    day,
+  );
 };
 
 // A recorder for processes that do not already hold a store handle: opens
@@ -77,20 +109,32 @@ const addCost = (bucket, cost) => {
   bucket.cost[cost.currency] = (bucket.cost[cost.currency] ?? 0) + cost.amount;
 };
 
-const emptyBucket = () => ({ calls: 0, promptTokens: 0, cachedTokens: 0, completionTokens: 0, messages: 0, cost: {}, unpricedCalls: 0 });
+const emptyBucket = () => ({
+  calls: 0, promptTokens: 0, cachedTokens: 0, completionTokens: 0, reasoningTokens: 0, messages: 0, cost: {}, unpricedCalls: 0,
+  subscriptionCalls: 0, subscriptionListUsd: 0,
+});
 
+// Subscription-paid calls cost no money: they are counted apart, with the
+// list price the provider reported, and never enter `cost` (or the budget).
 const accumulate = (bucket, row, cost) => {
   bucket.calls += 1;
   bucket.promptTokens += row.promptTokens;
   bucket.cachedTokens += row.cachedTokens;
   bucket.completionTokens += row.completionTokens;
+  bucket.reasoningTokens += row.reasoningTokens ?? 0;
   bucket.messages += row.messages;
+  if (row.billing === "subscription") {
+    bucket.subscriptionCalls += 1;
+    bucket.subscriptionListUsd += Number(row.listCostUsd) || 0;
+    return;
+  }
   addCost(bucket, cost);
 };
 
 const roundCost = (bucket) => ({
   ...bucket,
   cost: Object.fromEntries(Object.entries(bucket.cost).map(([currency, amount]) => [currency, Math.round(amount * 10000) / 10000])),
+  subscriptionListUsd: Math.round(bucket.subscriptionListUsd * 10000) / 10000,
 });
 
 // Totals for today / 7 / 30 days, a per-day series, and splits by purpose and
@@ -103,7 +147,7 @@ const summarizeUsage = (db, { nowUnix, days = 30, prices }) => {
   const from = todayStart - (days - 1) * DAY_SECONDS;
   const rows = db.prepare(`
     SELECT at, purpose, model, prompt_tokens AS promptTokens, cached_tokens AS cachedTokens,
-           completion_tokens AS completionTokens, messages
+           completion_tokens AS completionTokens, reasoning_tokens AS reasoningTokens, messages, billing, list_cost_usd AS listCostUsd
     FROM llm_usage WHERE at >= ? ORDER BY at
   `).all(from);
 
@@ -170,12 +214,32 @@ const summarizeUsage = (db, { nowUnix, days = 30, prices }) => {
   };
 };
 
+// Summary calls for chunks of Beijing days fromDay..toDay made at or after
+// sinceUnix, per day and group (the detailed redo report).
+const usageByGroupDay = (db, { sinceUnix, fromDay, toDay, prices }) => {
+  ensureUsageSchema(db);
+  const rows = db.prepare(`
+    SELECT at, purpose, model, prompt_tokens AS promptTokens, cached_tokens AS cachedTokens, completion_tokens AS completionTokens,
+           reasoning_tokens AS reasoningTokens, messages, billing, list_cost_usd AS listCostUsd, group_id AS groupId, chunk_day AS day
+    FROM llm_usage
+    WHERE at >= ? AND chunk_day IS NOT NULL AND chunk_day >= ? AND chunk_day <= ? AND purpose IN ('map', 'redo')
+  `).all(sinceUnix, fromDay, toDay);
+  const buckets = new Map();
+  for (const row of rows) {
+    const key = `${row.day}|${row.groupId}`;
+    const bucket = buckets.get(key) ?? { day: row.day, groupId: row.groupId, ...emptyBucket() };
+    accumulate(bucket, row, costOf(row, prices));
+    buckets.set(key, bucket);
+  }
+  return [...buckets.values()].map(roundCost);
+};
+
 // Today's estimated spend in one currency (for the daily money budget).
 const todaySpend = (db, { nowUnix, prices, currency }) => {
   ensureUsageSchema(db);
   const rows = db.prepare(`
     SELECT at, model, prompt_tokens AS promptTokens, cached_tokens AS cachedTokens, completion_tokens AS completionTokens
-    FROM llm_usage WHERE at >= ?
+    FROM llm_usage WHERE at >= ? AND billing != 'subscription'
   `).all(startOfBeijingDay(nowUnix));
   return rows.reduce((total, row) => {
     const cost = costOf(row, prices);
@@ -183,4 +247,4 @@ const todaySpend = (db, { nowUnix, prices, currency }) => {
   }, 0);
 };
 
-module.exports = { ensureUsageSchema, usageFromResponse, recordUsage, createStoreRecorder, summarizeUsage, todaySpend, beijingDay };
+module.exports = { ensureUsageSchema, usageFromResponse, recordUsage, createStoreRecorder, summarizeUsage, usageByGroupDay, todaySpend, beijingDay };

@@ -6,7 +6,7 @@
 
 const aiUsageState = { usage: null, providers: null, error: null, notice: null, hoverDay: null, showPrices: false, priceDraft: null };
 
-const AI_PURPOSE_LABELS = { map: "简报：单段摘要", reduce: "简报：合并", manual: "自定义总结", quick: "选段总结", other: "其他" };
+const AI_PURPOSE_LABELS = { map: "简报：单段摘要", reduce: "简报：合并", manual: "自定义总结", quick: "选段总结", digest: "总览 / 周报 / 月报", ask: "问群聊", other: "其他" };
 const AI_CURRENCY_SIGNS = { CNY: "¥", USD: "$" };
 
 const aiMoney = (costs) => {
@@ -24,9 +24,10 @@ const aiTokens = (count) => {
 
 const loadAiUsage = async () => {
   try {
-    const [usage, providers] = await Promise.all([api("/api/llm/usage?days=30"), api("/api/llm/providers")]);
+    const [usage, providers, redoReport] = await Promise.all([api("/api/llm/usage?days=30"), api("/api/llm/providers"), api("/api/llm/redo-report")]);
     aiUsageState.usage = usage;
     aiUsageState.providers = providers;
+    aiUsageState.redoReport = redoReport;
     aiUsageState.error = null;
   } catch (error) {
     aiUsageState.error = error.message;
@@ -60,12 +61,69 @@ const aiPauseRow = (usage) => {
     el("button", { class: "btn small", onclick: () => aiAction("/api/ai/pause", { minutes: -1 }, "已暂停，直到你恢复。") }, "一直暂停"));
 };
 
-const aiTile = (label, bucket, extra) =>
-  el("div", { class: "ai-tile" },
+// Calls a Grok subscription paid for cost nothing; they are shown apart with
+// the list price xAI reported for them.
+const aiSubscriptionLine = (bucket) => (bucket?.subscriptionCalls > 0
+  ? el("span", { class: "ai-tile-meta" }, `其中 ${bucket.subscriptionCalls} 次由 Grok 订阅支付（原价约 US$${bucket.subscriptionListUsd.toFixed(2)}）`)
+  : null);
+
+const aiTile = (label, bucket, extra) => {
+  const allSubscription = (bucket?.calls ?? 0) > 0 && bucket.subscriptionCalls === bucket.calls;
+  return el("div", { class: "ai-tile" },
     el("span", { class: "ai-tile-label" }, label),
-    el("strong", { class: "ai-tile-value" }, aiMoney(bucket?.cost)),
+    el("strong", { class: "ai-tile-value" }, allSubscription ? "订阅" : aiMoney(bucket?.cost)),
     el("span", { class: "ai-tile-meta" }, `${bucket?.calls ?? 0} 次 · ${aiTokens((bucket?.promptTokens ?? 0) + (bucket?.completionTokens ?? 0))} token`),
+    aiSubscriptionLine(bucket),
     extra ? el("span", { class: "ai-tile-meta" }, extra) : null);
+};
+
+/* ---------- detail level ---------- */
+
+const AI_REDO_CHOICES = [[1, "最近 1 天"], [3, "最近 3 天"], [7, "最近 7 天"], [14, "最近 14 天"], [30, "最近 30 天"]];
+
+const aiRedoRow = (usage) => {
+  const redo = usage.redo ?? { queued: 0, standardByDays: {} };
+  const report = aiRedoReport(aiUsageState.redoReport);
+  if (redo.queued > 0) {
+    return el("div", {}, report);
+  }
+  const daysSelect = el("select", {}, AI_REDO_CHOICES.map(([days, label]) => {
+    const pending = redo.standardByDays?.[days] ?? { chunks: 0, messages: 0 };
+    return el("option", { value: String(days), selected: days === 3 }, `${label}（已有 ${pending.chunks} 段 / ${pending.messages} 条标准摘要）`);
+  }));
+  return el("div", {},
+    el("div", { class: "row", style: "margin-top:8px;flex-wrap:wrap" },
+      el("span", { class: "card-sub", style: "margin:0" }, "把过去的日子也做成详细模式（重做已有摘要，补齐没摘要过的消息）："),
+      daysSelect,
+      el("button", {
+        class: "btn small",
+        onclick: () => aiAction("/api/llm/redo", { days: Number(daysSelect.value) }, "已排队，后台会用详细模式处理这些日子。"),
+      }, "用详细模式重做")),
+    report);
+};
+
+const aiDetailRow = (usage) => {
+  const detailed = usage.detail === "detailed";
+  const choice = (value, label, hint) =>
+    el("label", { class: `bg-toggle ${usage.detail === value ? "on" : ""}` },
+      el("input", {
+        type: "radio", name: "ai-detail", checked: usage.detail === value,
+        onchange: () => aiAction("/api/llm/detail", { detail: value }, value === "detailed" ? "已切换到详细模式。" : "已切换回标准模式。"),
+      }),
+      el("span", {}, el("strong", {}, label), el("small", {}, hint)));
+  return el("div", { class: "ai-detail" },
+    el("h3", { class: "ai-subhead" }, "AI 详细度"),
+    el("div", { class: "ai-detail-choices" },
+      choice("standard", "标准", "精简，省 token：简报只让 AI 写总览，合并有间隔，各类列表有上限。"),
+      choice("detailed", "详细（高用量）", "话题带细节和原话、问答跨段对上、列表更完整、有新消息就合并、段切得更细。")),
+    detailed && !usage.grokSelected
+      ? el("div", { class: "notice warn", style: "margin:8px 0 0" }, "你现在用的是按量计费的 API key：详细模式的用量是标准的好几倍，费用会明显增加。有 Grok 订阅的话，建议在上方登录 Grok 再用详细模式。")
+      : null,
+    detailed && usage.grokSelected
+      ? el("p", { class: "card-sub", style: "margin:8px 0 0" }, "Grok 不能用而改用备用 API key 时，会自动按标准模式处理，不会用详细模式烧 API 费用。")
+      : null,
+    detailed ? aiRedoRow(usage) : null);
+};
 
 // Single series (daily cost, or tokens when nothing is priced): one hue, no
 // legend, 4px rounded tops on a shared baseline, hover/focus readout below.
@@ -135,8 +193,9 @@ const aiBudgetRow = (usage) => {
           dailyBudget: amountInput.value.trim() === "" || Number(amountInput.value) === 0 ? null : { amount: Number(amountInput.value), currency: currencySelect.value },
         }, "已保存每日预算。"),
       }, "保存")),
-    el("label", {}, "简报合并", intervalSelect),
-    el("label", {}, "零散消息", tailSelect),
+    usage.detail === "detailed"
+      ? el("span", { class: "card-sub" }, "详细模式：有新段就合并，零散消息等 15 分钟。")
+      : [el("label", {}, "简报合并", intervalSelect), el("label", {}, "零散消息", tailSelect)],
     el("span", { class: "card-sub" }, `另有每日 ${usage.callCap?.limit ?? 400} 次调用上限（今天已用 ${usage.callCap?.used ?? 0} 次）。`));
 };
 
@@ -217,6 +276,7 @@ const renderAiUsageCard = () => {
     el("h2", {}, "AI 用量与费用"),
     el("p", { class: "card-sub" }, "按 AI 服务每次返回的实际 token 数统计，费用按下方价格表估算，以服务商账单为准。每 15 分钟的刷新本身不调用 AI：群里攒够一段新消息才总结一次（按消息量计费），各群总览再按「简报合并」的间隔重写，所以费用主要看群有多热闹。"),
     aiPauseRow(usage),
+    aiDetailRow(usage),
     el("div", { class: "ai-tiles" },
       aiTile("今天", usage.today),
       aiTile("近 7 天", usage.week),

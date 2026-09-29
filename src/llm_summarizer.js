@@ -12,10 +12,9 @@
 const http = require("node:http");
 const https = require("node:https");
 
-const REQUEST_TIMEOUT_MS = 120000;
-const MAP_MAX_TOKENS = 6144;
-const REDUCE_MAX_TOKENS = 8192;
-const SINGLE_MAX_TOKENS = 6144;
+const { profileFor, mapRulesFor } = require("./llm_profiles");
+
+const DEFAULT_TIMEOUT_MS = 120000;
 
 // Runaway guard for map-reduce over one window. Override via LLM_MAX_CHUNKS.
 const MAX_CHUNKS = (() => {
@@ -34,10 +33,47 @@ const getChatCompletionsUrl = (rawBaseUrl) => {
   return url;
 };
 
-const requestJson = (url, apiKey, payload) =>
+// Grok answers are streamed: xAI's edge drops a non-streamed request that is
+// still thinking after 60 s (measured). The stream is collected and put back
+// into the shape of a normal response; one that ends without a finish reason
+// (cut off mid-answer) is an error.
+const STREAM_IDLE_MS = 120000;
+const STREAM_CUT = "LLM stream ended before the answer finished";
+
+const assembleStream = (text) => {
+  let content = "";
+  let finishReason = null;
+  let usage;
+  for (const line of text.split(/\r?\n/u)) {
+    const data = line.startsWith("data:") ? line.slice(5).trim() : "";
+    if (data === "" || data === "[DONE]") {
+      continue;
+    }
+    const event = JSON.parse(data);
+    const choice = event.choices?.[0];
+    content += choice?.delta?.content ?? "";
+    finishReason = choice?.finish_reason ?? finishReason;
+    usage = event.usage ?? usage;
+  }
+  if (finishReason === null) {
+    throw new Error(STREAM_CUT);
+  }
+  return { choices: [{ finish_reason: finishReason, message: { content } }], usage };
+};
+
+const requestJson = (url, apiKey, payload, timeoutMs = DEFAULT_TIMEOUT_MS) =>
   new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
     const transport = url.protocol === "http:" ? http : https;
+    const streamed = payload.stream === true;
+    // Streamed: the idle limit applies between chunks, the level's limit to the whole answer.
+    const deadline = streamed
+      ? setTimeout(() => request.destroy(new Error(`LLM request timed out after ${timeoutMs} ms. Url=${url.toString()}`)), timeoutMs)
+      : null;
+    const settle = (fn, value) => {
+      clearTimeout(deadline);
+      fn(value);
+    };
     const request = transport.request(
       {
         protocol: url.protocol,
@@ -57,21 +93,27 @@ const requestJson = (url, apiKey, payload) =>
         response.on("end", () => {
           const responseBody = Buffer.concat(chunks).toString("utf8");
           if (response.statusCode < 200 || response.statusCode >= 300) {
-            reject(new Error(`LLM request failed. StatusCode=${response.statusCode} Body=${responseBody.slice(0, 2000)}`));
+            settle(reject, Object.assign(
+              new Error(`LLM request failed. StatusCode=${response.statusCode} Body=${responseBody.slice(0, 2000)}`),
+              { status: response.statusCode },
+            ));
             return;
           }
           try {
-            resolve(JSON.parse(responseBody));
+            settle(resolve, streamed ? assembleStream(responseBody) : JSON.parse(responseBody));
           } catch (error) {
-            reject(new Error(`LLM response was not valid JSON. Body=${responseBody.slice(0, 2000)} Error=${error.message}`));
+            settle(reject, error.message === STREAM_CUT
+              ? error
+              : new Error(`LLM response was not valid JSON. Body=${responseBody.slice(0, 2000)} Error=${error.message}`));
           }
         });
       },
     );
-    request.setTimeout(REQUEST_TIMEOUT_MS, () => {
-      request.destroy(new Error(`LLM request timed out after ${REQUEST_TIMEOUT_MS} ms. Url=${url.toString()}`));
+    const idleMs = streamed ? Math.min(timeoutMs, STREAM_IDLE_MS) : timeoutMs;
+    request.setTimeout(idleMs, () => {
+      request.destroy(new Error(`LLM request timed out after ${idleMs} ms. Url=${url.toString()}`));
     });
-    request.on("error", (error) => reject(error));
+    request.on("error", (error) => settle(reject, error));
     request.write(body);
     request.end();
   });
@@ -80,7 +122,14 @@ const sleep = (milliseconds) => new Promise((resolve) => {
   setTimeout(resolve, milliseconds);
 });
 
-const requestJsonWithRetry = async (url, apiKey, payload) => {
+// A bad request or a refused credential fails the same way every time.
+const NON_RETRYABLE_STATUSES = new Set([400, 401, 403, 404, 413, 422]);
+
+// A timed-out request is not repeated either: a long detailed call that hit
+// its limit would only block the run for another full timeout.
+const TIMED_OUT = /timed out after/u;
+
+const requestJsonWithRetry = async (url, apiKey, payload, timeoutMs) => {
   const delays = [0, 1200, 3000];
   let lastError = null;
   for (let index = 0; index < delays.length; index += 1) {
@@ -88,10 +137,13 @@ const requestJsonWithRetry = async (url, apiKey, payload) => {
       await sleep(delays[index]);
     }
     try {
-      return await requestJson(url, apiKey, payload);
+      return await requestJson(url, apiKey, payload, timeoutMs);
     } catch (error) {
       lastError = error;
       console.warn(JSON.stringify({ level: "warn", event: "llm_request_failed", attempt: index + 1, maxAttempts: delays.length, message: error.message }));
+      if (NON_RETRYABLE_STATUSES.has(error.status) || TIMED_OUT.test(error.message) || error.message === STREAM_CUT) {
+        break;
+      }
     }
   }
   throw lastError;
@@ -115,20 +167,44 @@ const reportUsage = (client, responseBody, meta) => {
     host: client.url.host,
     usage: responseBody.usage,
     messages: meta.messages ?? 0,
+    billing: client.provider === "grok-subscription" ? "subscription" : "api",
+    groupId: meta.groupId ?? null,
+    day: meta.day ?? null,
   });
 };
 
 // Provider quirks. DeepSeek's thinking switch is its own extension; Gemini's
 // OpenAI layer takes reasoning_effort (unknown fields are ignored there, but
 // other providers may reject them, so each extra goes only where it belongs).
-const providerExtras = (url) => {
+// xAI: Grok reasons by default, and on a 397-message chunk at the detailed
+// level its default took 466 s for barely more than "medium" (185 s; "low"
+// 121 s, half the topics). Reasoning tokens do not count against max_tokens.
+const providerExtras = (url, detail = "standard") => {
   if (/(^|\.)deepseek\.com$/iu.test(url.hostname)) {
     return { thinking: { type: "disabled" } };
   }
   if (url.hostname === "generativelanguage.googleapis.com") {
     return { reasoning_effort: "minimal" };
   }
+  if (url.hostname === "api.x.ai") {
+    return { reasoning_effort: detail === "detailed" ? "medium" : "low" };
+  }
   return {};
+};
+
+// The primary provider is down for us right now (credential refused, quota
+// used up, outage, network): the rest of the process switches to the
+// fallback and the failure is remembered. Anything else — an empty or
+// malformed answer, a cut-off stream, one very long call timing out, a
+// refused request (Grok silently returns empty summaries for some adult
+// chat) — is retried on the fallback for that one call only.
+const UNUSABLE_ANSWER = /truncated|not valid JSON|did not contain|Invalid LLM JSON|stream ended before|timed out after/u;
+const shouldFallBack = (error) => {
+  const status = Number(error?.status);
+  if (!Number.isFinite(status)) {
+    return !UNUSABLE_ANSWER.test(String(error?.message));
+  }
+  return status === 401 || status === 402 || status === 403 || status === 429 || status >= 500;
 };
 
 // Some OpenAI-compatible providers ignore response_format and wrap the JSON
@@ -159,24 +235,73 @@ const extractAssistantContent = (responseBody) => {
   return content;
 };
 
-const callLlm = async (client, prompt, maxTokens, meta = { purpose: "other" }) => {
+const callOnce = async (client, { system, user, maxTokens, temperature = 0.2 }, meta) => {
   const { url, apiKey, model } = client;
   const payload = {
     model,
     messages: [
-      { role: "system", content: prompt.system },
-      { role: "user", content: prompt.user },
+      { role: "system", content: system },
+      { role: "user", content: user },
     ],
     response_format: { type: "json_object" },
     max_tokens: maxTokens,
-    temperature: 0.2,
-    stream: false,
-    ...providerExtras(url),
+    temperature,
+    ...(url.hostname === "api.x.ai" ? { stream: true, stream_options: { include_usage: true } } : { stream: false }),
+    ...providerExtras(url, client.detail),
   };
-  const responseBody = await requestJsonWithRetry(url, apiKey, payload);
+  const responseBody = await requestJsonWithRetry(url, apiKey, payload, profileFor(client.detail).requestTimeoutMs);
   // Billed even when the answer is unusable (e.g. truncated), so record first.
   reportUsage(client, responseBody, meta);
   return parseJsonContent(extractAssistantContent(responseBody));
+};
+
+const activeClient = (client) => (client.state.usingFallback ? client.fallback : client);
+
+// The model answering right now (the fallback's once the primary failed),
+// and the detail level it works at.
+const currentModel = (client) => activeClient(client).model;
+const currentDetail = (client) => activeClient(client).detail;
+
+// build(detail) returns { system, user, maxTokens }: the request is rebuilt
+// for the fallback because it runs at its own (standard) detail level.
+// meta.validate(raw) throws when an answer is unusable (e.g. an empty
+// summary), which sends that call to the fallback too. When the primary is
+// down (shouldFallBack), the rest of this process uses the fallback.
+// meta.allowFallback = false: this call must come from the primary (detailed
+// redo work) — its failure is thrown, though a primary that is down is still
+// switched away from for the process's other calls. meta.onAnswered(endpoint)
+// learns which endpoint (model, detail) produced the accepted answer.
+const callLlm = async (client, build, meta = { purpose: "other" }) => {
+  const { validate = () => {}, allowFallback = true, onAnswered = () => {}, ...usageMeta } = meta;
+  const ask = async (endpoint) => {
+    const raw = await callOnce(endpoint, build(endpoint.detail), usageMeta);
+    validate(raw);
+    onAnswered(endpoint);
+    return raw;
+  };
+  const active = activeClient(client);
+  try {
+    return await ask(active);
+  } catch (error) {
+    if (active !== client || client.fallback === null) {
+      throw error;
+    }
+    const reason = String(error.message).slice(0, 200);
+    const down = shouldFallBack(error);
+    if (down) {
+      client.state.usingFallback = true;
+      console.warn(`llm ${client.model} unavailable, using ${client.fallback.model}: ${reason}`);
+      client.onFallback(error);
+    }
+    if (!allowFallback) {
+      throw error;
+    }
+    if (!down) {
+      client.state.answeredByFallback += 1;
+      console.warn(`llm ${client.model} gave no usable answer, asking ${client.fallback.model} for this one: ${reason}`);
+    }
+    return ask(client.fallback);
+  }
 };
 
 /* ---------- prompts ---------- */
@@ -271,14 +396,8 @@ const OUTPUT_SCHEMA = {
   ],
 };
 
-const SUMMARY_RULES = [
-  "summary 用 2-4 句话说清这段时间群里最值得知道的事，像朋友转述一样具体，不要空话套话。",
-  "topics 是大家集中讨论过的话题：title 必须来自这批消息的真实内容；每个话题需要 summary、details、evidence。只保留真的有多人参与或反复出现的，不要把一两句闲聊当话题。",
-  "newThings 列出这批消息里新出现或被分享的东西：新模型/新版本、工具或插件、教程、资源、网站、活动或比赛、新闻。kind 取 model|tool|tutorial|resource|news|event|other；name 写名称；detail 一句话说明它是什么、有什么用或大家怎么评价；有链接就把原链接写进 link，否则 link 用 null；speaker、hkt 写是谁在什么时候分享的。同一个东西只列一次。只有消息里确实出现时才列。",
-  "qa 列出有人提问并得到有用回答的问题（尤其是技术和使用问题，值得当知识保存）：question 概括问题，answer 概括最有用的回答，asker/answerer 写发言人，resolved 用 true。没人回答但值得注意的问题也可以列：answer 和 answerer 用 null，resolved 用 false。寒暄、求表情、纯玩笑不要列。",
-  "timeline 按时间段归纳：群聊通常集中在几个时间段，每段给出起止时间和这段时间主要在聊什么。用 localTimeBlocks 提示的分段作参考，可合并或拆分。",
-  "uncategorized 只列不属于上面任何一类、但确实值得注意的零散消息（群通知、规则变化、约定、提醒），逐条注明时间、发言人和为什么值得注意。纯闲聊不要列。",
-  "links 只保留值得保存或回看、且没有出现在 newThings 里的链接。",
+// Rules every detail level shares (the level's own rules come first).
+const COMMON_RULES = [
   "不要输出 actions 或 risks 字段。",
   "如果没有某类内容，用空数组或 null。",
 ];
@@ -303,7 +422,7 @@ const buildLocalTopicContext = (analysis) =>
 // Prompt over an explicit set of already-formatted message lines.
 // `analysis` is optional context (the manual pipeline has one; the background
 // briefing passes a light { firstMessageHkt, lastMessageHkt } object).
-const buildMapPrompt = (analysis, messageLines, partMeta) => ({
+const buildMapPrompt = (analysis, messageLines, partMeta, detail = "standard") => ({
   system: SYSTEM_PROMPT,
   user: JSON.stringify(
     {
@@ -317,7 +436,7 @@ const buildMapPrompt = (analysis, messageLines, partMeta) => ({
               hint: `这是同一个群按时间先后切分的第 ${partMeta.part}/${partMeta.total} 段消息，请客观提取本段内容，稍后会与其它段合并成完整摘要。`,
             },
           }),
-      rules: SUMMARY_RULES,
+      rules: [...mapRulesFor(detail), ...COMMON_RULES],
       outputSchema: OUTPUT_SCHEMA,
       context: {
         groups: analysis?.byGroup,
@@ -345,58 +464,82 @@ const arrayOf = (value) => (Array.isArray(value) ? value : []);
 
 // Per-chunk caps keep the merge input (and therefore the merge OUTPUT) small
 // enough to fit max_tokens — an untrimmed 7-chunk merge once overflowed.
-const trimPartialForReduce = (partial) => ({
+const trimPartialForReduce = (partial, trim = profileFor("standard").reduce.trim) => ({
   summary: typeof partial.summary === "string" ? partial.summary : "",
-  topics: arrayOf(partial.topics).slice(0, 8).map((topic) => ({
+  topics: arrayOf(partial.topics).slice(0, trim.topics).map((topic) => ({
     title: topic?.title,
     summary: topic?.summary,
     importance: topic?.importance,
     messageCountEstimate: topic?.messageCountEstimate,
-    details: arrayOf(topic?.details).slice(0, 2),
-    evidence: arrayOf(topic?.evidence).slice(0, 1),
+    details: arrayOf(topic?.details).slice(0, trim.details),
+    evidence: arrayOf(topic?.evidence).slice(0, trim.evidence),
   })),
-  newThings: arrayOf(partial.newThings).slice(0, 10),
-  qa: arrayOf(partial.qa).slice(0, 8),
-  timeline: arrayOf(partial.timeline).slice(0, 8),
-  uncategorized: arrayOf(partial.uncategorized).slice(0, 8),
-  links: arrayOf(partial.links).slice(0, 8),
+  newThings: arrayOf(partial.newThings).slice(0, trim.newThings),
+  qa: arrayOf(partial.qa).slice(0, trim.qa),
+  timeline: arrayOf(partial.timeline).slice(0, trim.timeline),
+  uncategorized: arrayOf(partial.uncategorized).slice(0, trim.uncategorized),
+  links: arrayOf(partial.links).slice(0, trim.links),
 });
 
-const buildReducePrompt = (analysis, partials) => ({
-  system: [
-    "你是一个 QQ 群聊摘要合并器。",
-    "输入是同一个群、按时间先后切分的多段局部摘要（JSON），请合并成一份完整、不重复的总摘要。",
-    "输出必须是合法 JSON，不要使用 Markdown，不要输出额外解释。",
-  ].join("\n"),
-  user: JSON.stringify(
-    {
-      task: "把下面同一个群的多段局部摘要合并成一份覆盖整个时间范围的总摘要。",
-      rules: [
-        "同一话题在多段出现时必须合并成一个 topic：summary 综合各段，details/evidence 取有代表性的，不要堆叠重复。",
-        "输出必须精简，宁缺毋滥——这是给忙碌的人快速扫读的。严格遵守下列数量上限：",
-        "topics 最多 8 个，按热度和重要性排序，messageCountEstimate 汇总各段；每个 topic 的 details 最多 3 条、evidence 最多 2 条，evidence 引用要短。",
-        "newThings 最多 12 个，同一个东西（同名或同链接）只保留一条，detail 合并各段信息。",
-        "qa 最多 10 个；同一问题合并；某段没人回答、后段有人回答的，改成有回答并 resolved=true。",
-        "timeline 最多 12 段，按时间顺序合并，相邻同话题可合并成一段。",
-        "uncategorized 最多 10 条、links 最多 12 条，去重合并，只保留真正值得注意的。",
-        "summary 用 2-4 句概括这一整个时间范围最值得知道的内容。",
-        "不要输出 actions 或 risks 字段。如果没有某类内容，用空数组或 null。",
-      ],
-      outputSchema: OUTPUT_SCHEMA,
-      context: {
-        timeRange: {
-          firstMessageHkt: analysis?.firstMessageHkt ?? null,
-          lastMessageHkt: analysis?.lastMessageHkt ?? null,
+const REDUCE_TONE = {
+  standard: "输出必须精简，宁缺毋滥——这是给忙碌的人快速扫读的。严格遵守下列数量上限：",
+  detailed: "这是详细模式：保留各段所有有内容的信息，只合并真正重复的，不要为了简短而丢掉细节。下列数量是上限，不是目标：",
+};
+
+const REDUCE_TRIM_ROUNDS = 4;
+
+// Each chunk's summary trimmed to the level's caps, then halved until all of
+// them fit the level's input budget (a detailed Grok chunk summary alone can
+// run to 20k characters, and a brief merges up to 40 of them).
+const fitPartials = (partials, { trim, inputChars }) => {
+  let caps = trim;
+  let fitted = partials.map((partial) => trimPartialForReduce(partial, caps));
+  for (let round = 0; round < REDUCE_TRIM_ROUNDS && JSON.stringify(fitted).length > inputChars; round += 1) {
+    caps = Object.fromEntries(Object.entries(caps).map(([key, value]) => [key, Math.max(1, Math.floor(value / 2))]));
+    fitted = partials.map((partial) => trimPartialForReduce(partial, caps));
+  }
+  return fitted;
+};
+
+const buildReducePrompt = (analysis, partials, detail = "standard") => {
+  const profile = profileFor(detail);
+  const { caps, summarySentences } = profile.reduce;
+  return {
+    system: [
+      "你是一个 QQ 群聊摘要合并器。",
+      "输入是同一个群、按时间先后切分的多段局部摘要（JSON），请合并成一份完整、不重复的总摘要。",
+      "输出必须是合法 JSON，不要使用 Markdown，不要输出额外解释。",
+    ].join("\n"),
+    user: JSON.stringify(
+      {
+        task: "把下面同一个群的多段局部摘要合并成一份覆盖整个时间范围的总摘要。",
+        rules: [
+          "同一话题在多段出现时必须合并成一个 topic：summary 综合各段，details/evidence 取有代表性的，不要堆叠重复。",
+          REDUCE_TONE[profile.name],
+          "topics 最多 " + caps.topics + " 个，按热度和重要性排序，messageCountEstimate 汇总各段；每个 topic 的 details 最多 " + caps.details + " 条、evidence 最多 " + caps.evidence + " 条，evidence 引用要短。",
+          "newThings 最多 " + caps.newThings + " 个，同一个东西（同名或同链接）只保留一条，detail 合并各段信息。",
+          "qa 最多 " + caps.qa + " 个；同一问题合并；某段没人回答、后段有人回答的，改成有回答并 resolved=true。",
+          "timeline 最多 " + caps.timeline + " 段，按时间顺序合并，相邻同话题可合并成一段。",
+          "uncategorized 最多 " + caps.uncategorized + " 条、links 最多 " + caps.links + " 条，去重合并。",
+          "summary 用 " + summarySentences + " 句概括这一整个时间范围最值得知道的内容。",
+          "不要输出 actions 或 risks 字段。如果没有某类内容，用空数组或 null。",
+        ],
+        outputSchema: OUTPUT_SCHEMA,
+        context: {
+          timeRange: {
+            firstMessageHkt: analysis?.firstMessageHkt ?? null,
+            lastMessageHkt: analysis?.lastMessageHkt ?? null,
+          },
+          parsedTextMessages: analysis?.parsedTextMessages ?? null,
+          totalParts: partials.length,
         },
-        parsedTextMessages: analysis?.parsedTextMessages ?? null,
-        totalParts: partials.length,
+        partials: fitPartials(partials, profile.reduce),
       },
-      partials: partials.map(trimPartialForReduce),
-    },
-    null,
-    2,
-  ),
-});
+      null,
+      2,
+    ),
+  };
+};
 
 /* ---------- validation ---------- */
 
@@ -653,9 +796,21 @@ const deterministicMerge = (partials) => {
 
 /* ---------- orchestration ---------- */
 
+// callLlm validators: an answer that fails them is asked again elsewhere.
+const validateSummary = (raw) => {
+  normalizeLlmSummary(raw, {});
+};
+const requireSummaryText = (raw) => {
+  requiredString(raw?.summary, "summary");
+};
+
 // Summarize one chunk of formatted lines (the "map" step).
-const summarizeLines = async (client, analysis, lines, partMeta, purpose = "map") =>
-  callLlm(client, buildMapPrompt(analysis, lines, partMeta), partMeta === undefined ? SINGLE_MAX_TOKENS : MAP_MAX_TOKENS, { purpose, messages: lines.length });
+// callMeta: { groupId, day } for the usage record, allowFallback for redo work.
+const summarizeLines = async (client, analysis, lines, partMeta, purpose = "map", callMeta = {}) =>
+  callLlm(client, (detail) => ({
+    ...buildMapPrompt(analysis, lines, partMeta, detail),
+    maxTokens: partMeta === undefined ? profileFor(detail).map.singleMaxTokens : profileFor(detail).map.maxTokens,
+  }), { purpose, messages: lines.length, validate: validateSummary, ...callMeta });
 
 // Merge already-produced partials. Validated HERE so a reduce that returns
 // malformed JSON also falls back to the deterministic merge.
@@ -664,7 +819,7 @@ const reducePartials = async (client, analysis, partials, provider, purpose = "r
     return { summary: normalizeLlmSummary(partials[0], provider), mode: "single" };
   }
   try {
-    const raw = await callLlm(client, buildReducePrompt(analysis, partials), REDUCE_MAX_TOKENS, { purpose });
+    const raw = await callLlm(client, (detail) => ({ ...buildReducePrompt(analysis, partials, detail), maxTokens: profileFor(detail).reduce.maxTokens }), { purpose, validate: validateSummary });
     return { summary: normalizeLlmSummary(raw, provider), mode: "mapreduce" };
   } catch (error) {
     console.warn(`llm reduce failed, using deterministic merge: ${error.message}`);
@@ -718,13 +873,18 @@ const buildBriefMergePrompt = (analysis, partials) => ({
   ),
 });
 
-// The always-on briefing re-merges every group through the day, so its merge
-// must be cheap. Only the prose (overview + ranked topics) comes from the
-// model; new things, Q&A, timeline and links are merged locally from the
-// already-paid-for chunk summaries. Measured: ~5k output tokens -> under 1k.
+// The always-on briefing re-merges every group through the day. At the
+// standard level that merge must be cheap: only the prose (overview + ranked
+// topics) comes from the model; new things, Q&A, timeline and links are
+// merged locally from the already-paid-for chunk summaries (measured: ~5k
+// output tokens -> under 1k). The detailed level runs the full model merge,
+// so topics keep their details and quotes and Q&A is resolved across chunks.
 const mergeBriefPartials = async (client, analysis, partials, provider, purpose = "reduce") => {
   if (partials.length === 1) {
     return { summary: normalizeLlmSummary(partials[0], provider), mode: "single" };
+  }
+  if (profileFor(currentDetail(client)).briefMerge === "full") {
+    return reducePartials(client, analysis, partials, provider, purpose);
   }
   const local = {
     ...deterministicMerge(partials),
@@ -733,7 +893,7 @@ const mergeBriefPartials = async (client, analysis, partials, provider, purpose 
       .slice(0, BRIEF_NEW_THINGS),
   };
   try {
-    const raw = await callLlm(client, buildBriefMergePrompt(analysis, partials), BRIEF_MERGE_MAX_TOKENS, { purpose });
+    const raw = await callLlm(client, () => ({ ...buildBriefMergePrompt(analysis, partials), maxTokens: BRIEF_MERGE_MAX_TOKENS }), { purpose, validate: requireSummaryText });
     const topics = arrayOf(raw.topics).slice(0, BRIEF_MERGE_TOPICS).map((topic) => ({ ...topic, details: [], evidence: [] }));
     return { summary: normalizeLlmSummary({ ...local, summary: raw.summary, topics }, provider), mode: "brief-merge" };
   } catch (error) {
@@ -743,8 +903,11 @@ const mergeBriefPartials = async (client, analysis, partials, provider, purpose 
 };
 
 // Whole-window summary used by the manual run: map every chunk, then reduce.
+// The detailed level cuts finer chunks, so each message gets more attention.
 const summarizeMessages = async (client, analysis, messages, { maxMessages, maxChars }, provider) => {
-  const { chunks, capped } = buildChunks(messages, maxMessages, maxChars);
+  const profile = profileFor(currentDetail(client));
+  const chunkMessages = profile.userTunable ? maxMessages : Math.min(maxMessages, profile.engine.maxMessages);
+  const { chunks, capped } = buildChunks(messages, chunkMessages, maxChars);
   if (chunks.length <= 1) {
     const lines = chunks[0] ?? [];
     const raw = await summarizeLines(client, analysis, lines, undefined, "manual");
@@ -781,7 +944,17 @@ const summarizeMessages = async (client, analysis, messages, { maxMessages, maxC
   };
 };
 
-const createClient = ({ baseUrl, apiKey, model }) => ({ url: getChatCompletionsUrl(baseUrl), apiKey, model });
+const makeEndpoint = ({ baseUrl, apiKey, model, provider = "api", detail = "standard" }) =>
+  ({ url: getChatCompletionsUrl(baseUrl), apiKey, model, provider, detail });
+
+// fallback (same option shape) takes over when the primary is unavailable;
+// onFallback(error) lets the caller remember that (src/llm_route.js).
+const createClient = (options, { fallback = null, onFallback = () => {} } = {}) => ({
+  ...makeEndpoint(options),
+  fallback: fallback === null ? null : makeEndpoint(fallback),
+  onFallback,
+  state: { usingFallback: false, answeredByFallback: 0 },
+});
 
 module.exports = {
   MAX_CHUNKS,
@@ -791,6 +964,11 @@ module.exports = {
   OUTPUT_SCHEMA,
   createClient,
   callLlm,
+  currentModel,
+  currentDetail,
+  shouldFallBack,
+  getChatCompletionsUrl,
+  assembleStream,
   formatMessageLine,
   buildChunks,
   buildMapPrompt,

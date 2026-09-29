@@ -10,6 +10,9 @@ const background = require("./background");
 const briefing = require("./briefing_ops");
 const desktop = require("./desktop_ops");
 const llmOps = require("./llm_ops");
+const grokOps = require("./grok_ops");
+const digestOps = require("./digest_ops");
+const askOps = require("./ask_ops");
 const reviewOps = require("./review_ops");
 const knowledgeAigc = require("./knowledge_aigc");
 const backupOps = require("./backup_ops");
@@ -502,7 +505,6 @@ const handleApi = async (request, response, url) => {
           inputPath: prepared.inputPath,
           outputPath: prepared.outputPath,
           meta: { groupId: prepared.groupId, groupName: prepared.groupName, count: prepared.count },
-          llm: state.loadConfig().llm ?? {},
         });
       } catch (error) {
         // The job never started, so its cleanup will never run — remove the prepared input here.
@@ -680,6 +682,36 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/llm/grok/login") {
+      sendJson(response, 200, await grokOps.startLogin());
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/llm/grok") {
+      sendJson(response, 200, grokOps.getStatus());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/llm/grok/logout") {
+      sendJson(response, 200, await grokOps.logout());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/llm/grok/model") {
+      sendJson(response, 200, grokOps.saveModel(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/llm/grok/models") {
+      sendJson(response, 200, await grokOps.listModels());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/llm/provider") {
+      sendJson(response, 200, grokOps.selectProvider(await readBody(request)));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/update/check") {
       const cached = url.searchParams.get("cached") === "1";
       sendJson(response, 200, await update.checkUpdate({ maxAgeMs: cached ? update.AUTO_CHECK_MAX_AGE_MS : 0 }));
@@ -751,6 +783,56 @@ const handleApi = async (request, response, url) => {
 
     if (request.method === "POST" && url.pathname === "/api/llm/prices") {
       sendJson(response, 200, llmOps.savePrices(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/digest") {
+      sendJson(response, 200, digestOps.getDigest({ kind: url.searchParams.get("kind"), period: url.searchParams.get("period") }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/digests") {
+      sendJson(response, 200, digestOps.listDigests({ kind: url.searchParams.get("kind") }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/digest/generate") {
+      sendJson(response, 200, digestOps.generateDigest(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/ask") {
+      sendJson(response, 200, askOps.startAsk(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/ask") {
+      sendJson(response, 200, askOps.getAskStatus({ offset: url.searchParams.get("offset") }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/ask/item") {
+      sendJson(response, 200, askOps.getAskItem({ id: url.searchParams.get("id") }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/ask/delete") {
+      sendJson(response, 200, askOps.deleteAskItem(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/llm/detail") {
+      sendJson(response, 200, llmOps.setDetail(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/llm/redo-report") {
+      sendJson(response, 200, llmOps.getRedoReport());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/llm/redo") {
+      sendJson(response, 200, llmOps.queueRedo(await readBody(request)));
       return;
     }
 

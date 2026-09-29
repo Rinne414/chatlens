@@ -71,6 +71,9 @@ const crossGroupHighlights = (groups) => {
       summary: topic.summary,
       importance: topic.importance,
       messageCountEstimate: topic.messageCountEstimate,
+      // Filled by the detailed level's full merge; empty at the standard level.
+      details: topic.details ?? [],
+      evidence: topic.evidence ?? [],
       groupId: topic.groupId,
       groupName: topic.groupName,
     })),

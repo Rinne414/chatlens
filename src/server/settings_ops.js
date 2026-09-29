@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const state = require("./toolkit_state");
+const grokOps = require("./grok_ops");
 const secrets = require("../secrets");
 const platform = require("../platform");
 const { detectPrefixBytes } = require("../db_mirror");
@@ -68,6 +69,7 @@ const getSettingsStatus = () => {
       baseUrl: config.llm?.baseUrl ?? "",
       model: config.llm?.model ?? "",
     },
+    grok: grokOps.getStatus(),
   };
 };
 
@@ -141,7 +143,9 @@ const saveLlmConfig = ({ baseUrl, model }) => {
   if (nextModel.length > 0 && !MODEL_NAME_PATTERN.test(nextModel)) {
     throw new Error("模型名格式不对。");
   }
-  saveConfigPatch({ llm: { ...(config.llm ?? {}), provider: "deepseek", baseUrl: trimmedUrl, model: nextModel } });
+  // Saving the API-key provider keeps Grok selected if it is: the API key is
+  // then Grok's fallback.
+  saveConfigPatch({ llm: { ...(config.llm ?? {}), provider: config.llm?.provider ?? "api", baseUrl: trimmedUrl, model: nextModel } });
   return { baseUrl: trimmedUrl, model: nextModel };
 };
 

@@ -14,7 +14,7 @@
 
 const store = require("./briefing_store");
 const { formatHkt } = require("./unviewed_range");
-const { formatMessageLine, normalizeLlmSummary, summarizeLines, mergeBriefPartials } = require("./llm_summarizer");
+const { formatMessageLine, normalizeLlmSummary, summarizeLines, mergeBriefPartials, currentModel, currentDetail, shouldFallBack } = require("./llm_summarizer");
 
 const HOUR = 3600;
 const DEFAULTS = {
@@ -35,6 +35,8 @@ const DEFAULTS = {
   reduceIntervalSeconds: 7200,
   mapConcurrency: 3,
   maxMapPerRun: 40,
+  // Detailed-level job chunks (redo / backfill) per run; see mapPendingChunks.
+  maxJobPerRun: 40,
   dailyLlmCallLimit: 400,
 };
 
@@ -183,11 +185,38 @@ const runLimited = async (items, concurrency, worker) => {
   await Promise.all(lanes);
 };
 
+// Detailed-level job work (redo = 1; see briefing_store) runs only while the
+// client answers at the detailed level and never more than maxJobPerRun per
+// run, so live chunks stay fresh. A redo never falls back to a paid provider:
+// declined chat keeps its old summary, a provider that is down leaves it
+// queued. A declined backfill (no summary yet) may use the fallback.
+const handleJobFailure = (db, chunk, error, outcome, log) => {
+  if (shouldFallBack(error)) {
+    outcome.jobDeferred += 1;
+    log(`briefing detailed job paused (provider down) group=${chunk.groupId}`);
+    return true;
+  }
+  if (chunk.hasPartial) {
+    store.giveUpRedo(db, chunk.chunkId, error.message);
+    outcome.jobKeptOld += 1;
+    log(`briefing redo kept the old summary group=${chunk.groupId}: ${error.message.slice(0, 120)}`);
+    return true;
+  }
+  return false;
+};
+
 const mapPendingChunks = async (db, client, { now, log = () => {}, ...overrides } = {}) => {
   const options = { ...DEFAULTS, ...overrides };
   const chunks = store.chunksToSummarize(db, options.maxMapPerRun);
-  const outcome = { done: 0, failed: 0, skippedForBudget: 0, blockedBy: null };
+  const outcome = { done: 0, failed: 0, skippedForBudget: 0, blockedBy: null, jobDone: 0, jobDeferred: 0, jobKeptOld: 0 };
+  let jobTaken = 0;
   await runLimited(chunks, options.mapConcurrency, async (chunk) => {
+    const isJob = chunk.redo === 1;
+    if (isJob && (currentDetail(client) !== "detailed" || jobTaken >= options.maxJobPerRun)) {
+      outcome.jobDeferred += 1;
+      return;
+    }
+    jobTaken += isJob ? 1 : 0;
     const blocked = allowSpend(db, now, options);
     if (blocked !== null) {
       outcome.skippedForBudget += 1;
@@ -205,14 +234,26 @@ const mapPendingChunks = async (db, client, { now, log = () => {}, ...overrides 
       lastMessageHkt: formatHkt(messages.at(-1).sentAt),
       parsedTextMessages: messages.length,
     };
+    let answered = null;
+    const callMeta = {
+      groupId: chunk.groupId,
+      day: formatHkt(chunk.endSentAt).slice(0, 10),
+      onAnswered: (endpoint) => { answered = endpoint; },
+      ...(isJob && chunk.hasPartial ? { allowFallback: false } : {}),
+    };
     try {
       // Validate at map time: a malformed partial is a failed (retried)
       // chunk, never a landmine for the later reduce.
-      const partial = normalizeLlmSummary(await summarizeLines(client, context, messages.map(toLine)), { model: client.model });
-      store.saveChunkResult(db, chunk.chunkId, { partial });
+      const raw = await summarizeLines(client, context, messages.map(toLine), undefined, isJob ? "redo" : "map", callMeta);
+      const partial = normalizeLlmSummary(raw, { model: answered.model });
+      store.saveChunkResult(db, chunk.chunkId, { partial, detail: answered.detail });
       outcome.done += 1;
-      log(`briefing map ok group=${chunk.groupId} messages=${messages.length}`);
+      outcome.jobDone += isJob ? 1 : 0;
+      log(`briefing map ok group=${chunk.groupId} messages=${messages.length}${isJob ? " (detailed job)" : ""}`);
     } catch (error) {
+      if (isJob && handleJobFailure(db, chunk, error, outcome, log)) {
+        return;
+      }
       store.saveChunkResult(db, chunk.chunkId, { error: error.message });
       outcome.failed += 1;
       log(`briefing map failed group=${chunk.groupId}: ${error.message.slice(0, 200)}`);
@@ -235,7 +276,9 @@ const reduceBriefs = async (db, client, groupIds, { now, force = false, log = ()
       continue;
     }
     const chunks = all.slice(-options.maxReduceChunks);
-    const chunkKey = chunks.map((chunk) => chunk.chunkId).join(",");
+    // A chunk redone at the detailed level changes the key, so its group is
+    // re-merged; standard chunks keep the key format older versions wrote.
+    const chunkKey = chunks.map((chunk) => (chunk.detail === "detailed" ? `${chunk.chunkId}d` : String(chunk.chunkId))).join(",");
     const existing = store.getGroupBrief(db, groupId);
     if (existing !== null && existing.windowStart === windowStart && existing.chunkKey === chunkKey) {
       outcome.unchanged += 1;
@@ -264,7 +307,7 @@ const reduceBriefs = async (db, client, groupIds, { now, force = false, log = ()
     };
     let reduced;
     try {
-      reduced = await mergeBriefPartials(client, context, partials, { model: client.model });
+      reduced = await mergeBriefPartials(client, context, partials, { model: currentModel(client) });
     } catch (error) {
       // One group's bad data must not stop the other groups' briefs.
       log(`briefing reduce failed group=${groupId}: ${error.message.slice(0, 200)}`);
@@ -295,6 +338,7 @@ const reduceBriefs = async (db, client, groupIds, { now, force = false, log = ()
 
 module.exports = {
   DEFAULTS,
+  allowSpend,
   pauseStatus,
   setPause,
   planChunks,
