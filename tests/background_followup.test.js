@@ -21,3 +21,28 @@ test("otherwise the configured interval applies", () => {
   assert.equal(followUpDelay(resultWith({ skipped: "disabled" })), undefined);
   assert.equal(followUpDelay(null), undefined);
 });
+
+test("the refresh result survives a warning written on stderr in the middle of it", () => {
+  const { lineReader, parseResult } = require("../src/server/background");
+  const logged = [];
+  const readStdout = lineReader((line) => logged.push(`out:${line}`));
+  const readStderr = lineReader((line) => logged.push(`err:${line}`));
+  let stdoutText = "";
+  const stdout = (chunk) => {
+    stdoutText += chunk;
+    readStdout(chunk);
+  };
+  // Chunks as they arrived: stderr's half line lands between stdout's.
+  stdout("briefing map ok group=1\n");
+  readStderr("llm grok gave no usable ans");
+  stdout("refreshResult={\"groups\":38,\"briefing\":{\"jobQueued\":");
+  readStderr("wer, asking deepseek\n");
+  stdout("12}}\n");
+
+  assert.deepEqual(parseResult(stdoutText), { groups: 38, briefing: { jobQueued: 12 } });
+  assert.deepEqual(logged, [
+    "out:briefing map ok group=1",
+    "err:llm grok gave no usable answer, asking deepseek",
+    "out:refreshResult={\"groups\":38,\"briefing\":{\"jobQueued\":12}}",
+  ]);
+});

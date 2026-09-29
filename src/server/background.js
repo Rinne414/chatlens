@@ -215,6 +215,26 @@ const parseResult = (text) => {
   }
 };
 
+// One stream's text, line by line: onLine gets each complete line. Each stream
+// needs its own partial line - sharing one let half a warning on stderr glue
+// itself in front of stdout's "refreshResult=" line, and the whole result was
+// lost (2026-09-30 05:10 refresh: no record, no 2-minute follow-up).
+const lineReader = (onLine) => {
+  let partial = "";
+  return (textChunk) => {
+    partial += textChunk;
+    const lines = partial.split(/\r?\n/u);
+    partial = lines.pop() ?? "";
+    lines.forEach(onLine);
+  };
+};
+
+const logLine = (line) => {
+  if (line.trim().length > 0 && !line.startsWith("refreshResult=")) {
+    pushLog(line.trim().slice(0, 300));
+  }
+};
+
 const tick = ({ force }) => {
   if (status.running) {
     return { started: false, reason: "running" };
@@ -237,22 +257,16 @@ const tick = ({ force }) => {
   const args = [refreshScript, ...(force ? ["--force"] : [])];
   child = spawn(process.execPath, args, { cwd: state.toolRoot, ...platform.spawnOptionsForTree() });
   lowerPriority(child.pid);
-  let output = "";
-  let buffer = "";
-  const consume = (chunk) => {
-    const text = chunk.toString("utf8");
-    output += text;
-    buffer += text;
-    const lines = buffer.split(/\r?\n/u);
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (line.trim().length > 0 && !line.startsWith("refreshResult=")) {
-        pushLog(line.trim().slice(0, 300));
-      }
-    }
-  };
-  child.stdout.on("data", consume);
-  child.stderr.on("data", consume);
+  // The result line is on stdout; decoded as UTF-8 across chunk boundaries.
+  let stdoutText = "";
+  const readStdout = lineReader(logLine);
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (textChunk) => {
+    stdoutText += textChunk;
+    readStdout(textChunk);
+  });
+  child.stderr.on("data", lineReader(logLine));
   child.on("error", (error) => {
     status.lastError = error.message;
   });
@@ -265,7 +279,7 @@ const tick = ({ force }) => {
       return;
     }
     status.lastFinishedAt = new Date().toISOString();
-    const result = parseResult(output);
+    const result = parseResult(stdoutText);
     status.lastResult = result;
     if (code !== 0 && status.lastError === null) {
       status.lastError = status.log.at(-1) ?? `刷新进程退出码 ${code}`;
@@ -426,4 +440,4 @@ const getStatus = () => ({
   log: status.log.slice(-12),
 });
 
-module.exports = { start, stop, runNow, getStatus, saveSettings, notifyAfterTick, followUpDelay, DEFAULTS };
+module.exports = { start, stop, runNow, getStatus, saveSettings, notifyAfterTick, followUpDelay, lineReader, parseResult, DEFAULTS };
