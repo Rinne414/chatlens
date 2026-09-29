@@ -213,6 +213,10 @@ const needingKeep = (db, { now, limit, groupIds }) => {
   });
 };
 
+// Every AI picture whose original is not saved yet, closest to expiry first.
+const needingKeepAi = (db, { now, limit }) =>
+  liveCandidates(db, { now, limit, where: "f.probe = 'ai' AND COALESCE(f.kept, 0) = 0 AND p.sticker = 0", order: "expiresAt ASC" });
+
 // Pictures per media row for the chat view, in message order.
 const picturesForRows = (db, groupId, rowIds) => {
   if (rowIds.length === 0) {
@@ -254,32 +258,42 @@ const keptBytes = (db) =>
     )
   `).get().bytes;
 
-// AI pictures whose original is not saved for good, soonest expiry first.
-const EXPIRING_AI_WHERE = "f.probe = 'ai' AND COALESCE(f.kept, 0) = 0";
+// AI pictures whose original is not saved for good that Tencent still has
+// (the same rules as liveCandidates). AI pictures are a small share of
+// picture_files, so this walks those and looks up their posts; CROSS JOIN
+// fixes that order. Grouping every live post instead took ~1.1 s on 195k
+// posts (measured 2026-09-30), this ~70 ms.
+const AI_UNSAVED_LIVE = `
+  FROM picture_files f CROSS JOIN pictures p ON p.md5 = f.md5
+  WHERE f.probe = 'ai' AND f.kept = 0 AND f.gone = 0 AND f.failures < 3 AND p.expires_at > @now
+  GROUP BY p.md5`;
 
+// Soonest expiry first; limit -1 = all.
 const expiringAi = (db, { now, limit = 200 }) =>
-  liveCandidates(db, { now, limit, where: EXPIRING_AI_WHERE, order: "expiresAt ASC" });
+  db.prepare(`
+    SELECT p.md5, p.file_id AS fileId, p.legacy_path AS legacyPath, p.size, p.width, p.height,
+           p.format, p.sent_at AS sentAt, MAX(p.expires_at) AS expiresAt, p.group_id AS groupId, p.row_id AS rowId
+    ${AI_UNSAVED_LIVE}
+    ORDER BY expiresAt ASC
+    LIMIT @limit
+  `).all({ now, limit });
 
-// How many there are in all (the list itself is capped), optionally only
-// those Tencent deletes within `withinSeconds`.
+// How many there are in all, optionally only those Tencent deletes within
+// `withinSeconds`.
 const countExpiringAi = (db, { now, withinSeconds = null }) =>
   db.prepare(`
-    SELECT COUNT(*) AS n FROM (
-      SELECT MAX(p.expires_at) AS expiresAt
-      FROM pictures p LEFT JOIN picture_files f ON f.md5 = p.md5
-      WHERE p.expires_at > @now AND COALESCE(f.gone, 0) = 0 AND COALESCE(f.failures, 0) < 3 AND ${EXPIRING_AI_WHERE}
-      GROUP BY p.md5
-    ) WHERE expiresAt <= @until
+    SELECT COUNT(*) AS n FROM (SELECT MAX(p.expires_at) AS expiresAt ${AI_UNSAVED_LIVE}) WHERE expiresAt <= @until
   `).get({ now, until: withinSeconds === null ? Number.MAX_SAFE_INTEGER : now + withinSeconds }).n;
 
-const pendingCounts = (db, now) => {
-  const count = (where) =>
-    db.prepare(`
-      SELECT COUNT(DISTINCT p.md5) AS n FROM pictures p LEFT JOIN picture_files f ON f.md5 = p.md5
-      WHERE p.expires_at > ? AND COALESCE(f.gone, 0) = 0 AND COALESCE(f.failures, 0) < 3 AND (${where})
-    `).get(now).n;
-  return { thumbs: count(THUMB_WANTED), probes: count(PROBE_WHERE), previews: count(PREVIEW_WANTED) };
-};
+// One pass over the live posts for all three counts (three passes took ~3 s).
+const pendingCounts = (db, now) =>
+  db.prepare(`
+    SELECT COUNT(DISTINCT CASE WHEN ${THUMB_WANTED} THEN p.md5 END) AS thumbs,
+           COUNT(DISTINCT CASE WHEN ${PROBE_WHERE} THEN p.md5 END) AS probes,
+           COUNT(DISTINCT CASE WHEN ${PREVIEW_WANTED} THEN p.md5 END) AS previews
+    FROM pictures p LEFT JOIN picture_files f ON f.md5 = p.md5
+    WHERE p.expires_at > ? AND COALESCE(f.gone, 0) = 0 AND COALESCE(f.failures, 0) < 3
+  `).get(now);
 
 // What to clear when over the budget, tier by tier: originals opened in the
 // console, ordinary pictures' previews and thumbnails, AI previews, and last
@@ -326,6 +340,7 @@ module.exports = {
   needingPreviews,
   needingProbe,
   needingKeep,
+  needingKeepAi,
   picturesForRows,
   usage,
   keptBytes,

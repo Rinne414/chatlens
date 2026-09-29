@@ -60,9 +60,17 @@ const backfill = ({ day }) => {
   return { ...result, started: tick.started, reason: tick.reason ?? null };
 };
 
-const search = ({ q, messageOffset = 0 }) => {
+const numberOrNull = (value) => (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value));
+
+const search = ({ q, messageOffset = 0, fromUnix = null, toUnix = null, more = false }) => {
   const query = String(q ?? "").slice(0, MAX_QUERY_LENGTH);
-  return review.search(state.getStore(), { query, messageOffset });
+  return review.search(state.getStore(), {
+    query,
+    messageOffset,
+    fromUnix: numberOrNull(fromUnix),
+    toUnix: numberOrNull(toUnix),
+    messagesOnly: more === true,
+  });
 };
 
 module.exports = { getCalendar, getDay, backfill, search };

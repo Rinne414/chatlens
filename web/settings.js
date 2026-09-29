@@ -465,8 +465,12 @@ const renderBackgroundCard = () => {
       backgroundToggle("自动 AI 总结", "关闭后只收消息、不调用 AI", current.autoSummarize, (value) => saveBackgroundSetting({ autoSummarize: value })),
       backgroundToggle("有人 @ 我或回复我时通知", null, current.notifyMentions, (value) => saveBackgroundSetting({ notifyMentions: value })),
       backgroundToggle("每天早上推送一次简报", "9 点后第一次刷新时", current.notifyDaily, (value) => saveBackgroundSetting({ notifyDaily: value })),
+      backgroundToggle("关注的词出现时通知", "在首页「关注的词」里设要关注的词；「不看此人」的人说的不通知", current.notifyWatchWords === true, (value) => saveBackgroundSetting({ notifyWatchWords: value })),
       backgroundToggle(loginLabel, "不弹窗口，打开简报时秒开", desktop.autostart === true, (value) =>
         desktopAction("/api/desktop/autostart", { enabled: value }, value ? "已开启：下次登录会自动在后台运行。" : "已关闭开机后台运行。"))),
+    el("div", { class: "row", style: "margin-top:12px" },
+      el("button", { class: "btn small", type: "button", onclick: quitConsole }, "⏻ 关闭控制台"),
+      el("span", { class: "card-sub", style: "margin:0" }, "控制台在后台运行、没有窗口；关掉后不再自动刷新，从开始菜单可以再打开。")),
     el("div", { class: "row", style: "margin-top:12px" },
       el("span", { style: "font-size:13px" }, "刷新间隔"),
       el("select", {

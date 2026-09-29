@@ -102,9 +102,9 @@ const uncategorizedNodes = (group) => {
     el("h4", { style: "margin:14px 0 4px" }, "未归类但可能重要"),
     el("ul", { class: "item-list" }, items.map((item) =>
       el("li", {},
-        el("span", { style: "color:var(--muted)" }, `[${item.hkt}] `),
-        el("b", {}, item.speaker),
-        `: ${item.note}`))));
+        item.hkt ? el("span", { style: "color:var(--muted)" }, `[${item.hkt}] `) : null,
+        item.speaker ? [el("b", {}, item.speaker), ": "] : null,
+        item.note))));
 };
 
 // Honest coverage note: map-reduce now covers the whole window, so show

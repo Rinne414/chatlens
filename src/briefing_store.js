@@ -120,7 +120,9 @@ const insertChunk = (db, chunk) =>
     VALUES (@groupId, @startSentAt, @endSentAt, @firstRowId, @lastRowId, @messageCount, @createdAt, @redo)
   `).run({ redo: 0, ...chunk }).lastInsertRowid;
 
-// Ordinary chunks first (newest first), then detailed-level job work, newest first.
+// Ordinary chunks first (newest first), then detailed-level job work: messages
+// no summary covers yet before upgrades of ones that have a summary, each
+// newest first.
 const chunksToSummarize = (db, limit) =>
   db.prepare(`
     SELECT chunk_id AS chunkId, group_id AS groupId, start_sent_at AS startSentAt, end_sent_at AS endSentAt,
@@ -128,7 +130,7 @@ const chunksToSummarize = (db, limit) =>
            redo, partial_json IS NOT NULL AS hasPartial
     FROM summary_chunks
     WHERE status = 'pending' OR (status = 'failed' AND attempts < ${MAX_CHUNK_ATTEMPTS}) OR (status = 'done' AND redo = 1)
-    ORDER BY redo, end_sent_at DESC
+    ORDER BY redo, partial_json IS NOT NULL, end_sent_at DESC
     LIMIT ?
   `).all(limit);
 
@@ -162,6 +164,53 @@ const saveChunkResult = (db, chunkId, { partial, error, detail = "standard" }) =
     WHERE chunk_id = ?
   `).run(String(error ?? "unknown error").slice(0, 500), chunkId);
 };
+
+// The failure was not the chunk's fault (the AI account itself was refused):
+// the error is kept for diagnosis, status and attempts stay as they were.
+const noteChunkError = (db, chunkId, error) => {
+  db.prepare("UPDATE summary_chunks SET error = ? WHERE chunk_id = ?").run(String(error ?? "").slice(0, 500), chunkId);
+};
+
+// Chunks given up on (every attempt failed) that end at or after fromUnix.
+const givenUpChunks = (db, fromUnix = 0) =>
+  db.prepare(`
+    SELECT chunk_id AS chunkId, message_count AS messageCount, error
+    FROM summary_chunks WHERE status = 'failed' AND attempts >= ${MAX_CHUNK_ATTEMPTS} AND end_sent_at >= ?
+    ORDER BY chunk_id
+  `).all(fromUnix);
+
+// Back into the queue with fresh attempts; asJob queues them as detailed-level
+// job work (a backfill: see chunksToSummarize), which keeps a big backlog from
+// crowding out new messages. Returns how many were queued.
+const requeueChunks = (db, chunkIds, { asJob = false } = {}) => {
+  const update = db.prepare(`
+    UPDATE summary_chunks SET status = 'pending', attempts = 0, error = NULL, redo = ?
+    WHERE chunk_id = ? AND status = 'failed'
+  `);
+  return db.transaction(() => chunkIds.reduce((total, chunkId) => total + update.run(asJob ? 1 : 0, chunkId).changes, 0))();
+};
+
+// Done chunks whose stored summary is a refusal (isDeclined(partial)) are
+// summarized again as ordinary new work. Returns how many.
+const requeueDeclined = (db, isDeclined) => {
+  const rows = db.prepare("SELECT chunk_id AS chunkId, partial_json AS partialJson FROM summary_chunks WHERE status = 'done' AND partial_json IS NOT NULL").all();
+  const ids = rows.filter((row) => {
+    try {
+      return isDeclined(JSON.parse(row.partialJson));
+    } catch {
+      return false;
+    }
+  }).map((row) => row.chunkId);
+  const update = db.prepare("UPDATE summary_chunks SET status = 'pending', attempts = 0, error = NULL, redo = 0, partial_json = NULL WHERE chunk_id = ?");
+  db.transaction(() => ids.forEach((chunkId) => update.run(chunkId)))();
+  return ids.length;
+};
+
+// Queued backfill (job chunks without any summary yet) becomes ordinary work:
+// at the standard level job chunks wait, and these would otherwise never be
+// summarized. Redo chunks keep their old summaries and their place in the job.
+const releaseBackfillJob = (db) =>
+  db.prepare("UPDATE summary_chunks SET redo = 0 WHERE redo = 1 AND partial_json IS NULL").run().changes;
 
 // A redo whose new summary cannot be had (the provider declined the chat):
 // the old summary stays and the chunk leaves the queue.
@@ -200,6 +249,11 @@ const detailProgress = (db, fromUnix) =>
     GROUP BY day, c.group_id
     ORDER BY day DESC, messages DESC
   `).all(fromUnix);
+
+// Chunks summarized at the detailed level since a moment (the job's pace).
+const detailedDoneSince = (db, sinceUnix) =>
+  db.prepare("SELECT COUNT(*) AS n FROM summary_chunks WHERE status = 'done' AND detail = 'detailed' AND summarized_at >= ?")
+    .get(sinceUnix).n;
 
 // How many chunks ending at or after fromUnix are not at the detailed level yet.
 const standardChunksSince = (db, fromUnix) =>
@@ -265,10 +319,16 @@ module.exports = {
   chunksToSummarize,
   chunkMessages,
   saveChunkResult,
+  noteChunkError,
+  givenUpChunks,
+  requeueChunks,
+  requeueDeclined,
+  releaseBackfillJob,
   markChunksForRedo,
   giveUpRedo,
   redoStats,
   detailProgress,
+  detailedDoneSince,
   standardChunksSince,
   doneChunksInWindow,
   chunkStatsInWindow,

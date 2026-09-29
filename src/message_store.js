@@ -502,16 +502,27 @@ const getStoredGroups = (db) =>
     .all();
 
 // One row per group with everything the QQ-style inbox list needs.
-const getGroupSummaries = (db) =>
-  db
+// unreadFloor: for a group without a read mark, only messages from this time
+// on count as unread (the inbox passes the briefing's last "看完了"; counting
+// a never-opened group's whole history made every badge "99+").
+// lastText is the newest text message: the newest message is often just a
+// picture or a sticker, which says nothing in a preview.
+const getGroupSummaries = (db, { unreadFloor = 0 } = {}) => {
+  const lastOf = (mediaFilter) => db.prepare(`
+    SELECT sent_at AS sentAt, speaker, text, is_media AS isMedia, media_kinds AS mediaKinds FROM messages
+    WHERE group_id = ? ${mediaFilter} ORDER BY sent_at DESC, row_id DESC LIMIT 1
+  `);
+  const lastMessage = lastOf("");
+  const lastText = lastOf("AND is_media = 0");
+  return db
     .prepare(`
       SELECT m.group_id AS groupId,
              COALESCE(n.name, '') AS name,
              COUNT(*) AS messageCount,
              MIN(m.sent_at) AS firstUnix,
              MAX(m.sent_at) AS lastUnix,
-             SUM(CASE WHEN m.sent_at > COALESCE(r.sent_at, 0)
-                        OR (m.sent_at = COALESCE(r.sent_at, 0) AND m.row_id > COALESCE(r.row_id, ''))
+             SUM(CASE WHEN m.sent_at > COALESCE(r.sent_at, @floor)
+                        OR (m.sent_at = COALESCE(r.sent_at, @floor) AND m.row_id > COALESCE(r.row_id, ''))
                       THEN 1 ELSE 0 END) AS unreadCount,
              (SELECT MAX(end_unix) FROM scan_ranges s WHERE s.group_id = m.group_id) AS coverageEnd
       FROM messages m
@@ -520,16 +531,13 @@ const getGroupSummaries = (db) =>
       GROUP BY m.group_id
       ORDER BY lastUnix DESC
     `)
-    .all()
+    .all({ floor: unreadFloor })
     .map((group) => ({
       ...group,
-      lastMessage:
-        db
-          .prepare(
-            "SELECT sent_at AS sentAt, speaker, text, is_media AS isMedia, media_kinds AS mediaKinds FROM messages WHERE group_id = ? ORDER BY sent_at DESC, row_id DESC LIMIT 1",
-          )
-          .get(group.groupId) ?? null,
+      lastMessage: lastMessage.get(group.groupId) ?? null,
+      lastText: lastText.get(group.groupId) ?? null,
     }));
+};
 
 const getReadMark = (db, groupId) =>
   db
@@ -599,6 +607,13 @@ const escapeLike = (value) => String(value).replace(/[\\%_]/gu, (match) => `\\${
 
 // Messages (not sent by me) that @ me, reply to one of my messages, @all, or
 // say one of my display names. Newest first; `kind` is the strongest reason.
+// When a mention was most likely seen already: I spoke in that group just
+// before it (a bot answering my command answers within seconds) or within
+// a while after it (I was reading along). A reply minutes after my question,
+// with nothing from me since, is still news.
+const PRESENT_BEFORE_SECONDS = 90;
+const PRESENT_AFTER_SECONDS = 10 * 60;
+
 const getMentions = (db, { fromUnix, toUnix, groupIds, identity }) => {
   const uins = identity?.uins ?? [];
   const names = identity?.names ?? [];
@@ -630,7 +645,9 @@ const getMentions = (db, { fromUnix, toUnix, groupIds, identity }) => {
              m.reply_to_uin AS replyToUin, m.reply_to_seq AS replyToSeq
       FROM messages m
       LEFT JOIN group_names n ON n.group_id = m.group_id
-      WHERE m.is_media = 0 AND m.is_self = 0
+      -- "+": without statistics SQLite picked idx_messages_self (is_self = 0 is
+      -- nearly every row) over the time index: 240 ms for a day's mentions.
+      WHERE m.is_media = 0 AND +m.is_self = 0
         AND m.sent_at >= @fromUnix AND m.sent_at < @toUnix
         ${groupFilter}
         AND (${reasons.join(" OR ")})
@@ -640,6 +657,9 @@ const getMentions = (db, { fromUnix, toUnix, groupIds, identity }) => {
 
   const findMine = db.prepare(
     "SELECT text FROM messages WHERE group_id = ? AND msg_seq = ? AND is_self = 1 AND is_media = 0 LIMIT 1",
+  );
+  const spokeAround = db.prepare(
+    "SELECT 1 FROM messages WHERE group_id = ? AND sent_at BETWEEN ? AND ? AND is_self = 1 LIMIT 1",
   );
   const uinSet = new Set(uins);
   return rows.map((row) => {
@@ -657,6 +677,7 @@ const getMentions = (db, { fromUnix, toUnix, groupIds, identity }) => {
       text: row.text,
       kind,
       quotedMine: quoted,
+      youWereThere: spokeAround.get(row.groupId, row.sentAt - PRESENT_BEFORE_SECONDS, row.sentAt + PRESENT_AFTER_SECONDS) !== undefined,
     };
   });
 };

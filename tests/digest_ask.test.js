@@ -172,6 +172,35 @@ test("retrieval ranks messages matching more keywords and widens them with conte
   assert.ok(evidence.clues.every((clue) => clue.groupName === "画图群"));
 });
 
+test("retrieval says how many messages matched in all and how far back it looked when a keyword hit its cap", () => {
+  const db = seed();
+  // "LoRA" and "显存" are each in 2 messages of each group: 8 messages in all.
+  const capped = findEvidence(db, { keywords: ["LoRA", "显存"], fromUnix: 0, toUnix: NOW + DAY, groupIds: [] },
+    { hitsPerKeyword: 2, maxHits: 10, context: 0, inputChars: 10000, summaryHits: 5 });
+  assert.equal(capped.stats.matchedMessages, 4);
+  assert.equal(capped.stats.totalMatches, 8);
+  assert.equal(capped.stats.capped, true);
+  assert.deepEqual(capped.stats.keywordHits.map(({ keyword, searched, total }) => [keyword, searched, total]), [["lora", 2, 4], ["显存", 2, 4]]);
+  // The newest ones were read: group 2002 (14:00) is later than 1001 (10:00).
+  assert.ok(Number.isFinite(capped.stats.searchedFrom));
+  assert.ok(capped.messages.every((item) => item.groupId === "2002"));
+
+  // A rare keyword with an old hit does not stretch how far back the capped
+  // one was read: "lora" read only group 2002 (14:00), "开黑" also hit 1001 (10:00).
+  const mixed = findEvidence(db, { keywords: ["LoRA", "开黑"], fromUnix: 0, toUnix: NOW + DAY, groupIds: [] },
+    { hitsPerKeyword: 2, maxHits: 10, context: 0, inputChars: 10000, summaryHits: 5 });
+  assert.deepEqual(mixed.stats.keywordHits.map(({ keyword, searched, total }) => [keyword, searched, total]), [["lora", 2, 4], ["开黑", 2, 2]]);
+  const oldestLora = Math.min(...mixed.messages.filter((item) => /LoRA/u.test(item.text)).map((item) => item.sentAt));
+  assert.equal(mixed.stats.searchedFrom, oldestLora);
+  assert.ok(mixed.messages.some((item) => item.groupId === "1001" && item.sentAt < oldestLora));
+
+  const whole = findEvidence(db, { keywords: ["LoRA"], fromUnix: 0, toUnix: NOW + DAY, groupIds: ["1001"] },
+    { hitsPerKeyword: 50, maxHits: 10, context: 0, inputChars: 10000, summaryHits: 5 });
+  assert.equal(whole.stats.capped, false);
+  assert.equal(whole.stats.totalMatches, 2);
+  assert.equal(whole.stats.searchedFrom, null);
+});
+
 test("asking plans keywords, answers from the found messages and keeps only real citations", async (t) => {
   const mock = await startMock();
   t.after(() => mock.server.close());

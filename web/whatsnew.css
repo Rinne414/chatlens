@@ -1,0 +1,11 @@
+/* ---- 这次更新的新东西 (web/whatsnew.js) ---- */
+.whats-new { margin: 0 0 18px; padding: 14px 16px; border: 1px solid var(--accent); border-radius: 12px; background: var(--accent-soft); }
+.whats-new-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.whats-new-head strong { font-size: 15px; color: var(--accent); }
+.whats-new-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; }
+.whats-new-item { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; text-align: left; }
+button.whats-new-item { cursor: pointer; }
+button.whats-new-item:hover, button.whats-new-item:focus-visible { background: var(--panel); outline: none; }
+.whats-new-item b { font-size: 13.5px; }
+.whats-new-item span { font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+.whats-new-flash { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 10px; transition: outline-color .3s; }

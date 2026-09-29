@@ -251,14 +251,31 @@ const facetSection = (id, title, rows, hint = "") => facetBlock({
   onToggle: () => toggleFacetExpanded(id),
 });
 
+// One file saved under several names ("anima_baseV10", "anima_baseV10.safetensors",
+// "anima\anima_baseV10.safetensors") showed as identical-looking separate
+// rows. They are one row here, counted together; its token is the bare name,
+// which model: / lora: already match as a part of the stored name.
+const mergeNameVariants = (rows) => {
+  const merged = new Map();
+  for (const row of rows) {
+    const short = shortModelName(row.value) || String(row.value);
+    const key = short.toLowerCase();
+    const entry = merged.get(key);
+    merged.set(key, entry === undefined
+      ? { value: short, count: row.count, variants: [row.value] }
+      : { ...entry, count: entry.count + row.count, variants: [...entry.variants, row.value] });
+  }
+  return [...merged.values()].sort((left, right) => right.count - left.count);
+};
+
 const tokenFacetRows = (rows, field) => {
   const { tokenizeQuery, quoteValue } = window.KbTokens;
   const tokens = tokenizeQuery(app.knowledgeTab.query);
-  return rows.map((row) => {
+  return mergeNameVariants(rows).map((row) => {
     const token = `${field}:${quoteValue(row.value)}`;
     return facetRow({
-      label: shortModelName(row.value),
-      title: row.value,
+      label: row.value,
+      title: row.variants.length > 1 ? `${row.variants.length} 种写法：\n${row.variants.join("\n")}` : row.variants[0],
       count: row.count,
       active: tokens.includes(token),
       onClick: () => toggleKnowledgeToken(token),

@@ -303,8 +303,8 @@ const app = {
   },
 };
 
-const VIEW_TITLES = { brief: "简报", review: "回顾", ask: "问群聊", trends: "热点", group: "群", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
-const NAV_ICONS = { brief: "📰", review: "📅", ask: "🔎", trends: "🔥", group: "👥", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
+const VIEW_TITLES = { brief: "简报", review: "回顾", bookmarks: "收藏", ask: "问群聊", trends: "热点", group: "群", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
+const NAV_ICONS = { brief: "📰", review: "📅", bookmarks: "🔖", ask: "🔎", trends: "🔥", group: "👥", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
 const KIND_ICONS = { image: "📷", video: "🎬", sticker: "😃", face: "😃", emoji: "😃", audio: "🎵", file: "📎" };
 const KIND_LABELS = { image: "图片", video: "视频", sticker: "表情", face: "表情", emoji: "表情", audio: "语音", file: "文件" };
 
@@ -382,11 +382,32 @@ const groupAvatarUrl = (groupId) => `https://p.qlogo.cn/gh/${groupId}/${groupId}
 const userAvatarUrl = (uin) =>
   /^\d+$/u.test(String(uin ?? "")) ? `https://q1.qlogo.cn/g?b=qq&nk=${uin}&s=100` : null;
 
+// A count that fits a badge without hiding its size: 842, 1.6k, 12k.
+const compactCount = (count) => {
+  const value = Number(count) || 0;
+  if (value < 1000) {
+    return String(value);
+  }
+  return value < 10000 ? `${(Math.floor(value / 100) / 10).toFixed(1)}k` : `${Math.floor(value / 1000)}k`;
+};
+
+const graphemes = typeof Intl.Segmenter === "function" ? new Intl.Segmenter("zh", { granularity: "grapheme" }) : null;
+
+// The first character as a person sees it: a name may start with an emoji
+// (two UTF-16 units, or several joined ones) that slice(0, 1) cuts in half.
+const firstGrapheme = (text) => {
+  const value = String(text ?? "").trim();
+  if (value === "") {
+    return "";
+  }
+  return graphemes === null ? Array.from(value)[0] : graphemes.segment(value)[Symbol.iterator]().next().value.segment;
+};
+
 const avatarEl = (label, seed, size, avatarUrl) => {
   const node = el("span", {
     class: `av ${size === "sm" ? "av-sm" : ""}`,
     style: `background:hsl(${hashHue(seed)} 55% ${settings.theme === "dark" ? "38%" : "46%"})`,
-  }, String(label ?? "?").trim().slice(0, 1) || "?");
+  }, firstGrapheme(label) || "?");
   // Real avatar on top of the colored initial; if the CDN misses, the initial stays visible.
   if (settings.icons && typeof avatarUrl === "string") {
     node.append(el("img", {
@@ -444,7 +465,50 @@ const NAV_PARENT = { run: "brief", reader: "brief", history: "settings", watchli
 // Run when the user leaves a view: overlays belong to the view that opened them.
 const VIEW_LEAVE_HOOKS = [];
 
+/* ---------- browser back / forward between pages ----------
+   Each page change is a history entry, and the entry being left remembers
+   how far down the reader was, so the browser's (or the mouse's) back button
+   returns to the briefing exactly where a jump into a chat started. */
+
+const viewHistory = { restoring: false };
+
+const recordViewHistory = (name) => {
+  if (viewHistory.restoring) {
+    return;
+  }
+  try {
+    if (typeof history.state?.view !== "string") {
+      history.replaceState({ view: name, scrollY: 0 }, "");
+      return;
+    }
+    if (app.view === name) {
+      return;
+    }
+    history.replaceState({ ...history.state, scrollY: window.scrollY }, "");
+    history.pushState({ view: name, scrollY: 0 }, "");
+  } catch {
+    // History is a convenience; a page that cannot use it still works.
+  }
+};
+
+window.addEventListener?.("popstate", (event) => {
+  const view = event.state?.view;
+  if (typeof view !== "string" || !document.getElementById(`view-${view}`)) {
+    return;
+  }
+  viewHistory.restoring = true;
+  try {
+    openView(view);
+  } finally {
+    viewHistory.restoring = false;
+  }
+  const scrollY = Number(event.state.scrollY) || 0;
+  // After the page has drawn from what it already holds.
+  requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, scrollY)));
+});
+
 const showView = (name) => {
+  recordViewHistory(name);
   if (app.view !== name) {
     for (const layer of document.querySelectorAll(".view-layer")) {
       layer.remove();
@@ -2412,6 +2476,10 @@ const openView = (name) => {
   }
   if (name === "review") {
     openReviewView();
+    return;
+  }
+  if (name === "bookmarks") {
+    openBookmarksView();
     return;
   }
   if (name === "ask") {

@@ -14,11 +14,11 @@ const path = require("node:path");
 const { parseArgs } = require("node:util");
 const { loadConfig } = require("../server/toolkit_state");
 const messageStore = require("../message_store");
-const { ensureBriefingSchema, getState, setState } = require("../briefing_store");
+const { ensureBriefingSchema, getState, setState, redoStats, requeueDeclined } = require("../briefing_store");
 const { REMOTE_LIFETIME_SECONDS, ingestPictures } = require("../picture_store");
 const { REPAIR_STATE_KEY } = require("../repair_picture_text");
 const engine = require("../briefing_engine");
-const { createClient, currentModel, currentDetail, setUsageRecorder } = require("../llm_summarizer");
+const { createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary } = require("../llm_summarizer");
 const digestEngine = require("../digest_engine");
 const { ensureDigestSchema } = require("../digest_store");
 const { ensureUsageSchema, recordUsage, todaySpend } = require("../llm_usage");
@@ -172,6 +172,38 @@ const runDigests = async (db, client, { now, gate }) => {
   }
 };
 
+// Before v0.0.20 a refused AI account (e.g. an empty DeepSeek balance) used up
+// every chunk's attempts, and those messages were never summarized. Such
+// chunks get one more go, once; a detailed-level backlog goes into the job
+// queue so it cannot crowd out new messages.
+const REQUEUE_ACCOUNT_FAILURES_KEY = "requeue_account_failures_v1";
+
+const requeueAccountFailuresOnce = (db, { now, asJob }) => {
+  if (getState(db, REQUEUE_ACCOUNT_FAILURES_KEY, null) !== null) {
+    return;
+  }
+  const requeued = engine.requeueFailedChunks(db, { onlyAccountErrors: true, asJob });
+  setState(db, REQUEUE_ACCOUNT_FAILURES_KEY, { at: now, requeued, asJob });
+  if (requeued > 0) {
+    common.info(`briefing requeued ${requeued} chunks the AI account had refused${asJob ? " (detailed job)" : ""}`);
+  }
+};
+
+// Before v0.0.20 a refusal that came back in the right shape ("我不能整理…",
+// every list empty) was stored as the summary; those chunks are summarized
+// again, once (a fresh refusal is now caught and asked elsewhere).
+const REQUEUE_DECLINED_KEY = "requeue_declined_v1";
+const requeueDeclinedOnce = (db, { now }) => {
+  if (getState(db, REQUEUE_DECLINED_KEY, null) !== null) {
+    return;
+  }
+  const requeued = requeueDeclined(db, isDeclinedSummary);
+  setState(db, REQUEUE_DECLINED_KEY, { at: now, requeued });
+  if (requeued > 0) {
+    common.info(`briefing requeued ${requeued} chunks whose stored summary was a refusal`);
+  }
+};
+
 const runBriefing = async ({ config, groupIds, now, force }) => {
   let route;
   try {
@@ -194,16 +226,22 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
   try {
     const client = createClient(route.primary, { fallback: route.fallback, onFallback: (error) => markGrokUnavailable(error) });
     const gate = { ...engineOptions(config, route.primary.detail), spendCheck: moneyBudgetCheck(db, config, now) };
+    requeueAccountFailuresOnce(db, { now, asJob: route.primary.detail === "detailed" });
+    requeueDeclinedOnce(db, { now });
     const created = engine.closeChunks(db, groupIds, { now, force, ...gate });
     common.progress(`briefing-chunks:${created}`);
     const map = await engine.mapPendingChunks(db, client, { now, log: common.info, ...gate });
-    const reduce = await engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate });
-    const digests = await runDigests(db, client, { now, gate });
+    // The account was refused: merges and digests would be refused as well.
+    const aiDown = map.routeDown !== null;
+    const reduce = aiDown ? { skipped: "ai-down" } : await engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate });
+    const digests = aiDown ? [] : await runDigests(db, client, { now, gate });
     return {
       chunksCreated: created,
       map,
       reduce,
       digests,
+      // Detailed-level job chunks still queued (the console continues sooner while they last).
+      jobQueued: redoStats(db).queued,
       budget: engine.budgetStatus(db, now, profileFor(route.primary.detail).engine.dailyLlmCallLimit),
       pause: engine.pauseStatus(db, now),
       llm: {

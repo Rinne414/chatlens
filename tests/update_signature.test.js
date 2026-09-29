@@ -6,6 +6,9 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+
+// Never start a real updater from a test (see update_ops.spawnUpdater).
+process.env.CHATLENS_TEST_NO_UPDATER = "1";
 const { spawnSync } = require("node:child_process");
 const signature = require("../src/update_signature");
 
@@ -154,6 +157,20 @@ test("the updater refuses unsigned or tampered releases before installing anythi
     assert.equal(fs.existsSync(path.join(ROOT, "dist", "update", archiveName)), false, "the rejected download is deleted");
   } finally {
     tampered();
+  }
+
+  // Without the public key nothing can be verified: refuse, never install unchecked.
+  process.env.CHATLENS_SIGNING_PUBLIC = path.join(home, "missing-public.pem");
+  const signedRelease = fakeGithub(new Map([
+    [latest, release([archiveName, "chatlens-v9.9.9-SHA256SUMS.txt", "chatlens-v9.9.9-SHA256SUMS.txt.sig"])],
+    [`${base}${archiveName}`, archiveBytes],
+    [`${base}chatlens-v9.9.9-SHA256SUMS.txt`, sumsText],
+    [`${base}chatlens-v9.9.9-SHA256SUMS.txt.sig`, signature.signSums(sumsText, privateKey)],
+  ]));
+  try {
+    await assert.rejects(updateOps.applyUpdate(), /公钥.*手动下载/u);
+  } finally {
+    signedRelease();
     delete process.env.CHATLENS_SIGNING_PUBLIC;
   }
 });

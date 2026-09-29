@@ -90,7 +90,16 @@ test("the job queues a redo plus a backfill of the uncovered messages at the det
   assert.deepEqual(store.redoStats(fixture.db), { queued: 2, messages: 30 });
   const queue = store.chunksToSummarize(fixture.db, 10);
   assert.ok(queue.every((chunk) => chunk.redo === 1));
-  assert.deepEqual(queue.map((chunk) => chunk.hasPartial).sort(), [0, 1]);
+  // Messages without any summary come before upgrades of summarized ones.
+  assert.deepEqual(queue.map((chunk) => chunk.hasPartial), [0, 1]);
+});
+
+test("leaving the detailed level turns queued backfill into ordinary work; redo keeps its place", () => {
+  const fixture = seed();
+  queueJob(fixture);
+  assert.equal(store.releaseBackfillJob(fixture.db), 1);
+  const queue = store.chunksToSummarize(fixture.db, 10);
+  assert.deepEqual(queue.map((chunk) => [chunk.redo, chunk.hasPartial]), [[0, 0], [1, 1]]);
 });
 
 test("job chunks wait while the client works at the standard level", async (t) => {

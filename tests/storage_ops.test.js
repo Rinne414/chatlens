@@ -105,6 +105,19 @@ test("storage measurements partition checkpoints, temporary copies, and run outp
   assert.equal(reports.bytes, 43);
 });
 
+test("every storage row on the page can be measured", async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.paths.toolRoot, { recursive: true, force: true }));
+  populateFixture(fixture.paths);
+  writeSizedFile(path.join(fixture.paths.storeDir, "db-mirror", "nt_msg.db"), 47);
+  writeSizedFile(path.join(fixture.paths.storeDir, "pictures", "ab", "thumb.png"), 53);
+
+  for (const item of getStorageOverview(fixture.context).items) {
+    await assert.doesNotReject(measureStorageCategory(fixture.context, item.id), `category=${item.id}`);
+  }
+  assert.equal((await measureStorageCategory(fixture.context, "database-mirror")).bytes, 47);
+});
+
 test("temporary cleanup removes only regenerable data", async (t) => {
   const fixture = createFixture();
   t.after(() => fs.rmSync(fixture.paths.toolRoot, { recursive: true, force: true }));

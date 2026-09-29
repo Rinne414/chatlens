@@ -86,4 +86,11 @@ const handleGalleryApi = (request, response, url, { sendJson, sendError }) => {
   return true;
 };
 
-module.exports = { handleGalleryApi, withReadOnlyStore };
+// The list and its facet counts over a long range (1-2 s measured on 20k+
+// pictures) run in the read worker (read_worker.js); the query comes as a
+// plain object there.
+const HEAVY_ROUTES = { "/api/gallery": list, "/api/gallery/facets": facets };
+const isHeavyGalleryRoute = (pathname) => Object.hasOwn(HEAVY_ROUTES, pathname);
+const runHeavyGalleryQuery = (pathname, query) => HEAVY_ROUTES[pathname](new URLSearchParams(query));
+
+module.exports = { handleGalleryApi, withReadOnlyStore, isHeavyGalleryRoute, runHeavyGalleryQuery };

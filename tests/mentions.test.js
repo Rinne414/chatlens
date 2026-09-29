@@ -87,3 +87,65 @@ test("no identity means no mentions", () => {
     db.close();
   }
 });
+
+test("a mention right after I spoke in that group is marked: I was there and likely saw it", () => {
+  const db = openTemp();
+  try {
+    messageStore.ingestExport(db, exportOf([
+      msg(1, 1100, { senderUin: "999", senderName: "小狐狸", isSelf: true, text: "机器人画一张" }),
+      msg(2, 1160, { senderName: "Bot", text: "@小狐狸 画好了", atUins: ["999"] }),
+      msg(3, 1100 + 11 * 60, { senderName: "Bot", text: "@小狐狸 还要吗", atUins: ["999"] }),
+      msg(4, 5000, { text: "@小狐狸 在吗", atUins: ["999"] }),
+    ]), "run-1");
+    const identity = messageStore.getSelfIdentity(db);
+    const mentions = messageStore.getMentions(db, { fromUnix: 1000, toUnix: 9000, identity });
+    assert.deepEqual(mentions.map((item) => [item.rowId, item.youWereThere]), [["4", false], ["3", false], ["2", true]]);
+  } finally {
+    db.close();
+  }
+});
+
+test("inbox summary: a never-opened group counts only what came after the floor; the preview is the last text", () => {
+  const db = openTemp();
+  try {
+    messageStore.ingestExport(db, {
+      ...exportOf([
+        msg(1, 1100, { text: "很早的消息" }),
+        msg(2, 3000, { text: "看完之后的第一句" }),
+        msg(3, 3100, { text: "最后一句文字" }),
+      ]),
+      mediaMessages: [{ groupId: "1001", rowId: "4", msgSeq: "504", sentAt: 3200, senderUin: "222", senderName: "Alice", mediaRefs: [{ kind: "image", hash: "a".repeat(32) }] }],
+    }, "run-1");
+    const [all] = messageStore.getGroupSummaries(db);
+    assert.equal(all.unreadCount, 4);
+    const [floored] = messageStore.getGroupSummaries(db, { unreadFloor: 2000 });
+    assert.equal(floored.unreadCount, 3);
+    assert.equal(floored.lastMessage.isMedia, 1);
+    assert.deepEqual({ speaker: floored.lastText.speaker, text: floored.lastText.text }, { speaker: "Alice", text: "最后一句文字" });
+    // A read mark wins over the floor.
+    messageStore.setReadMark(db, "1001", 3000, "2");
+    assert.equal(messageStore.getGroupSummaries(db, { unreadFloor: 2000 })[0].unreadCount, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test("a reply some minutes after my question is news unless I spoke again after it", () => {
+  const db = openTemp();
+  try {
+    messageStore.ingestExport(db, exportOf([
+      msg(1, 1000, { senderUin: "999", senderName: "小狐狸", isSelf: true, text: "有人知道怎么装吗？" }),
+      msg(2, 1360, { senderName: "Bob", text: "看教程", replyTo: { uin: "999", seq: "501", sentAt: 1000 } }),
+      msg(3, 3000, { senderUin: "999", senderName: "小狐狸", isSelf: true, text: "再问一个" }),
+      msg(4, 3300, { senderName: "Carol", text: "@小狐狸 这个", atUins: ["999"] }),
+      msg(5, 3480, { senderUin: "999", senderName: "小狐狸", isSelf: true, text: "谢谢" }),
+    ]), "run-1");
+    const identity = messageStore.getSelfIdentity(db);
+    const mentions = messageStore.getMentions(db, { fromUnix: 900, toUnix: 9000, identity });
+    // Row 2: 6 minutes after my question, I said nothing after it -> not seen yet.
+    // Row 4: I answered 3 minutes later -> I saw it.
+    assert.deepEqual(mentions.map((item) => [item.rowId, item.youWereThere]), [["4", true], ["2", false]]);
+  } finally {
+    db.close();
+  }
+});

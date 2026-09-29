@@ -466,6 +466,9 @@ const categoryMeasurePaths = (context, category) => {
   if (category === "coverage-checkpoints") {
     return [path.join(storeDir, "coverage-repairs")];
   }
+  if (category === "database-mirror") {
+    return [path.join(storeDir, "db-mirror")];
+  }
   if (category === "temporary-files") {
     return collectTemporaryTargets(context, false).targets;
   }

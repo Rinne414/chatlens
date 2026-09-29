@@ -125,3 +125,64 @@ test("secrets round-trip through the platform backend without leaking to other n
     }
   }
 });
+
+test("a summary with one incomplete list item keeps the rest instead of being thrown away", () => {
+  // Seen live: a whole detailed Grok answer was re-asked on DeepSeek because
+  // one uncategorized item had no speaker.
+  const summary = normalizeLlmSummary({
+    summary: "群里在聊显卡。",
+    topics: [
+      { title: "显卡", summary: "3090 够用", importance: "urgent", messageCountEstimate: "12", details: "显存 24G", evidence: "3090 显存够跑 Flux 吗" },
+      { title: "", summary: "没有标题的话题" },
+    ],
+    timeline: [{ start: "10:00", title: "开始", summary: "有人问显卡" }, { start: "10:05" }],
+    uncategorized: [{ hkt: "10:01", note: "发了个表情" }, { hkt: "10:02", speaker: "阿杰", note: "谢啦" }, { speaker: "小雨" }],
+    links: [{ url: "https://example.com/a" }, { url: "javascript:alert(1)", title: "x", why: "y" }],
+  }, {});
+  assert.deepEqual(summary.topics.map((topic) => [topic.title, topic.importance, topic.messageCountEstimate, topic.details, topic.evidence]),
+    [["显卡", "medium", 0, [], []]]);
+  assert.deepEqual(summary.timeline.map((item) => item.title), ["开始"]);
+  assert.deepEqual(summary.uncategorized, [{ hkt: "10:01", speaker: "", note: "发了个表情" }, { hkt: "10:02", speaker: "阿杰", note: "谢啦" }]);
+  assert.deepEqual(summary.links.map((link) => [link.url, link.title]), [["https://example.com/a", "https://example.com/a"]]);
+
+  assert.throws(() => normalizeLlmSummary({ topics: [] }, {}), /Required string is missing: summary/u);
+});
+
+test("an answer without the summary's structure is unusable, even with a summary sentence", () => {
+  const { validateSummary } = require("../src/llm_summarizer");
+  // A refusal dressed as JSON must not replace a good summary (detailed redo).
+  assert.throws(() => validateSummary({ summary: "抱歉，我无法总结这段内容。" }), /topics/u);
+  assert.throws(() => validateSummary({ summary: "群里在聊显卡。", topics: [], qa: "没有" }), /qa/u);
+  // Structure present: incomplete items are simply dropped.
+  assert.doesNotThrow(() => validateSummary({ summary: "群里在聊显卡。", topics: [{ title: "", summary: "" }], newThings: [], qa: [] }));
+  // A quiet chunk may have nothing to list.
+  assert.doesNotThrow(() => validateSummary({ summary: "没什么新鲜事。", topics: [] }));
+});
+
+test("a well-formed refusal with nothing listed is not a summary", () => {
+  const { validateSummary, shouldFallBack } = require("../src/llm_summarizer");
+  // Stored as summaries on 2026-09-30 (3 chunks, 456 messages).
+  const refusals = [
+    "这批消息里有涉及未成年人的性化内容，我不能整理、摘录或复述。",
+    "这段群聊包含对未成年人的性化讨论和色情生成内容，无法总结。",
+    "这段群聊无法按要求做完整摘要：消息里包含对未成年人的性内容，不能整理、摘录或复述。",
+    "I can't help summarize this conversation.",
+  ];
+  for (const summary of refusals) {
+    let error = null;
+    try {
+      validateSummary({ summary, topics: [], newThings: [], qa: [], timeline: [] });
+    } catch (caught) {
+      error = caught;
+    }
+    assert.ok(error !== null, summary);
+    // The answer's problem, not the provider being down: only this call goes elsewhere.
+    assert.equal(shouldFallBack(error), false);
+  }
+  // A quiet chunk is fine, and so is a refusal-ish sentence next to real content.
+  assert.doesNotThrow(() => validateSummary({ summary: "这段消息很少，主要是群友之间的互相调侃和玩梗。", topics: [] }));
+  assert.doesNotThrow(() => validateSummary({
+    summary: "部分内容无法总结，其余在聊显卡。",
+    topics: [{ title: "显卡", summary: "3090 够用", importance: "low", messageCountEstimate: 3, details: [], evidence: [] }],
+  }));
+});

@@ -31,7 +31,9 @@ const displayText = (item) =>
 
 const inboxRow = (group) => {
   const name = group.name || group.groupId;
-  const last = group.lastMessage;
+  // The newest words rather than a bare "[图片]" / "[表情]" (the newest message
+  // is often just that); pictures only when there is no text at all.
+  const last = group.lastText ?? group.lastMessage;
   const extra = app.msg.extras?.[group.groupId] ?? null;
   const preview = last === null || last === undefined
     ? "（暂无消息）"
@@ -49,7 +51,7 @@ const inboxRow = (group) => {
       el("span", { class: "inbox-bottom" },
         el("span", { class: "inbox-preview" }, preview),
         group.unreadCount > 0
-          ? el("span", { class: "badge" }, group.unreadCount > 99 ? "99+" : String(group.unreadCount))
+          ? el("span", { class: "badge", title: `${group.unreadCount} 条本工具还没看过的消息` }, compactCount(group.unreadCount))
           : null),
       extra === null || extra.topics.length === 0
         ? null
@@ -76,7 +78,10 @@ const renderInbox = () => {
             renderInbox();
           },
         }, label, key === "all" || countFor(test) === null ? "" : ` ${countFor(test)}`))),
-        el("span", { class: "card-sub inbox-note" }, "数字是本工具还没看过的消息，不是 QQ 未读")),
+        el("span", {
+          class: "card-sub inbox-note",
+          title: "在这里打开过的群，从你看到的位置算起；还没打开过的群，从简报上次点「看完了」算起。和 QQ 里的未读无关。",
+        }, "数字是本工具还没看过的消息，不是 QQ 未读")),
       groups.length === 0
         ? el("div", { class: "empty" }, "还没有本地消息记录。后台刷新第一次跑完后这里就会有群。")
         : shown.length === 0
@@ -114,13 +119,20 @@ const buildMessagesQuery = (reset) => {
 // second-precision timestamp join remains as fallback for old manifests.
 const MEDIA_MAP_TTL_MS = 60 * 1000;
 
+// Only the open group's part of the index: the whole of it is ~45 MB.
 const ensureMediaMap = async () => {
   const msg = app.msg;
-  if (msg.mediaMap instanceof Map && Date.now() - (msg.mediaMapAt ?? 0) < MEDIA_MAP_TTL_MS) {
+  if (msg.mediaMap instanceof Map && msg.mediaMapGroup === msg.groupId && Date.now() - (msg.mediaMapAt ?? 0) < MEDIA_MAP_TTL_MS) {
     return;
   }
+  const groupId = msg.groupId;
+  msg.mediaMapGroup = groupId;
   try {
-    const data = await api("/api/media-index");
+    const data = await api(`/api/media-index?groupId=${encodeURIComponent(groupId)}`);
+    // The user moved to another chat meanwhile: its own request fills the map.
+    if (msg.mediaMapGroup !== groupId) {
+      return;
+    }
     const byTime = new Map();
     const byRow = new Map();
     for (const item of data.items ?? []) {
@@ -141,6 +153,9 @@ const ensureMediaMap = async () => {
     msg.mediaRowMap = byRow;
     msg.mediaMapAt = Date.now();
   } catch {
+    if (msg.mediaMapGroup !== groupId) {
+      return;
+    }
     msg.mediaMap = msg.mediaMap instanceof Map ? msg.mediaMap : new Map();
     msg.mediaRowMap = msg.mediaRowMap instanceof Map ? msg.mediaRowMap : new Map();
     msg.mediaMapAt = Date.now();
@@ -161,18 +176,38 @@ const windowedItems = (items, max, dropFrom) => {
     : { items: items.slice(0, max), dropped: items.slice(max) };
 };
 
+// Each reset (a chat opened, a range or filter changed, a jump) starts a new
+// generation, and an answer for an older one is dropped. Switching groups
+// while a page was loading used to show the old group's messages in the new
+// chat, and auto-read could then move the NEW group's read mark to their times.
+const nextLoadGeneration = () => {
+  app.msg.loadGeneration = (app.msg.loadGeneration ?? 0) + 1;
+  return app.msg.loadGeneration;
+};
+const isStaleLoad = (generation, groupId) => generation !== (app.msg.loadGeneration ?? 0) || groupId !== app.msg.groupId;
+const finishLoad = (generation) => {
+  if (generation === (app.msg.loadGeneration ?? 0)) {
+    app.msg.loading = false;
+  }
+};
+
 // Returns the page added at the bottom and the messages dropped at the top.
 const loadMessages = async (reset) => {
   const msg = app.msg;
-  if (msg.groupId === null || msg.loading) {
+  if (msg.groupId === null || (msg.loading && !reset)) {
     return NO_PAGE;
   }
+  const generation = reset ? nextLoadGeneration() : msg.loadGeneration ?? 0;
+  const groupId = msg.groupId;
   msg.loading = true;
   try {
     if (reset) {
       await ensureMediaMap();
     }
     const result = await api(`/api/messages?${buildMessagesQuery(reset)}`);
+    if (isStaleLoad(generation, groupId)) {
+      return NO_PAGE;
+    }
     const { items, dropped } = windowedItems(reset ? result.messages : [...msg.items, ...result.messages], CHAT_WINDOW, "start");
     msg.items = items;
     msg.hasMore = result.hasMore;
@@ -187,7 +222,7 @@ const loadMessages = async (reset) => {
     }
     return { added: result.messages, dropped };
   } finally {
-    msg.loading = false;
+    finishLoad(generation);
   }
 };
 
@@ -199,6 +234,8 @@ const loadOlderMessages = async () => {
   if (msg.loading || msg.items.length === 0) {
     return NO_PAGE;
   }
+  const generation = msg.loadGeneration ?? 0;
+  const groupId = msg.groupId;
   msg.loading = true;
   try {
     const first = msg.items[0];
@@ -217,6 +254,9 @@ const loadOlderMessages = async () => {
       params.set("media", "1");
     }
     const result = await api(`/api/messages?${params}`);
+    if (isStaleLoad(generation, groupId)) {
+      return NO_PAGE;
+    }
     const { items, dropped } = windowedItems([...result.messages, ...msg.items], CHAT_WINDOW, "end");
     msg.items = items;
     msg.hasOlder = result.hasMore && result.messages.length > 0;
@@ -225,7 +265,43 @@ const loadOlderMessages = async () => {
     }
     return { added: result.messages, dropped };
   } finally {
-    msg.loading = false;
+    finishLoad(generation);
+  }
+};
+
+// Past every stored message: the newest page is the one "before" this.
+const AFTER_ALL_MESSAGES = { sentAt: 4102444800, rowId: "9" };
+
+// The newest page of the current range in one request (a new generation);
+// older pages stay reachable by scrolling up.
+const loadNewestPage = async () => {
+  const msg = app.msg;
+  const generation = nextLoadGeneration();
+  const groupId = msg.groupId;
+  msg.loading = true;
+  try {
+    const params = new URLSearchParams({ groupId, limit: String(MSG_PAGE_SIZE) });
+    params.set("beforeSentAt", String(Number.isFinite(msg.to) ? msg.to : AFTER_ALL_MESSAGES.sentAt));
+    params.set("beforeRowId", AFTER_ALL_MESSAGES.rowId);
+    if (Number.isFinite(msg.from)) {
+      params.set("from", String(msg.from));
+    }
+    if (msg.q.trim().length > 0) {
+      params.set("q", msg.q.trim());
+    }
+    if (msg.mediaOnly) {
+      params.set("media", "1");
+    }
+    const result = await api(`/api/messages?${params}`);
+    if (isStaleLoad(generation, groupId)) {
+      return false;
+    }
+    msg.items = result.messages;
+    msg.hasOlder = result.hasMore;
+    msg.hasMore = false;
+    return true;
+  } finally {
+    finishLoad(generation);
   }
 };
 
@@ -834,15 +910,14 @@ const pinToBottom = () => {
   }
 };
 
-// Reach the newest message: page forward until there is no more, then pin to bottom.
+// Reach the newest message and pin to it. Paging forward page by page used to
+// give up after 20 pages (6,000 messages) in a busy group, short of the newest.
 const goToLatest = async () => {
-  let guard = 0;
-  while (app.msg.hasMore && guard < 20) {
-    guard += 1;
+  if (app.msg.hasMore) {
     try {
-      await loadMessages(false);
-    } catch {
-      break;
+      await loadNewestPage();
+    } catch (error) {
+      alert(`读取最新消息失败：${error.message}`);
     }
   }
   renderMessagesView();

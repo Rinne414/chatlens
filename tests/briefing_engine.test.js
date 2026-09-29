@@ -116,7 +116,7 @@ test("background briefing: chunk once, map once, reduce per group, then serve a 
     // 2002: 8 messages two hours old -> one tail chunk.
     assert.equal(engine.closeChunks(db, groups, { now: NOW }), 3);
     const map = await engine.mapPendingChunks(db, client, { now: NOW });
-    assert.deepEqual(map, { done: 3, failed: 0, skippedForBudget: 0, blockedBy: null, jobDone: 0, jobDeferred: 0, jobKeptOld: 0 });
+    assert.deepEqual(map, { done: 3, failed: 0, skippedForBudget: 0, blockedBy: null, jobDone: 0, jobDeferred: 0, jobKeptOld: 0, routeDown: null });
     const reduce = await engine.reduceBriefs(db, client, groups, { now: NOW });
     assert.equal(reduce.updated, 2);
     // Only the group with two chunks needed a reduce call.
@@ -256,4 +256,58 @@ test("a longer tail wait lets a quiet group's few messages keep accumulating", (
   assert.deepEqual(engine.planChunks(quiet, { now: NOW, tailMaxAgeSeconds: 3 * HOUR }), []);
   // The 6-hour safety net still closes it eventually.
   assert.deepEqual(engine.planChunks(pendingOf(20, { start: NOW - 7 * HOUR, step: 60 }), { now: NOW, tailMaxAgeSeconds: 3 * HOUR }), [{ from: 0, to: 20 }]);
+});
+
+test("a muted person's mentions stay in the briefing, flagged", () => {
+  const db = seedStore();
+  try {
+    const build = (mutedUins) => buildBriefing({ db, knowledgeDbPath: "", watchlist: [], mutedUins, nowUnix: NOW });
+    assert.deepEqual(build([]).mentions.map((item) => [item.speaker, item.muted]), [["Alice", false]]);
+    assert.deepEqual(build(["222"]).mentions.map((item) => [item.speaker, item.muted]), [["Alice", true]]);
+  } finally {
+    db.close();
+  }
+});
+
+test("each group says how much of the window is still unread in the chat", () => {
+  const db = seedStore();
+  try {
+    const build = () => buildBriefing({ db, knowledgeDbPath: "", watchlist: [], nowUnix: NOW });
+    const unseen = () => Object.fromEntries(build().groups.map((group) => [group.groupId, group.unseen]));
+    assert.deepEqual(unseen(), { 1001: 422, 2002: 8 });
+    // Read 2002 to its last message, 1001 half-way.
+    messageStore.setReadMark(db, "2002", NOW - 2 * HOUR + 7 * 60, "7007");
+    messageStore.setReadMark(db, "1001", NOW - 3 * HOUR + 199 * 10, "1199");
+    assert.deepEqual(unseen(), { 1001: 222, 2002: 0 });
+  } finally {
+    db.close();
+  }
+});
+
+test("at merge-on-every-chunk, an upgrade-only change (a chunk redone in detail) merges at most hourly", async () => {
+  const mock = await startMockLlm();
+  const db = seedStore();
+  try {
+    const client = createClient({ baseUrl: mock.url, apiKey: "test", model: "mock" });
+    const options = { reduceIntervalSeconds: 0 };
+    engine.closeChunks(db, ["1001"], { now: NOW });
+    await engine.mapPendingChunks(db, client, { now: NOW });
+    await engine.reduceBriefs(db, client, ["1001"], { now: NOW, ...options });
+    const reducesBefore = mock.calls.reduce;
+
+    // The detailed job replaces one chunk's summary: same chunks, new level.
+    const [first] = briefingStore.doneChunksInWindow(db, "1001", 0);
+    briefingStore.saveChunkResult(db, first.chunkId, { partial: { summary: "详细版", topics: [] }, detail: "detailed" });
+    const soon = await engine.reduceBriefs(db, client, ["1001"], { now: NOW + 600, ...options });
+    assert.equal(soon.deferred, 1);
+    assert.equal(mock.calls.reduce, reducesBefore);
+
+    // An hour on it is merged.
+    const later = await engine.reduceBriefs(db, client, ["1001"], { now: NOW + 3601, ...options });
+    assert.equal(later.updated, 1);
+    assert.equal(mock.calls.reduce, reducesBefore + 1);
+  } finally {
+    db.close();
+    mock.server.close();
+  }
 });

@@ -6,7 +6,7 @@
 
 const aiUsageState = { usage: null, providers: null, error: null, notice: null, hoverDay: null, showPrices: false, priceDraft: null };
 
-const AI_PURPOSE_LABELS = { map: "简报：单段摘要", reduce: "简报：合并", manual: "自定义总结", quick: "选段总结", digest: "总览 / 周报 / 月报", ask: "问群聊", other: "其他" };
+const AI_PURPOSE_LABELS = { map: "简报：单段摘要", reduce: "简报：合并", manual: "自定义总结", quick: "选段总结", digest: "总览 / 周报 / 月报", ask: "问群聊", redo: "详细模式重做", probe: "连通检查", other: "其他" };
 const AI_CURRENCY_SIGNS = { CNY: "¥", USD: "$" };
 
 const aiMoney = (costs) => {

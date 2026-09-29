@@ -11,6 +11,7 @@ const briefingStore = require("./briefing_store");
 const engine = require("./briefing_engine");
 const { formatHkt } = require("./unviewed_range");
 const { interleave } = require("./briefing_view");
+const { compareRowIds } = require("./row_ids");
 
 const BEIJING_OFFSET_SECONDS = 8 * 3600;
 const DAY_SECONDS = 86400;
@@ -97,11 +98,11 @@ const calendar = (db, { fromDay, toDay }) => {
 
 /* ---------- coverage: which of a day's messages a chunk already holds ---------- */
 
-const rowNumber = (rowId) => Number(rowId);
-
-// (sentAt, rowId) keyset comparison, the same order the chunker uses.
+// (sentAt, rowId) keyset comparison, the same order the chunker uses. Row ids
+// compared as Numbers once tagged boundary messages of one second as covered,
+// so 补齐 never summarized them.
 const compareKey = (leftSentAt, leftRow, rightSentAt, rightRow) =>
-  leftSentAt - rightSentAt || rowNumber(leftRow) - rowNumber(rightRow);
+  leftSentAt - rightSentAt || compareRowIds(leftRow, rightRow);
 
 // Pure: tags each message (sorted by sentAt, rowId) with the status of the
 // chunk that contains it, or null. Chunks never overlap each other.
@@ -347,24 +348,32 @@ const chunkHits = (partial, terms, chunk) => {
   return hits.map((hit) => ({ ...base, ...hit, day: dayOf(hit.sentAt) }));
 };
 
-const searchSummaries = (db, terms) => {
+// [fromUnix, toUnix): no bound where a side is null. The whole history when
+// both are.
+const ALL_TIME = { fromUnix: null, toUnix: null };
+const inRange = (unix, { fromUnix, toUnix }) => (fromUnix === null || unix >= fromUnix) && (toUnix === null || unix < toUnix);
+
+const searchSummaries = (db, terms, range = ALL_TIME) => {
   const where = terms.map(() => "c.partial_json LIKE ? ESCAPE '\\'").join(" AND ");
   const chunks = db.prepare(`
     SELECT c.chunk_id AS chunkId, c.group_id AS groupId, COALESCE(n.name, '') AS groupName,
            c.start_sent_at AS startSentAt, c.end_sent_at AS endSentAt, c.partial_json AS partialJson
     FROM summary_chunks c LEFT JOIN group_names n ON n.group_id = c.group_id
     WHERE c.status = 'done' AND ${where}
+      AND c.end_sent_at >= ? AND c.start_sent_at < ?
     ORDER BY c.end_sent_at DESC
-  `).all(...terms.map((term) => `%${escapeLike(term)}%`));
+  `).all(...terms.map((term) => `%${escapeLike(term)}%`), range.fromUnix ?? 0, range.toUnix ?? Number.MAX_SAFE_INTEGER);
   return chunks.flatMap((chunk) => {
     const partial = parsePartial(chunk.partialJson);
-    return partial === null ? [] : chunkHits(partial, terms, chunk);
+    return partial === null ? [] : chunkHits(partial, terms, chunk).filter((hit) => inRange(hit.sentAt, range));
   });
 };
 
-const searchMessages = (db, terms, offset = 0) => {
-  const where = terms.map(() => "m.text LIKE ? ESCAPE '\\'").join(" AND ");
-  const params = terms.map((term) => `%${escapeLike(term)}%`);
+// withDays: also the per-day counts (the first page); a further page of the
+// same search only needs its messages.
+const searchMessages = (db, terms, offset = 0, range = ALL_TIME, { withDays = true } = {}) => {
+  const where = `${terms.map(() => "m.text LIKE ? ESCAPE '\\'").join(" AND ")} AND m.sent_at >= ? AND m.sent_at < ?`;
+  const params = [...terms.map((term) => `%${escapeLike(term)}%`), range.fromUnix ?? 0, range.toUnix ?? Number.MAX_SAFE_INTEGER];
   const hits = db.prepare(`
     SELECT m.group_id AS groupId, COALESCE(n.name, '') AS groupName, m.row_id AS rowId, m.sent_at AS sentAt,
            m.speaker, m.text
@@ -372,6 +381,10 @@ const searchMessages = (db, terms, offset = 0) => {
     WHERE m.is_media = 0 AND ${where}
     ORDER BY m.sent_at DESC LIMIT ${MESSAGE_PAGE} OFFSET ?
   `).all(...params, Math.max(0, Number.parseInt(offset, 10) || 0));
+  const items = hits.map((hit) => ({ ...hit, groupName: hit.groupName || hit.groupId, day: dayOf(hit.sentAt) }));
+  if (!withDays) {
+    return { items };
+  }
   const byDay = db.prepare(`
     SELECT (m.sent_at + ${BEIJING_OFFSET_SECONDS}) / ${DAY_SECONDS} AS dayNumber, COUNT(*) AS count
     FROM messages m WHERE m.is_media = 0 AND ${where}
@@ -380,17 +393,26 @@ const searchMessages = (db, terms, offset = 0) => {
   return {
     total: byDay.reduce((total, row) => total + row.count, 0),
     byDay: byDay.map((row) => ({ day: dayOf(row.dayNumber * DAY_SECONDS - BEIJING_OFFSET_SECONDS + 3600), count: row.count })),
-    items: hits.map((hit) => ({ ...hit, groupName: hit.groupName || hit.groupId, day: dayOf(hit.sentAt) })),
+    items,
   };
 };
 
-const search = (db, { query, messageOffset = 0 }) => {
+// fromUnix / toUnix: an optional date range. messagesOnly: just the next
+// page of raw messages ("再显示更多").
+const search = (db, { query, messageOffset = 0, fromUnix = null, toUnix = null, messagesOnly = false }) => {
   briefingStore.ensureBriefingSchema(db);
   const terms = searchTerms(query);
+  const range = {
+    fromUnix: Number.isFinite(fromUnix) ? fromUnix : null,
+    toUnix: Number.isFinite(toUnix) ? toUnix : null,
+  };
   if (terms.length === 0) {
     return { terms, summaries: { total: 0, byDay: [], items: [] }, messages: { total: 0, byDay: [], items: [] } };
   }
-  const summaryHits = searchSummaries(db, terms).sort((left, right) => right.sentAt - left.sentAt);
+  if (messagesOnly) {
+    return { terms, messages: searchMessages(db, terms, messageOffset, range, { withDays: false }) };
+  }
+  const summaryHits = searchSummaries(db, terms, range).sort((left, right) => right.sentAt - left.sentAt);
   const summaryDays = new Map();
   for (const hit of summaryHits) {
     summaryDays.set(hit.day, (summaryDays.get(hit.day) ?? 0) + 1);
@@ -402,7 +424,7 @@ const search = (db, { query, messageOffset = 0 }) => {
       byDay: [...summaryDays.entries()].map(([day, count]) => ({ day, count })),
       items: summaryHits,
     },
-    messages: searchMessages(db, terms, messageOffset),
+    messages: searchMessages(db, terms, messageOffset, range),
   };
 };
 

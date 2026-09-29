@@ -442,6 +442,9 @@ test("the expiring AI count is not capped by the list and skips saved or deleted
     assert.equal(pictureStore.expiringAi(db, { now: SENT_AT, limit: 1 }).length, 1);
     assert.equal(pictureStore.countExpiringAi(db, { now: SENT_AT }), 3);
     assert.equal(pictureStore.countExpiringAi(db, { now: SENT_AT, withinSeconds: 7 * DAY }), 2);
+    // "自动保存所有 AI 原图" works through the same pictures, soonest expiry first.
+    assert.deepEqual(pictureStore.needingKeepAi(db, { now: SENT_AT, limit: 10 }).map((item) => item.md5[0]), ["1", "2", "3"]);
+    assert.deepEqual(pictureStore.expiringAi(db, { now: SENT_AT, limit: -1 }).map((item) => item.md5[0]), ["1", "2", "3"]);
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });

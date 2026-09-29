@@ -51,3 +51,23 @@ test("the remote CDN is only asked for well-formed md5s", () => {
   assert.equal(files.canTryRemote({ kind: "image", hash: "../../x" }), false);
   assert.equal(files.canTryRemote({ kind: "video", hash: "a".repeat(32) }), false);
 });
+
+test("the backup ledger: none yet is empty, a damaged one stops the save instead of copying everything again", () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "backup-ledger-"));
+  assert.deepEqual(files.loadLedger(target), { version: 1, items: {} });
+
+  fs.mkdirSync(path.join(target, ".qq-backup"), { recursive: true });
+  fs.writeFileSync(path.join(target, ".qq-backup", "ledger.json"), "{ \"items\": { broken", "utf8");
+  assert.throws(() => files.loadLedger(target), /备份记录文件损坏/u);
+  fs.writeFileSync(path.join(target, ".qq-backup", "ledger.json"), "null", "utf8");
+  assert.throws(() => files.loadLedger(target), /备份记录文件损坏/u);
+});
+
+test("an export that stopped early is recognised from its output line", () => {
+  const { scanWarningFrom } = require("../src/pipeline/backup_run");
+  assert.equal(scanWarningFrom("matched=12\ncoveredFromUnix=1\n"), null);
+  assert.deepEqual(
+    scanWarningFrom("matched=12\nwarning=scan-incomplete reason=scan-limit groups=1001,2002\n警告：…\n"),
+    { reason: "scan-limit", groupIds: ["1001", "2002"] },
+  );
+});

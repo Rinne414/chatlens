@@ -257,7 +257,28 @@ const backupProgress = () => {
     el("ol", { class: "backup-stages" }, (job.stages ?? []).map((stage) => el("li", { class: stage.status }, stage.label))));
 };
 
+// Why the scan stopped, and what to do about it.
+const BACKUP_SCAN_STOPS = {
+  aborted: ["读取 QQ 数据库副本时出错", "稍后再扫描一次"],
+  "scan-limit": ["消息太多，超过了一次的扫描量", "缩小日期范围，再扫描一次"],
+  "mirror-inconsistent": ["复制 QQ 数据库时 QQ 正在写入，副本可能不完整", "等 QQ 不忙时（或先退出 QQ）再扫描一次"],
+};
+
+// The export stopped early for some groups: whatever else the report says,
+// this range is not safe to clean up.
+const backupIncompleteVerdict = (report) => {
+  const names = new Map([...report.groups, ...(report.emptyGroups ?? [])].map((group) => [group.groupId, group.groupName || group.groupId]));
+  const groups = report.incompleteScan.groupIds.map((groupId) => names.get(groupId) ?? groupId);
+  const [why, advice] = BACKUP_SCAN_STOPS[report.incompleteScan.reason] ?? BACKUP_SCAN_STOPS["scan-limit"];
+  return el("div", { class: "backup-verdict check" },
+    el("strong", {}, `⚠ 有 ${groups.length} 个群的消息没扫完，先别清理这段时间的 QQ 记录`),
+    el("p", {}, `没扫完的群：${groups.join("、")}（${why}）。这次${report.mode === "save" ? "只保存了" : "只看了"}扫到的部分：${advice}。`));
+};
+
 const backupVerdict = (report) => {
+  if (report.incompleteScan) {
+    return backupIncompleteVerdict(report);
+  }
   const saved = report.mode === "save";
   const gaps = report.totals.thumbOnly + (report.totals.compressed ?? 0) + report.totals.missing;
   if (report.totals.total === 0) {
@@ -302,6 +323,15 @@ const backupKindCell = (counts) => {
     `${briefNumber(counts.total)}`, gaps > 0 ? el("span", { class: "backup-gap" }, ` 缺 ${gaps}`) : null);
 };
 
+// A group whose scan stopped early is never "可清理" (nor "没有文件"),
+// whatever the part that was scanned found.
+const backupGroupState = (report, group, settled) => {
+  if ((report.incompleteScan?.groupIds ?? []).includes(group.groupId)) {
+    return el("span", { class: "backup-gap" }, "没扫完");
+  }
+  return settled;
+};
+
 const backupGroupTable = (report) =>
   el("table", { class: "ai-table backup-table" },
     el("thead", {}, el("tr", {}, ["群", ...BACKUP_KIND_ORDER.map(([, label]) => label), "AI 图", "被求过", "聊天记录", ""].map((head) => el("th", {}, head)))),
@@ -312,13 +342,14 @@ const backupGroupTable = (report) =>
         el("td", {}, briefNumber(group.ai)),
         el("td", {}, briefNumber(group.asked)),
         el("td", {}, group.logDays > 0 ? `${group.logDays} 天` : "—"),
-        el("td", {}, group.verdict === "safe" ? el("span", { class: "backup-ok" }, "可清理") : el("span", { class: "backup-gap" }, "先处理缺的")))),
+        el("td", {}, backupGroupState(report, group,
+          group.verdict === "safe" ? el("span", { class: "backup-ok" }, "可清理") : el("span", { class: "backup-gap" }, "先处理缺的"))))),
       (report.emptyGroups ?? []).map((group) => el("tr", { class: "muted" },
         el("td", {}, group.groupName || group.groupId),
         BACKUP_KIND_ORDER.map(() => el("td", {}, "—")),
         el("td", {}, "—"), el("td", {}, "—"),
         el("td", {}, group.logDays > 0 ? `${group.logDays} 天` : "—"),
-        el("td", {}, "没有文件")))));
+        el("td", {}, backupGroupState(report, group, "没有文件"))))));
 
 const backupMissingList = (report) => {
   const groups = report.groups.filter((group) => group.missingSamples.length > 0);
@@ -510,6 +541,25 @@ const backupRescueSelection = (items) => {
     pictureExportStatus("backup"));
 };
 
+// "Don't make me remember": the background picture pass saves every AI
+// original itself, soonest expiry first. Off by default because it costs disk.
+const backupAutoKeep = (expiring, items) => {
+  const bytes = items.reduce((total, item) => total + (Number(item.size) || 0), 0);
+  const toggle = async (event) => {
+    await savePictureSettings({ keepAi: event.target.checked });
+    await loadExpiringPictures();
+    rerenderRescue();
+  };
+  return el("label", { class: "backup-auto-keep" },
+    el("input", { type: "checkbox", checked: expiring.keepAi === true, disabled: pictureUi.busy, onchange: toggle }),
+    el("span", {},
+      el("strong", {}, "以后自动保存所有 AI 原图"),
+      el("span", { class: "card-sub" },
+        expiring.keepAi === true
+          ? " 已开启：后台每次刷新后按过期先后慢慢存，不用守着页面。"
+          : ` 后台每次刷新后按过期先后慢慢存到工具的永久副本，不用守着页面。${items.length > 0 ? `现在待存 ${briefNumber(items.length)} 张，约 ${formatByteSize(bytes)}；` : ""}之后每张约 1.5 MB，不占图片缓存上限。`)));
+};
+
 const backupRescue = () => {
   const expiring = pictureUi.expiring;
   if (expiring === undefined) {
@@ -529,6 +579,7 @@ const backupRescue = () => {
           : el("button", { class: "btn primary", type: "button", onclick: rescueAllExpiring },
             `全部保存（${briefNumber(items.length)} 张）`)),
     rescue === null ? null : el("p", { id: "backup-rescue-progress", class: "backup-rescue-progress", "aria-live": "polite" }, backupRescueProgressText()),
+    backupAutoKeep(expiring, items),
     items.length === 0 ? null : backupRescueSelection(items),
     items.length === 0
       ? el("p", { class: "backup-ok" }, "✓ 现在没有待保存的 AI 原图。")

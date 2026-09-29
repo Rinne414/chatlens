@@ -114,7 +114,7 @@ const addMention = (groups, message) => {
     mentions: 0,
     speakers: new Set(),
     times: [],
-    sample: { speaker: message.speaker, text: clip(message.text), sentAt: message.sentAt, rowId: message.rowId },
+    sample: { speaker: message.speaker, speakerUin: message.speakerUin ?? "", text: clip(message.text), sentAt: message.sentAt, rowId: message.rowId },
   };
   record.mentions += 1;
   record.lastAt = Math.max(record.lastAt, message.sentAt);
@@ -306,6 +306,30 @@ const foldRelated = (ranked) => {
   return kept;
 };
 
+// One person sending a set of pictures to the same groups (an artist sharing
+// a batch, a bot) is one story, not a card per picture: a picture first
+// posted by the same person within this long of a higher-ranked one folds
+// under it, which lists the rest in `more`.
+const PICTURE_SET_SECONDS = 2 * 3600;
+
+const foldPictureSets = (ranked) => {
+  const kept = [];
+  for (const event of ranked) {
+    // By QQ number when known: two people can share a display name.
+    const who = event.kind !== "picture" ? "" : event.origin.speakerUin || event.origin.speaker;
+    const parent = who === ""
+      ? undefined
+      : kept.find((other) => other.kind === "picture" && (other.origin.speakerUin || other.origin.speaker) === who
+        && Math.abs(other.firstAt - event.firstAt) <= PICTURE_SET_SECONDS);
+    if (parent === undefined) {
+      kept.push(event.kind === "picture" ? { ...event, more: [] } : event);
+    } else {
+      parent.more.push({ md5: event.md5, ai: event.ai, groupCount: event.groupCount, firstAt: event.firstAt });
+    }
+  }
+  return kept;
+};
+
 // Mentions per bucket across the window, for the small spark line.
 const sparkOf = (times, fromUnix, nowUnix, buckets) => {
   const size = Math.max(1, (nowUnix - fromUnix) / buckets);
@@ -332,9 +356,9 @@ const trends = (db, { nowUnix, days = 3, fromUnix: from = null, toUnix: to = nul
     ...pictureEvents(db, fromUnix, toUnix, ids),
   ];
   const buckets = Math.min(SPARK_MAX_BUCKETS, span * 4);
-  const ranked = foldRelated(events
+  const ranked = foldPictureSets(foldRelated(events
     .map((event) => ({ ...event, score: score(event, Math.min(nowUnix, toUnix)) }))
-    .sort((left, right) => right.score - left.score))
+    .sort((left, right) => right.score - left.score)))
     .map(({ times, key, ...event }) => ({ ...event, spark: sparkOf(times, fromUnix, toUnix, buckets) }));
   return { days: span, fromUnix, toUnix, messages: messages.length, summarizedChunks: partials.length, events: ranked };
 };

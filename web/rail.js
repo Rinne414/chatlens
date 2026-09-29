@@ -26,7 +26,8 @@ const railAgo = (unix) => {
   return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`;
 };
 
-const railUnreadText = (count) => (count > 99 ? "99+" : String(count));
+// The server counts up to its cap (maxCounted, 999); below it the real number.
+const railUnreadText = (count) => (count >= (railState.data?.maxCounted ?? 999) ? `${count}+` : String(count));
 
 const railGroupRow = (group, cap) =>
   el("button", {

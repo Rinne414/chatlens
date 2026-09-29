@@ -55,7 +55,9 @@ const groupRangeUnix = () => {
   if (preset === "custom" && fromDay !== null && toDay !== null) {
     return { fromUnix: dayStartUnix(fromDay), toUnix: dayStartUnix(toDay) + DAY };
   }
-  return { fromUnix: now - (preset === "30d" ? 30 : 7) * DAY, toUnix: now + 60 };
+  // Whole Beijing days, today included: a rolling "now - 7 days" began with
+  // half a day, which skewed the daily bars and counts.
+  return { fromUnix: dayStartUnix(shiftDay(today, -((preset === "30d" ? 30 : 7) - 1))), toUnix: now + 60 };
 };
 
 const groupRangeDays = () => {
@@ -87,11 +89,18 @@ const groupChoices = () => {
 
 /* ---------- loading ---------- */
 
-const loadGroupPictures = async (groupId, range) => {
+// An answer counts only while the page still shows the group and range it
+// was asked for: 30 天 then quickly 7 天 used to let the slower 30-day answer
+// land under the 7-day label. Every change sets a new range object, so the
+// identity check also tells two custom date ranges apart.
+const groupRequestIsCurrent = (groupId, rangeChoice) =>
+  app.groupPage.groupId === groupId && app.groupPage.range === rangeChoice;
+
+const loadGroupPictures = async (groupId, range, rangeChoice = app.groupPage.range) => {
   try {
     const params = new URLSearchParams({ groupId, ai: "1", fromUnix: String(range.fromUnix), toUnix: String(range.toUnix), limit: String(GROUP_AI_STRIP) });
     const page = await api(`/api/gallery?${params}`);
-    if (app.groupPage.groupId === groupId) {
+    if (groupRequestIsCurrent(groupId, rangeChoice)) {
       replaceGroupPage({ aiPictures: page });
       renderGroupView();
     }
@@ -102,18 +111,23 @@ const loadGroupPictures = async (groupId, range) => {
 
 const loadGroupPage = async (groupId) => {
   const range = groupRangeUnix();
+  const rangeChoice = app.groupPage.range;
   replaceGroupPage({ groupId, data: app.groupPage.data?.groupId === groupId ? app.groupPage.data : null, loading: true, error: null, aiPictures: null });
   wallWritePref(GROUP_LAST_KEY, groupId);
   renderGroupView();
   renderRailGroups();
-  loadGroupPictures(groupId, range);
+  loadGroupPictures(groupId, range, rangeChoice);
   try {
     const params = new URLSearchParams({ groupId, fromUnix: String(range.fromUnix), toUnix: String(range.toUnix) });
     const data = await api(`/api/group?${params}`);
-    if (app.groupPage.groupId === groupId) {
-      replaceGroupPage({ data, loading: false });
+    if (!groupRequestIsCurrent(groupId, rangeChoice)) {
+      return;
     }
+    replaceGroupPage({ data, loading: false });
   } catch (error) {
+    if (!groupRequestIsCurrent(groupId, rangeChoice)) {
+      return;
+    }
     replaceGroupPage({ loading: false, error: error.message });
   }
   renderGroupView();
@@ -286,15 +300,18 @@ const groupRangeControl = () => {
       onclick: () => setGroupRange({ preset, fromDay: null, toDay: null }),
     }, label))),
     el("span", { class: custom ? "trends-dates active" : "trends-dates" },
+      // A start after the end (or an end before the start) moves the other end along.
       el("input", { type: "date", value: fromDay, max: today, "aria-label": "开始日期", onchange: (event) => {
-        if (event.target.value !== "" && event.target.value <= toDay) {
-          setGroupRange({ preset: "custom", fromDay: event.target.value, toDay });
+        const value = event.target.value;
+        if (value !== "") {
+          setGroupRange({ preset: "custom", fromDay: value, toDay: value > toDay ? value : toDay });
         }
       } }),
       el("span", {}, "至"),
       el("input", { type: "date", value: toDay, max: today, "aria-label": "结束日期", onchange: (event) => {
-        if (event.target.value !== "" && event.target.value >= fromDay) {
-          setGroupRange({ preset: "custom", fromDay, toDay: event.target.value });
+        const value = event.target.value;
+        if (value !== "") {
+          setGroupRange({ preset: "custom", fromDay: value < fromDay ? value : fromDay, toDay: value });
         }
       } })),
     el("span", { class: "kb-meta" }, "也可以点下面柱状图里的某一天"));

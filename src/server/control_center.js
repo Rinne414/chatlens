@@ -7,6 +7,7 @@ const jobs = require("./run_jobs");
 const settings = require("./settings_ops");
 const storage = require("./storage_ops");
 const background = require("./background");
+const { formatHkt } = require("../unviewed_range");
 const briefing = require("./briefing_ops");
 const desktop = require("./desktop_ops");
 const llmOps = require("./llm_ops");
@@ -18,11 +19,12 @@ const knowledgeAigc = require("./knowledge_aigc");
 const backupOps = require("./backup_ops");
 const update = require("./update_ops");
 const knowledge = require("./knowledge_ops");
+const readWorker = require("./read_worker");
+const bookmarkOps = require("./bookmark_ops");
 const pictureRoutes = require("./picture_routes");
 const galleryOps = require("./gallery_ops");
 const railOps = require("./rail_ops");
 const groupOps = require("./group_ops");
-const trendsOps = require("./trends_ops");
 const picturePass = require("./picture_pass");
 const knowledgeExport = require("../knowledge_export");
 const platform = require("../platform");
@@ -33,6 +35,8 @@ const packageInfo = require("../../package.json");
 const BASE_PORT = 8321;
 const MAX_PORT_ATTEMPTS = 10;
 const MAX_BODY_BYTES = 64 * 1024;
+// An API error in server.log: provider errors can carry a 2,000-character body.
+const MAX_LOGGED_ERROR = 300;
 
 const token = crypto.randomBytes(16).toString("hex");
 const tokenBuffer = Buffer.from(token);
@@ -305,7 +309,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/trends") {
-      sendJson(response, 200, trendsOps.getTrends({
+      sendJson(response, 200, await readWorker.call("trends", {
         days: url.searchParams.get("days") ?? "3",
         fromUnix: Number(url.searchParams.get("fromUnix")),
         toUnix: Number(url.searchParams.get("toUnix")),
@@ -325,7 +329,11 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/group") {
-      sendJson(response, 200, groupOps.getGroupInsights(url.searchParams));
+      sendJson(response, 200, await readWorker.call("groupInsights", {
+        groupId: url.searchParams.get("groupId") ?? "",
+        fromUnix: url.searchParams.get("fromUnix"),
+        toUnix: url.searchParams.get("toUnix"),
+      }));
       return;
     }
 
@@ -349,17 +357,18 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/media-index") {
-      sendJson(response, 200, state.buildMediaIndex(url.searchParams.get("refresh") === "1"));
+      const groupId = url.searchParams.get("groupId");
+      sendJson(response, 200, await state.buildMediaIndex(url.searchParams.get("refresh") === "1", /^\d+$/u.test(groupId ?? "") ? groupId : null));
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/api/knowledge/overview") {
-      sendJson(response, 200, knowledge.overview(state.toolRoot));
+      sendJson(response, 200, await readWorker.call("overview", state.toolRoot));
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/api/knowledge/search") {
-      sendJson(response, 200, knowledge.searchImages(state.toolRoot, {
+      sendJson(response, 200, await readWorker.call("searchImages", state.toolRoot, {
         query: url.searchParams.get("q") ?? "",
         generator: url.searchParams.get("generator") ?? "",
         groupId: url.searchParams.get("groupId") ?? "",
@@ -372,7 +381,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/knowledge/facets") {
-      sendJson(response, 200, knowledge.facets(state.toolRoot, {
+      sendJson(response, 200, await readWorker.call("facets", state.toolRoot, {
         query: url.searchParams.get("q") ?? "",
         scope: url.searchParams.get("scope") ?? "prompt",
         generator: url.searchParams.get("generator") ?? "",
@@ -383,7 +392,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/knowledge/requests") {
-      sendJson(response, 200, knowledge.promptRequests(state.toolRoot, {
+      sendJson(response, 200, await readWorker.call("promptRequests", state.toolRoot, {
         onlyAnswered: url.searchParams.get("answered") === "1",
         limit: url.searchParams.get("limit"),
       }));
@@ -391,7 +400,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/knowledge/coverage") {
-      sendJson(response, 200, knowledge.coverage(state.toolRoot, {
+      sendJson(response, 200, await readWorker.call("coverage", state.toolRoot, {
         since: Number.parseInt(url.searchParams.get("since") ?? "0", 10) || 0,
       }));
       return;
@@ -714,7 +723,7 @@ const handleApi = async (request, response, url) => {
 
     if (request.method === "GET" && url.pathname === "/api/update/check") {
       const cached = url.searchParams.get("cached") === "1";
-      sendJson(response, 200, await update.checkUpdate({ maxAgeMs: cached ? update.AUTO_CHECK_MAX_AGE_MS : 0 }));
+      sendJson(response, 200, { ...(await update.checkUpdate({ maxAgeMs: cached ? update.AUTO_CHECK_MAX_AGE_MS : 0 })), lastFailure: update.lastUpdateFailure() });
       return;
     }
 
@@ -724,7 +733,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/briefing") {
-      sendJson(response, 200, briefing.getBriefing());
+      sendJson(response, 200, briefing.getBriefing({ known: url.searchParams.get("known") }));
       return;
     }
 
@@ -732,6 +741,21 @@ const handleApi = async (request, response, url) => {
       const result = briefing.markSeen(await readBody(request));
       background.runNow({ force: false });
       sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/briefing/retry-failed") {
+      sendJson(response, 200, briefing.retryFailed());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/watch-words") {
+      sendJson(response, 200, briefing.saveWatchWords(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/mentions/mute") {
+      sendJson(response, 200, briefing.setSpeakerMuted(await readBody(request)));
       return;
     }
 
@@ -767,7 +791,13 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/review/search") {
-      sendJson(response, 200, reviewOps.search({ q: url.searchParams.get("q"), messageOffset: url.searchParams.get("messageOffset") ?? 0 }));
+      sendJson(response, 200, reviewOps.search({
+        q: url.searchParams.get("q"),
+        messageOffset: url.searchParams.get("messageOffset") ?? 0,
+        fromUnix: url.searchParams.get("fromUnix"),
+        toUnix: url.searchParams.get("toUnix"),
+        more: url.searchParams.get("more") === "1",
+      }));
       return;
     }
 
@@ -862,12 +892,30 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
+    if (request.method === "GET" && galleryOps.isHeavyGalleryRoute(url.pathname)) {
+      sendJson(response, 200, await readWorker.call("gallery", url.pathname, Object.fromEntries(url.searchParams)));
+      return;
+    }
+
     if (galleryOps.handleGalleryApi(request, response, url, { sendJson, sendError })) {
+      return;
+    }
+
+    if (await bookmarkOps.handleBookmarkApi(request, response, url, { sendJson, readBody })) {
       return;
     }
 
     sendError(response, 404, "Unknown API route");
   } catch (error) {
+    // Mostly a refused input (the page shows the message); logged so a real
+    // failure (e.g. "database is locked") can be traced afterwards. An API
+    // key that found its way into a message stays out of the log file.
+    const logged = String(error.message)
+      .replace(/\b(sk|xai)-[\w-]{6,}/gu, "$1-***")
+      .replace(/Bearer\s+\S+/giu, "Bearer ***")
+      .replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/gu, "***")
+      .slice(0, MAX_LOGGED_ERROR);
+    console.error(`${request.method} ${url.pathname}: ${logged}`);
     sendError(response, 400, error.message);
   }
 };
@@ -1024,6 +1072,16 @@ const listen = (port, attempt) => {
     }
   });
 };
+
+// server.log (the launcher points stdout and stderr at it) gets a Beijing time
+// on every line, so a failure can be matched to the refresh or request behind it.
+const stampConsole = () => {
+  for (const method of ["log", "warn", "error"]) {
+    const write = console[method].bind(console);
+    console[method] = (...args) => write(`[${formatHkt(Math.floor(Date.now() / 1000))}]`, ...args);
+  }
+};
+stampConsole();
 
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);

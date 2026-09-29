@@ -7,6 +7,7 @@
 const messageStore = require("./message_store");
 const pictureStore = require("./picture_store");
 const { formatHkt } = require("./unviewed_range");
+const { getState } = require("./briefing_store");
 
 const DAY_SECONDS = 86400;
 const MENTION_LOOKBACK_SECONDS = 3 * DAY_SECONDS;
@@ -52,14 +53,33 @@ const directMentions = (db, groupIds, uins, nowUnix) => {
     args[`u${index}`] = String(uin);
     return [`(',' || at_uins || ',') LIKE '%,' || @u${index} || ',%'`, `reply_to_uin = @u${index}`];
   }).join(" OR ");
+  // "+is_self": otherwise SQLite walks idx_messages_self (is_self = 0 is nearly
+  // every row) instead of each group's recent days: 343 ms -> 18 ms measured.
   return db.prepare(`
     SELECT group_id AS groupId, row_id AS rowId, sent_at AS sentAt FROM messages
-    WHERE sent_at >= @fromUnix AND is_self = 0 AND group_id IN (${groupList}) AND (${reasons})
+    WHERE sent_at >= @fromUnix AND +is_self = 0 AND group_id IN (${groupList}) AND (${reasons})
   `).all(args);
 };
 
 const afterMark = (mark) => (item) =>
   mark === null || item.sentAt > mark.sentAt || (item.sentAt === mark.sentAt && item.rowId > mark.rowId);
+
+// A group never opened in the chat has no read mark; what counts as new for
+// it is what came after the briefing's last "看完了" (its whole history made
+// every badge "99+"). Same rule as the 消息 inbox (toolkit_state).
+const markOrFloor = (db, groupId) => {
+  const mark = messageStore.getReadMark(db, groupId);
+  if (mark !== null) {
+    return mark;
+  }
+  let floor = 0;
+  try {
+    floor = Number(getState(db, "briefing_since", 0)) || 0;
+  } catch {
+    floor = 0;
+  }
+  return floor > 0 ? { sentAt: floor, rowId: "" } : null;
+};
 
 const todayCounts = (db, nowUnix) => {
   const start = beijingMidnight(nowUnix);
@@ -88,7 +108,7 @@ const expiringSoon = (db, nowUnix) => {
 const railStatus = (db, { watchlist, identity, nowUnix }) => {
   const mentions = directMentions(db, watchlist.map((group) => group.groupId), identity.uins, nowUnix);
   const groups = watchlist.map((group) => {
-    const mark = messageStore.getReadMark(db, group.groupId);
+    const mark = markOrFloor(db, group.groupId);
     return {
       groupId: group.groupId,
       name: group.name || storedName(db, group.groupId),
@@ -129,7 +149,7 @@ const inboxExtras = (db, { groupIds, identity, nowUnix }) => {
     WHERE group_id IN (SELECT value FROM json_each(?))
   `).all(JSON.stringify(groupIds)).map((row) => [row.groupId, parseJson(row.json)]));
   return Object.fromEntries(groupIds.map((groupId) => {
-    const mark = messageStore.getReadMark(db, groupId);
+    const mark = markOrFloor(db, groupId);
     const brief = briefs.get(groupId) ?? null;
     return [groupId, {
       topics: (brief?.topics ?? []).slice(0, 3).map((topic) => topic.title),

@@ -51,17 +51,18 @@ html[data-theme="dark"] {
   background: var(--paper);
   border: 1px solid var(--paper-rule);
   border-radius: 14px;
-  padding: 26px 30px 22px;
+  padding: 26px 30px 32px;
   margin-bottom: 26px;
   overflow: hidden;
 }
 .brief-mast::after {
-  /* a printed double rule under the headline block */
+  /* a printed double rule closing the masthead; clear of the card's edge so
+     both lines show (at bottom: 0 the lower one was clipped, a stray-looking line) */
   content: "";
   position: absolute;
   left: 30px;
   right: 30px;
-  bottom: 0;
+  bottom: 12px;
   height: 4px;
   border-top: 1px solid var(--paper-rule);
   border-bottom: 1px solid var(--paper-rule);
@@ -161,6 +162,21 @@ html[data-theme="dark"] {
 .brief-kind.atAll, .brief-kind.name { background: var(--bg); color: var(--muted); }
 .brief-mention-text { margin: 6px 0 0; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .brief-quote { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line-strong); color: var(--muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+/* Mentions while you were in the conversation: already seen, so quieter. */
+.brief-mention.was-there { border-left-color: var(--line-strong); }
+.brief-mention.was-there .brief-kind { background: var(--bg); color: var(--muted); }
+.brief-there { font-size: 11px; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 5px; padding: 0 6px; }
+.brief-thread-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.brief-thread-actions { display: flex; flex-wrap: wrap; gap: 16px; margin: -4px 16px 10px; font-size: 13px; }
+.brief-thread-actions:empty { display: none; }
+.brief-mute { color: var(--muted); }
+.brief-muted { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.brief-muted > .brief-mention-list { flex-basis: 100%; }
+.brief-muted-person { white-space: nowrap; }
+.brief-thread-older { list-style: none; margin: 0 0 10px; padding: 0 16px; display: grid; gap: 2px; }
+.brief-thread-older .brief-row-button { padding: 6px 8px; border-radius: 6px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.brief-thread-older .brief-row-button:hover { background: var(--bg); }
+.brief-thread-older .brief-meta { margin-right: 6px; font-variant-numeric: tabular-nums; }
 
 /* 值得一看 — asymmetric bento: new things tall on the left */
 .brief-bento {
@@ -330,7 +346,7 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 
 @media (max-width: 820px) {
   .brief-bento { grid-template-columns: minmax(0, 1fr); grid-template-areas: "things" "qa" "topics"; }
-  .brief-mast { padding: 20px 18px 18px; }
+  .brief-mast { padding: 20px 18px 28px; }
   .brief-mast::after { left: 18px; right: 18px; }
 }
 
@@ -420,3 +436,42 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .brief-image-check.on { background: var(--accent); border-color: var(--accent); }
 .brief-picture-selection { position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, .12); font-size: 13px; }
 .brief-picture-selection code { font-size: 12px; word-break: break-all; }
+
+/* 关注的词: followed words as chips, the chosen one's mentions below. */
+.brief-watch-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.brief-watch-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--panel); overflow: hidden; }
+.brief-watch-chip.active { border-color: var(--accent); background: var(--accent-soft); }
+.brief-watch-chip.quiet .brief-watch-pick { color: var(--muted); }
+.brief-watch-pick { border: 0; background: none; font: inherit; font-size: 13px; color: var(--ink); padding: 4px 4px 4px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.brief-watch-count { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+.brief-watch-chip.quiet .brief-watch-count { color: var(--muted); }
+.brief-watch-remove { border: 0; background: none; font: inherit; color: var(--muted); padding: 0 10px 0 6px; cursor: pointer; }
+.brief-watch-remove:hover { color: var(--risk); }
+.brief-watch-form { display: inline-flex; gap: 6px; flex: 0 1 300px; }
+.brief-watch-notify { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12.5px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.brief-watch-notify input { margin: 0; accent-color: var(--accent); }
+.brief-watch-input { flex: 1 1 180px; min-width: 0; font: inherit; font-size: 13px; padding: 5px 10px; border: 1px dashed var(--line-strong); border-radius: 999px; background: var(--panel); color: var(--ink); }
+.brief-watch-input:focus { outline: none; border-style: solid; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.brief-watch-error { color: var(--risk); font-size: 13px; margin: 0 0 8px; }
+.brief-watch-groups { color: var(--muted); font-size: 12px; margin: 0 0 8px; overflow-wrap: anywhere; }
+.brief-watch-hits { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.brief-watch-hit { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.brief-watch-hit .brief-row-button { padding: 10px 14px; }
+.brief-watch-hit mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
+.brief-watch-more { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; font-size: 13px; }
+
+/* 各群: how far the user has read each group in the chat. */
+.brief-group-progress { display: inline-block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--accent); }
+.brief-group-progress.done { color: var(--muted); font-weight: 400; }
+.brief-group.seen .brief-group-summary, .brief-group.seen .brief-group-topics { opacity: .55; }
+.brief-group-actions { display: flex; justify-content: flex-end; margin: -10px 16px 10px 0; font-size: 12.5px; }
+.brief-lede-jump { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; border-bottom: 1px dashed var(--line-strong); }
+.brief-lede-jump:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* keyboard (brief_keys.js) */
+.brief-page li.kb-current { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+.brief-keys-help { position: fixed; right: 20px; bottom: 20px; z-index: 800; width: min(320px, calc(100vw - 32px)); padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); box-shadow: 0 12px 40px rgba(0, 0, 0, .18); }
+.brief-keys-help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.brief-keys-help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0 0 8px; font-size: 13px; }
+.brief-keys-help dt { font-family: ui-monospace, Consolas, monospace; color: var(--accent); white-space: nowrap; }
+.brief-keys-help dd { margin: 0; }

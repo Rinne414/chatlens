@@ -169,6 +169,11 @@ const renderUpdateCard = () => {
     el("h2", {}, "版本与更新"),
     el("p", { class: "update-version" }, el("strong", {}, `当前版本 v${version}`), state),
     el("div", { class: "row" }, applyButton, checkButton, msg),
+    // Only while still behind: once on the latest version (updated by hand, or
+    // a later try worked) the old failure no longer matters.
+    info?.lastFailure && info.hasUpdate === true
+      ? el("p", { class: "notice risk" }, `上次自动更新没有成功（${info.lastFailure.at}）：${info.lastFailure.message}。控制台仍是当前版本；可以再试一次，或到 GitHub 发布页手动下载。详情在 dist/update/update.log。`)
+      : null,
     notesBlock,
     el("p", { class: "card-sub update-footnote" },
       "控制台打开时和之后每 6 小时会自动向 GitHub 查一次最新版本；一键更新会下载安装包、核对签名后自动重启控制台，你的配置、密钥和数据不受影响。",

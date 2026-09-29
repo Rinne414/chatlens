@@ -41,6 +41,25 @@ const readRequest = (requestPath) => {
 const workDirFor = (request) =>
   path.join(backupRoot, `work-${common.shortStableHash([request.groupIds.join(","), request.fromUnix, request.toUnix].join("|"))}`);
 
+// export_group_recent prints "warning=scan-incomplete reason=<r> groups=<ids>"
+// when a group's scan stopped early; the backup then covers only part of it,
+// and the report must not say it is safe to clean up.
+const SCAN_WARNING_FILE = "scan-warning.json";
+const scanWarningFrom = (stdout) => {
+  const match = /warning=scan-incomplete reason=(\S+) groups=(\S*)/u.exec(stdout);
+  return match === null ? null : { reason: match[1], groupIds: match[2].split(",").filter(Boolean) };
+};
+
+// The warning of the export in workDir (kept there, so a save that reuses the
+// scan's export still knows), or null.
+const readScanWarning = (workDir) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(workDir, SCAN_WARNING_FILE), "utf8"));
+  } catch {
+    return null;
+  }
+};
+
 // Mirror -> export -> ingest (for the chat logs) -> analyze (media list) ->
 // harvest (so AI parameters and prompt requests are known for this range).
 const exportRange = async (config, request, workDir) => {
@@ -57,13 +76,25 @@ const exportRange = async (config, request, workDir) => {
   const env = { NTQQ_DB_KEY: readSecretSync("ntqqKey") };
   const scanLimit = Number(config.defaultScanLimit) > 0 ? Number(config.defaultScanLimit) : 1000000;
   common.progress("copy-start");
+  let exported = null;
+  let mirrorConsistent = true;
   await common.withFreshMirror(config, "backup", async (mirror) => {
     common.progress("export-start");
-    await common.runNodeScriptOrThrow("export_group_recent.js",
+    mirrorConsistent = mirror.consistent !== false;
+    exported = await common.runNodeScriptOrThrow("export_group_recent.js",
       [mirror.messageDb, mirror.groupDb, request.groupIds.join(","), request.fromUnix, request.toUnix, exportPath, scanLimit],
       { env }, "导出消息失败");
   });
-  await common.runNodeScript("ingest_store.js", [exportPath, common.storeDbPath, `backup-${common.localStamp()}`], { env, quiet: true });
+  // A copy taken while QQ was writing can lack rows without any read error:
+  // every group then counts as not fully scanned.
+  const warning = scanWarningFrom(exported?.stdout ?? "")
+    ?? (mirrorConsistent ? null : { reason: "mirror-inconsistent", groupIds: request.groupIds });
+  if (warning !== null) {
+    common.writeJson(path.join(workDir, SCAN_WARNING_FILE), warning);
+  }
+  // The day logs are written from the message store: a failed ingest would
+  // leave days out while the report looked complete.
+  await common.runNodeScriptOrThrow("ingest_store.js", [exportPath, common.storeDbPath, `backup-${common.localStamp()}`], { env, quiet: true }, "写入消息库失败");
   await common.runNodeScriptOrThrow("analyze_export.js", [exportPath, analysisDir], { env, quiet: true }, "分析消息失败");
   const ntDataDir = String(config.ntDataDir ?? "").trim();
   if (fs.existsSync(mediaMessages) && ntDataDir.length > 0) {
@@ -137,6 +168,8 @@ const main = async () => {
     throw new Error("找不到 QQ 的 nt_data 目录，请先在「设置」里探测路径。");
   }
   lowerOwnPriority();
+  // A damaged ledger stops the save now, not after the long export.
+  files.loadLedger(request.targetDir);
   const workDir = workDirFor(request);
   const mediaMessagesPath = await exportRange(config, request, workDir);
   common.progress("media-start");
@@ -179,6 +212,7 @@ const main = async () => {
       remoteCandidates: items.filter((item) => lesserCopy(item) && item.resolution.status !== "remote" && files.canTryRemote(item)).length,
       pendingBytes: request.mode === "scan" ? pending.reduce((total, item) => total + item.resolution.bytes, 0) : 0,
       freeBytes: files.freeBytesAt(request.targetDir),
+      incompleteScan: readScanWarning(workDir),
       emptyGroups: groups.filter((group) => !summary.groups.some((entry) => entry.groupId === group.groupId)).map((group) => ({ ...group, logDays: logs.get(group.groupId) ?? 0 })),
       createdAt: new Date().toISOString(),
     };
@@ -191,6 +225,8 @@ const main = async () => {
     storeDb.close();
   }
 };
+
+module.exports = { scanWarningFrom };
 
 if (require.main === module) {
   common.runMain(main);

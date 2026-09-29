@@ -22,6 +22,8 @@ const DEFAULTS = {
   autoSummarize: true,
   notifyMentions: true,
   notifyDaily: true,
+  // Off by default: a common word can match many messages a day.
+  notifyWatchWords: false,
   // Re-merge a group's brief at most this often (see briefing_engine). Merges
   // were ~80% of measured AI cost at 60 minutes.
   reduceIntervalMinutes: 120,
@@ -32,6 +34,7 @@ const DEFAULTS = {
   dailyBudget: null,
 };
 const MERGE_INTERVALS = new Set([0, 15, 30, 60, 120, 240]);
+const RESCHEDULING_SETTINGS = ["enabled", "intervalMinutes", "autoSummarize"];
 const TAIL_WAITS = new Set([60, 180, 360]);
 const FIRST_TICK_DELAY_MS = 15 * 1000;
 const BUSY_RETRY_MS = 2 * 60 * 1000;
@@ -79,6 +82,8 @@ const status = {
 };
 let timer = null;
 let child = null;
+// Set by stop(): a refresh killed because the console is closing did not fail.
+let stopping = false;
 
 // The refresh hashes the whole QQ database and runs in the background, so it
 // yields the CPU to whatever the user is doing. On Windows the processes it
@@ -100,11 +105,13 @@ const settings = () => ({ ...DEFAULTS, ...(state.loadConfig().background ?? {}) 
 
 const saveSettings = (patch) => {
   const raw = state.loadRawConfig();
-  const next = { ...DEFAULTS, ...(raw.background ?? {}) };
+  const before = { ...DEFAULTS, ...(raw.background ?? {}) };
+  const next = { ...before };
   if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
   if (typeof patch.autoSummarize === "boolean") next.autoSummarize = patch.autoSummarize;
   if (typeof patch.notifyMentions === "boolean") next.notifyMentions = patch.notifyMentions;
   if (typeof patch.notifyDaily === "boolean") next.notifyDaily = patch.notifyDaily;
+  if (typeof patch.notifyWatchWords === "boolean") next.notifyWatchWords = patch.notifyWatchWords;
   if (patch.reduceIntervalMinutes !== undefined) {
     const minutes = Number(patch.reduceIntervalMinutes);
     if (!MERGE_INTERVALS.has(minutes)) {
@@ -137,7 +144,11 @@ const saveSettings = (patch) => {
     next.intervalMinutes = minutes;
   }
   state.writeConfig({ ...raw, background: next });
-  schedule(FIRST_TICK_DELAY_MS);
+  // Only a change to when / whether refreshes run starts one soon; a
+  // notification switch (one click on the home page) must not.
+  if (RESCHEDULING_SETTINGS.some((key) => next[key] !== before[key])) {
+    schedule(FIRST_TICK_DELAY_MS);
+  }
   return next;
 };
 
@@ -176,6 +187,20 @@ const schedule = (delayMs) => {
     tick({ force: false });
   }, delay);
   timer.unref?.();
+};
+
+// While a detailed-level job (e.g. redoing 14 days) still has work and the
+// last refresh made progress on it, the next refresh starts after a short
+// pause instead of the full interval: a refresh already spends ~30 minutes
+// on the job, and the idle 15 minutes after it only made the job slower.
+const JOB_FOLLOW_UP_MS = 2 * 60 * 1000;
+
+// ms until the next refresh after one that ended with `result`, or undefined
+// for the configured interval.
+const followUpDelay = (result) => {
+  const briefing = result?.briefing;
+  const progressed = Number(briefing?.map?.jobDone) > 0 && (briefing?.map?.routeDown ?? null) === null;
+  return progressed && Number(briefing?.jobQueued) > 0 ? JOB_FOLLOW_UP_MS : undefined;
 };
 
 const parseResult = (text) => {
@@ -234,6 +259,11 @@ const tick = ({ force }) => {
   child.on("close", (code) => {
     child = null;
     status.running = false;
+    if (stopping) {
+      // Killed because the console is closing: not a failure, and the last
+      // refresh that did finish stays the one on record (background-status.json).
+      return;
+    }
     status.lastFinishedAt = new Date().toISOString();
     const result = parseResult(output);
     status.lastResult = result;
@@ -241,7 +271,7 @@ const tick = ({ force }) => {
       status.lastError = status.log.at(-1) ?? `刷新进程退出码 ${code}`;
     }
     saveStatus();
-    schedule();
+    schedule(code === 0 ? followUpDelay(result) : undefined);
     Promise.resolve(onTickFinished({ ok: code === 0, result })).catch((error) => {
       console.error(`background post-tick failed: ${error.message}`);
     });
@@ -253,18 +283,76 @@ const tick = ({ force }) => {
 
 const NOTIFY_STATE_KEY = "notify_state";
 
+const messageKey = (item) => `${item.groupId}|${item.rowId}`;
+
+// Messages with a followed word not handled yet, newest first: newer than the
+// mark, or in the mark's own second but not among `seen` (a busy group's
+// message of that second can arrive a refresh later). A message matching
+// several words is one entry.
+const unseenWatchHits = (watch, since, seen) => {
+  const byMessage = new Map();
+  for (const entry of watch ?? []) {
+    for (const hit of entry.latest) {
+      const key = messageKey(hit);
+      if (hit.sentAt > since || (hit.sentAt === since && !seen.has(key))) {
+        const words = [...(byMessage.get(key)?.words ?? []), entry.word];
+        byMessage.set(key, { ...hit, words });
+      }
+    }
+  }
+  return [...byMessage.values()].sort((left, right) => right.sentAt - left.sentAt);
+};
+
+const listOf = (values, limit, separator) => `${values.slice(0, limit).join(separator)}${values.length > limit ? " 等" : ""}`;
+
+const watchNotice = (hits) => {
+  const groupName = (hit) => hit.groupName || hit.groupId;
+  if (hits.length === 1) {
+    const [hit] = hits;
+    return { title: `「${hit.words.join("」「")}」出现在「${groupName(hit)}」`, body: `${hit.speaker}：${hit.text}` };
+  }
+  const words = [...new Set(hits.flatMap((hit) => hit.words))];
+  const groups = [...new Set(hits.map(groupName))];
+  return {
+    title: `关注的词有 ${hits.length} 条新消息`,
+    body: `「${listOf(words, 4, "」「")}」 · ${listOf(groups, 3, "、")}`,
+  };
+};
+
+// The first tick only remembers "now"; the mark also moves while switched
+// off, so switching on never replays old hits. Not notified: muted people,
+// and messages this tick already notified as an @ / reply (`skip`).
+// Returns the new mark { at, keys } (keys: the messages of the mark's second
+// already handled); a future-dated message cannot push it past now.
+const notifyWatchWords = async ({ watch, mark, skip, current, send }) => {
+  const now = Math.floor(Date.now() / 1000);
+  const seen = new Set(mark.keys);
+  // A message dated past now (clock skew) waits until real time reaches it,
+  // or it would be notified again on every refresh.
+  const unseen = unseenWatchHits(watch, mark.at, seen).filter((hit) => hit.sentAt <= now + 60);
+  const hits = unseen.filter((hit) => hit.muted !== true && !skip.has(messageKey(hit)));
+  if (current.notifyWatchWords && mark.at > 0 && hits.length > 0) {
+    await send({ ...watchNotice(hits), url: serverUrl });
+  }
+  const at = Math.min(Math.max(mark.at > 0 ? mark.at : now, ...unseen.map((hit) => hit.sentAt)), now + 60);
+  const atSecond = unseen.filter((hit) => hit.sentAt === at).map(messageKey);
+  return { at, keys: at === mark.at ? [...seen, ...atSecond] : atSecond };
+};
+
 // Called after each tick with a store handle: @/reply mentions newer than the
-// last notification, plus one daily "your briefing is ready" nudge.
-const notifyAfterTick = async ({ db, briefing, getState, setState }) => {
-  const current = settings();
+// last notification, followed words (when switched on), plus one daily "your
+// briefing is ready" nudge. `current` / `send` are replaced in tests.
+const notifyAfterTick = async ({ db, briefing, getState, setState, current = settings(), send = notify }) => {
   const saved = getState(db, NOTIFY_STATE_KEY, {}) ?? {};
   const next = { ...saved };
   const direct = briefing.mentions.filter((item) => item.kind === "at" || item.kind === "reply");
   const lastMention = Number(saved.lastMentionAt) || 0;
-  const fresh = direct.filter((item) => item.sentAt > lastMention);
+  // Not while you were in that conversation yourself (a bot answering your
+  // command): you saw those already.
+  const fresh = direct.filter((item) => item.sentAt > lastMention && item.youWereThere !== true && item.muted !== true);
   if (current.notifyMentions && fresh.length > 0 && lastMention > 0) {
     const first = fresh[0];
-    await notify({
+    await send({
       title: fresh.length === 1 ? `${first.speaker} 在「${first.groupName}」${first.kind === "reply" ? "回复了你" : "@了你"}` : `有 ${fresh.length} 条消息和你有关`,
       body: fresh.length === 1 ? first.text : fresh.slice(0, 3).map((item) => `${item.groupName}：${item.speaker}`).join("；"),
       url: serverUrl,
@@ -277,12 +365,23 @@ const notifyAfterTick = async ({ db, briefing, getState, setState }) => {
     next.lastMentionAt = Math.floor(Date.now() / 1000);
   }
 
+  const mentionsNotified = current.notifyMentions && lastMention > 0 ? fresh : [];
+  const watchMark = await notifyWatchWords({
+    watch: briefing.watch,
+    mark: { at: Number(saved.lastWatchAt) || 0, keys: Array.isArray(saved.lastWatchKeys) ? saved.lastWatchKeys : [] },
+    skip: new Set(mentionsNotified.map(messageKey)),
+    current,
+    send,
+  });
+  next.lastWatchAt = watchMark.at;
+  next.lastWatchKeys = watchMark.keys;
+
   const today = formatHkt(Math.floor(Date.now() / 1000)).slice(0, 10);
   const hour = Number(formatHkt(Math.floor(Date.now() / 1000)).slice(11, 13));
   const totalMessages = briefing.totals.textMessages + briefing.totals.mediaMessages;
   if (current.notifyDaily && saved.dailyDay !== today && hour >= DAILY_NOTIFY_HOUR && totalMessages > 0) {
     const topNames = briefing.groups.filter((group) => group.textMessages > 0).slice(0, 3).map((group) => group.name);
-    await notify({
+    await send({
       title: `群消息简报：${briefing.totals.groups} 个群有 ${totalMessages} 条新消息`,
       body: [
         briefing.highlights.newThings.length > 0 ? `${briefing.highlights.newThings.length} 个新东西` : "",
@@ -303,6 +402,7 @@ const start = ({ url, afterTick }) => {
 };
 
 const stop = () => {
+  stopping = true;
   if (timer !== null) {
     clearTimeout(timer);
     timer = null;
@@ -326,4 +426,4 @@ const getStatus = () => ({
   log: status.log.slice(-12),
 });
 
-module.exports = { start, stop, runNow, getStatus, saveSettings, notifyAfterTick, DEFAULTS };
+module.exports = { start, stop, runNow, getStatus, saveSettings, notifyAfterTick, followUpDelay, DEFAULTS };

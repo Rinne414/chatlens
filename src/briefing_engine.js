@@ -14,7 +14,7 @@
 
 const store = require("./briefing_store");
 const { formatHkt } = require("./unviewed_range");
-const { formatMessageLine, normalizeLlmSummary, summarizeLines, mergeBriefPartials, currentModel, currentDetail, shouldFallBack } = require("./llm_summarizer");
+const { formatMessageLine, normalizeLlmSummary, summarizeLines, mergeBriefPartials, currentModel, currentDetail, shouldFallBack, probeClient } = require("./llm_summarizer");
 
 const HOUR = 3600;
 const DEFAULTS = {
@@ -44,6 +44,71 @@ const DEFAULTS = {
 const BRIEFING_SINCE_KEY = "briefing_since";
 const BUDGET_KEY = "llm_budget";
 const PAUSE_KEY = "ai_paused_until";
+// Why the last run stopped asking the AI (the account was refused), for the
+// home page; cleared by the next summary that succeeds.
+const ROUTE_DOWN_KEY = "llm_route_down";
+
+/* ---------- AI failures a user can act on ---------- */
+
+const NETWORK_ERROR = /ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|socket hang up/u;
+
+// "LLM request failed. StatusCode=402 Body=..." -> 402 (stored errors are text).
+const statusOfError = (text) => Number(/StatusCode=(\d{3})/u.exec(String(text ?? ""))?.[1]) || null;
+
+// kind "other" is about this one answer (declined, malformed, too slow); every
+// other kind is about the account or the connection and fixes itself only
+// when the user or the provider acts.
+const describeAiError = ({ status, message = "" }) => {
+  const code = Number(status) || 0;
+  if (code === 402) {
+    return { kind: "balance", text: "AI 服务余额不足" };
+  }
+  if (code === 401 || code === 403) {
+    return { kind: "key", text: "AI 服务拒绝了密钥（失效或没有权限）" };
+  }
+  if (code === 429) {
+    return { kind: "rate-limit", text: "AI 服务限流或额度用完" };
+  }
+  if (code >= 500) {
+    return { kind: "outage", text: "AI 服务暂时故障" };
+  }
+  if (code === 0 && NETWORK_ERROR.test(String(message))) {
+    return { kind: "network", text: "连不上 AI 服务" };
+  }
+  return { kind: "other", text: "AI 没有给出可用的结果" };
+};
+
+// Nothing is left to try and the account itself was refused: the only
+// provider, or the fallback after the primary was found down. Only errors
+// that name such a cause count, so an unexpected error (a bug) still fails
+// its chunk the usual way instead of stalling every chunk behind it.
+const routeIsDown = (client, error) =>
+  error?.lastResort === true
+  && shouldFallBack(error)
+  && describeAiError({ status: error.status, message: error.message }).kind !== "other"
+  && (client.fallback === null || client.state.usingFallback);
+
+const routeProblem = (db) => store.getState(db, ROUTE_DOWN_KEY, null);
+
+// Given-up chunks grouped by what went wrong, most common first.
+const failedChunkReasons = (db, fromUnix = 0) => {
+  const reasons = new Map();
+  for (const row of store.givenUpChunks(db, fromUnix)) {
+    const status = statusOfError(row.error);
+    const current = reasons.get(status) ?? { status, ...describeAiError({ status, message: row.error }), chunks: 0, messages: 0 };
+    reasons.set(status, { ...current, chunks: current.chunks + 1, messages: current.messages + row.messageCount });
+  }
+  return [...reasons.values()].sort((left, right) => right.chunks - left.chunks);
+};
+
+// Given-up chunks back into the queue: all of them ("重试" on the home page),
+// or only those the account refused (they deserve another go once it works).
+const requeueFailedChunks = (db, { onlyAccountErrors = false, asJob = false, fromUnix = 0 } = {}) => {
+  const chunkIds = store.givenUpChunks(db, fromUnix)
+    .filter((row) => !onlyAccountErrors || describeAiError({ status: statusOfError(row.error), message: row.error }).kind !== "other")
+    .map((row) => row.chunkId);
+  return store.requeueChunks(db, chunkIds, { asJob });
+};
 
 // Pause state: 0/absent = running, -1 = paused until resumed, else unix time.
 const pauseStatus = (db, now) => {
@@ -209,9 +274,21 @@ const handleJobFailure = (db, chunk, error, outcome, log) => {
 const mapPendingChunks = async (db, client, { now, log = () => {}, ...overrides } = {}) => {
   const options = { ...DEFAULTS, ...overrides };
   const chunks = store.chunksToSummarize(db, options.maxMapPerRun);
-  const outcome = { done: 0, failed: 0, skippedForBudget: 0, blockedBy: null, jobDone: 0, jobDeferred: 0, jobKeptOld: 0 };
+  const outcome = { done: 0, failed: 0, skippedForBudget: 0, blockedBy: null, jobDone: 0, jobDeferred: 0, jobKeptOld: 0, routeDown: null };
   let jobTaken = 0;
+  // Asked once per run, the first time a chunk's error looks like an account
+  // refusal: does a tiny call fail the same way? Resolves to the probe's
+  // error when the account really is refused, null when it answers.
+  let routeCheck = null;
+  const confirmRouteDown = () => {
+    routeCheck ??= probeClient(client).then(() => null, (probeError) => (routeIsDown(client, probeError) ? probeError : null));
+    return routeCheck;
+  };
   await runLimited(chunks, options.mapConcurrency, async (chunk) => {
+    // The account was refused: every other call would be refused too.
+    if (outcome.routeDown !== null) {
+      return;
+    }
     const isJob = chunk.redo === 1;
     if (isJob && (currentDetail(client) !== "detailed" || jobTaken >= options.maxJobPerRun)) {
       outcome.jobDeferred += 1;
@@ -252,6 +329,16 @@ const mapPendingChunks = async (db, client, { now, log = () => {}, ...overrides 
       outcome.jobDone += isJob ? 1 : 0;
       log(`briefing map ok group=${chunk.groupId} messages=${messages.length}${isJob ? " (detailed job)" : ""}`);
     } catch (error) {
+      if (routeIsDown(client, error) && (await confirmRouteDown()) !== null) {
+        // Not this chunk's fault: it keeps its attempts for when the account works.
+        store.noteChunkError(db, chunk.chunkId, error.message);
+        if (outcome.routeDown === null) {
+          const status = Number(error.status) || null;
+          outcome.routeDown = { status, ...describeAiError({ status, message: error.message }), model: currentModel(client) };
+          log(`briefing map stopped, the AI account was refused (${outcome.routeDown.model}): ${error.message.slice(0, 200)}`);
+        }
+        return;
+      }
       if (isJob && handleJobFailure(db, chunk, error, outcome, log)) {
         return;
       }
@@ -260,8 +347,18 @@ const mapPendingChunks = async (db, client, { now, log = () => {}, ...overrides 
       log(`briefing map failed group=${chunk.groupId}: ${error.message.slice(0, 200)}`);
     }
   });
+  if (outcome.routeDown !== null) {
+    store.setState(db, ROUTE_DOWN_KEY, { ...outcome.routeDown, at: now });
+  } else if (outcome.done > 0 && routeProblem(db) !== null) {
+    store.setState(db, ROUTE_DOWN_KEY, null);
+  }
   return outcome;
 };
+
+const UPGRADE_MERGE_INTERVAL_SECONDS = 3600;
+
+// Chunk keys list chunk ids, a detailed one with a "d" suffix (see below).
+const sameChunkSet = (left, right) => left.replace(/d/gu, "") === right.replace(/d/gu, "");
 
 const reduceBriefs = async (db, client, groupIds, { now, force = false, log = () => {}, ...overrides } = {}) => {
   const options = { ...DEFAULTS, ...overrides };
@@ -289,7 +386,14 @@ const reduceBriefs = async (db, client, groupIds, { now, force = false, log = ()
     }
     const recentlyMerged = existing !== null && existing.windowStart === windowStart
       && now - existing.updatedAt < options.reduceIntervalSeconds;
-    if (recentlyMerged && !force) {
+    // The same chunks, only some now at the detailed level: the detailed job
+    // upgrading old summaries. Re-merging after every upgrade kept each
+    // refresh busy for many minutes; such changes merge at most hourly
+    // (a new chunk still merges at once).
+    const upgradeOnly = existing !== null && existing.windowStart === windowStart
+      && sameChunkSet(existing.chunkKey, chunkKey)
+      && now - existing.updatedAt < UPGRADE_MERGE_INTERVAL_SECONDS;
+    if ((recentlyMerged || upgradeOnly) && !force) {
       outcome.deferred += 1;
       return;
     }
@@ -353,4 +457,9 @@ module.exports = {
   mapPendingChunks,
   reduceBriefs,
   budgetStatus,
+  describeAiError,
+  statusOfError,
+  routeProblem,
+  failedChunkReasons,
+  requeueFailedChunks,
 };

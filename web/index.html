@@ -20,6 +20,9 @@
   <link rel="stylesheet" href="/group.css">
   <link rel="stylesheet" href="/trends.css">
   <link rel="stylesheet" href="/messages.css">
+  <link rel="stylesheet" href="/bookmarks.css">
+  <link rel="stylesheet" href="/whatsnew.css">
+  <link rel="stylesheet" href="/palette.css">
 </head>
 <body>
   <div class="shell">
@@ -31,6 +34,7 @@
       <nav id="nav">
         <button data-view="brief" class="active">简报</button>
         <button data-view="review">回顾</button>
+        <button data-view="bookmarks">收藏</button>
         <button data-view="ask">问群聊</button>
         <button data-view="trends">热点</button>
         <button data-view="group">群</button>
@@ -59,6 +63,7 @@
             </select>
           </label>
         </div>
+        <button id="quit-console" class="rail-quit" type="button" title="控制台在后台运行，没有窗口；在这里关掉它">⏻ 关闭控制台</button>
         <p>只读本地 QQ 数据副本，不发消息，不动原始数据。</p>
       </div>
     </aside>
@@ -73,6 +78,7 @@
       <div id="conn-banner" class="conn-banner" role="status" hidden></div>
       <div id="view-brief" class="view"></div>
       <div id="view-review" class="view" hidden></div>
+      <div id="view-bookmarks" class="view" hidden></div>
       <div id="view-ask" class="view" hidden></div>
       <div id="view-trends" class="view" hidden></div>
       <div id="view-group" class="view" hidden></div>
@@ -117,6 +123,11 @@
   <script src="/update.js"></script>
   <script src="/digest.js"></script>
   <script src="/ask.js"></script>
+  <script src="/bookmarks.js"></script>
+  <script src="/quit.js"></script>
+  <script src="/palette.js"></script>
+  <script src="/whatsnew.js"></script>
+  <script src="/brief_keys.js"></script>
   <script src="/brief.js"></script>
   <script src="/brief_pictures.js"></script>
   <script src="/review.js"></script>

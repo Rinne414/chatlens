@@ -25,6 +25,13 @@ const reviewState = {
   error: null,
   notice: null,
   query: "",
+  // "all" | "7" | "30" | "custom" (searchFrom..searchTo, both days included).
+  searchRange: "all",
+  searchFrom: null,
+  searchTo: null,
+  searchTicket: 0,
+  // Which results' day chips show every day, not just the newest 40.
+  dayChipsOpen: new Set(),
   results: null,
   resultsOpen: false,
   searching: false,
@@ -127,6 +134,9 @@ const openReviewView = async (preset = {}) => {
     return;
   }
   if (typeof preset.query === "string" && preset.query.trim().length > 0) {
+    // A search opened from another page brings its own range (all time unless
+    // it says otherwise), never the one last picked here.
+    Object.assign(reviewState, { searchRange: "all" }, preset.range ?? {});
     await runReviewSearch(preset.query);
   }
   await loadReviewDay(preset.day ?? reviewState.day ?? reviewDefaultDay());
@@ -161,28 +171,102 @@ const reviewOpenChat = (groupId, groupName, sentAt, rowId) => openMessagesView({
   origin: REVIEW_ORIGIN,
 });
 
-/* ---------- search ---------- */
+/* ---------- search, over all time / the last 7 or 30 days / chosen days ---------- */
+
+const REVIEW_SEARCH_RANGES = [["all", "全部时间"], ["7", "最近 7 天"], ["30", "最近 30 天"], ["custom", "选日期…"]];
+
+// Whole Beijing days, today included.
+const reviewSearchRangeUnix = () => {
+  const range = reviewState.searchRange;
+  if (range === "7" || range === "30") {
+    return { fromUnix: reviewDayUnix(reviewShiftDay(reviewToday(), 1 - Number(range))), toUnix: null };
+  }
+  if (range === "custom") {
+    return { fromUnix: reviewDayUnix(reviewState.searchFrom), toUnix: reviewDayUnix(reviewShiftDay(reviewState.searchTo, 1)) };
+  }
+  return { fromUnix: null, toUnix: null };
+};
+
+const reviewSearchParams = (extra = {}) => {
+  const params = new URLSearchParams({ q: reviewState.query, ...extra });
+  const { fromUnix, toUnix } = reviewSearchRangeUnix();
+  if (fromUnix !== null) {
+    params.set("fromUnix", String(fromUnix));
+  }
+  if (toUnix !== null) {
+    params.set("toUnix", String(toUnix));
+  }
+  return params;
+};
+
+const setReviewSearchRange = (patch) => {
+  Object.assign(reviewState, patch);
+  if (reviewState.searchRange === "custom" && reviewState.searchFrom === null) {
+    reviewState.searchTo = reviewToday();
+    reviewState.searchFrom = reviewShiftDay(reviewState.searchTo, -29);
+  }
+  runReviewSearch(reviewState.query);
+};
+
+const reviewSearchRangeControl = () => {
+  const range = reviewState.searchRange;
+  return el("div", { class: "review-search-range" },
+    el("div", { class: "wall-modes", role: "group", "aria-label": "搜索的时间范围" }, REVIEW_SEARCH_RANGES.map(([key, label]) => el("button", {
+      class: `wall-mode ${range === key ? "active" : ""}`,
+      type: "button",
+      "aria-pressed": String(range === key),
+      onclick: () => setReviewSearchRange({ searchRange: key }),
+    }, label))),
+    range === "custom"
+      ? el("span", { class: "trends-dates active" },
+        el("input", { type: "date", value: reviewState.searchFrom, "aria-label": "开始日期", onchange: (event) => {
+          const value = event.target.value;
+          if (value !== "") {
+            setReviewSearchRange({ searchFrom: value, searchTo: value > reviewState.searchTo ? value : reviewState.searchTo });
+          }
+        } }),
+        el("span", {}, "至"),
+        el("input", { type: "date", value: reviewState.searchTo, "aria-label": "结束日期", onchange: (event) => {
+          const value = event.target.value;
+          if (value !== "") {
+            setReviewSearchRange({ searchTo: value, searchFrom: value < reviewState.searchFrom ? value : reviewState.searchFrom });
+          }
+        } }))
+      : null);
+};
 
 const runReviewSearch = async (query) => {
+  // A quick second search (another range chip, or clearing the box) outruns
+  // the first; only the latest one's answer is shown.
+  reviewState.searchTicket += 1;
+  const ticket = reviewState.searchTicket;
   reviewState.query = String(query ?? "").trim();
   if (reviewState.query.length === 0) {
     reviewState.results = null;
     reviewState.resultsOpen = false;
+    reviewState.searching = false;
     renderReviewView();
     return;
   }
   reviewState.searching = true;
   reviewState.summaryShown = REVIEW_HIT_STEP;
+  reviewState.dayChipsOpen = new Set();
   renderReviewView();
   try {
-    reviewState.results = await api(`/api/review/search?q=${encodeURIComponent(reviewState.query)}`);
+    const results = await api(`/api/review/search?${reviewSearchParams()}`);
+    if (ticket !== reviewState.searchTicket) {
+      return;
+    }
+    reviewState.results = results;
     reviewState.resultsOpen = true;
     reviewState.error = null;
   } catch (error) {
+    if (ticket !== reviewState.searchTicket) {
+      return;
+    }
     reviewState.error = error.message;
-  } finally {
-    reviewState.searching = false;
   }
+  reviewState.searching = false;
   renderReviewView();
 };
 
@@ -243,10 +327,25 @@ const reviewMark = (text, terms) => {
   return parts;
 };
 
-const reviewDayChips = (byDay) =>
-  el("div", { class: "review-day-chips" }, byDay.slice(0, 40).map((entry) =>
-    el("button", { class: "chip", onclick: () => reviewPickDay(entry.day), title: `看 ${reviewShortDay(entry.day)} 的整理` },
-      reviewShortDay(entry.day), el("span", { class: "review-chip-count" }, entry.count))));
+const REVIEW_DAY_CHIPS_PREVIEW = 40;
+
+// kind: "summaries" | "messages", which list's days (each opens on its own).
+const reviewDayChips = (byDay, kind) => {
+  const shown = reviewState.dayChipsOpen.has(kind) ? byDay : byDay.slice(0, REVIEW_DAY_CHIPS_PREVIEW);
+  return el("div", { class: "review-day-chips" },
+    shown.map((entry) =>
+      el("button", { class: "chip", onclick: () => reviewPickDay(entry.day), title: `看 ${reviewShortDay(entry.day)} 的整理` },
+        reviewShortDay(entry.day), el("span", { class: "review-chip-count" }, entry.count))),
+    byDay.length > shown.length
+      ? el("button", {
+          class: "chip review-chip-more",
+          onclick: () => {
+            reviewState.dayChipsOpen = new Set([...reviewState.dayChipsOpen, kind]);
+            renderReviewView();
+          },
+        }, `还有 ${byDay.length - shown.length} 天…`)
+      : null);
+};
 
 const reviewHitMeta = (hit) => `${hit.groupName} · ${reviewShortDay(hit.day)} ${reviewClock(hit.sentAt)}`;
 
@@ -271,8 +370,12 @@ const REVIEW_HIT_STEP = 50;
 // More raw-message hits: the next page from the server, appended.
 const loadMoreReviewMessages = async () => {
   const results = reviewState.results;
+  const ticket = reviewState.searchTicket;
   try {
-    const page = await api(`/api/review/search?q=${encodeURIComponent(reviewState.query)}&messageOffset=${results.messages.items.length}`);
+    const page = await api(`/api/review/search?${reviewSearchParams({ messageOffset: results.messages.items.length, more: "1" })}`);
+    if (ticket !== reviewState.searchTicket) {
+      return;
+    }
     reviewState.results = { ...results, messages: { ...results.messages, items: [...results.messages.items, ...page.messages.items] } };
   } catch (error) {
     reviewState.error = error.message;
@@ -289,13 +392,16 @@ const reviewResults = () => {
   return el("section", { class: "review-results" },
     el("header", { class: "review-results-head" },
       el("h2", {}, `「${reviewState.query}」`),
+      reviewSearchRangeControl(),
       el("p", { class: "brief-meta" }, empty
-        ? "AI 整理和原文里都没有找到。换个说法，或者只输入一个关键词试试。"
+        ? (reviewState.searchRange === "all"
+          ? "AI 整理和原文里都没有找到。换个说法，或者只输入一个关键词试试。"
+          : "这段时间里没有找到。换成「全部时间」，或者换个说法试试。")
         : `AI 整理里 ${briefNumber(summaries.total)} 处 · 原文里 ${briefNumber(messages.total)} 条（按日期从新到旧）`)),
     summaries.total > 0
       ? el("section", { class: "brief-section" },
           el("h3", { class: "brief-section-title" }, "AI 整理里", el("span", { class: "brief-sub" }, "点一条看当时的聊天，点日期看那天的整理")),
-          reviewDayChips(summaries.byDay),
+          reviewDayChips(summaries.byDay, "summaries"),
           el("ul", { class: "review-hit-list" }, summaries.items.slice(0, summaryShown).map((hit) => reviewSummaryHit(hit, terms))),
           summaries.items.length > summaryShown
             ? moreHitsButton(`再显示 ${Math.min(REVIEW_HIT_STEP, summaries.items.length - summaryShown)} 处（共 ${briefNumber(summaries.items.length)} 处）`, () => {
@@ -307,7 +413,7 @@ const reviewResults = () => {
     messages.total > 0
       ? el("section", { class: "brief-section" },
           el("h3", { class: "brief-section-title" }, "原文里", el("span", { class: "brief-sub" }, `已显示 ${briefNumber(messages.items.length)} / ${briefNumber(messages.total)} 条`)),
-          reviewDayChips(messages.byDay),
+          reviewDayChips(messages.byDay, "messages"),
           el("ul", { class: "review-hit-list" }, messages.items.map((hit) => reviewMessageHit(hit, terms))),
           messages.total > messages.items.length
             ? moreHitsButton(`再显示更多（还有 ${briefNumber(messages.total - messages.items.length)} 条）`, loadMoreReviewMessages)

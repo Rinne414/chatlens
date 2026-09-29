@@ -6,6 +6,8 @@
 // group) and overlapping windows are merged. The cached chunk summaries add
 // "clues" — topics, Q&A and new things that mention a keyword.
 
+const { compareRowIds } = require("./row_ids");
+
 const ROW = "CAST(m.row_id AS INTEGER)";
 const MAX_KEYWORDS = 8;
 
@@ -28,18 +30,48 @@ const searchKeyword = (db, keyword, { fromUnix, toUnix, groupIds, limit }) => db
   ORDER BY m.sent_at DESC LIMIT ?
 `).all(`%${escapeLike(keyword)}%`, fromUnix, toUnix, ...groupIds, limit);
 
-// Earlier keywords matter more (the planner orders them by importance).
+// Messages matching any of the keywords in the scope (each counted once).
+const countMatches = (db, keywords, { fromUnix, toUnix, groupIds }) => db.prepare(`
+  SELECT COUNT(*) AS n FROM messages m
+  WHERE m.is_media = 0 AND (${keywords.map(() => "m.text LIKE ? ESCAPE '\\'").join(" OR ")})
+    AND m.sent_at >= ? AND m.sent_at < ? ${groupFilter(groupIds)}
+`).get(...keywords.map((keyword) => `%${escapeLike(keyword)}%`), fromUnix, toUnix, ...groupIds).n;
+
+// Earlier keywords matter more (the planner orders them by importance). Each
+// keyword brings only its newest `limit` messages; keywordHits says, per
+// keyword, how many were searched and how many there are in the scope.
 const rankHits = (db, keywords, options) => {
   const hits = new Map();
-  keywords.forEach((keyword, index) => {
+  const keywordHits = keywords.map((keyword, index) => {
     const weight = 1 / (1 + index * 0.25);
-    for (const message of searchKeyword(db, keyword, options)) {
+    const found = searchKeyword(db, keyword, options);
+    for (const message of found) {
       const key = hitKey(message);
       const entry = hits.get(key) ?? { message, score: 0, matched: [] };
       hits.set(key, { ...entry, score: entry.score + weight, matched: [...entry.matched, keyword] });
     }
+    const total = found.length < options.limit ? found.length : countMatches(db, [keyword], options);
+    // Newest first: the last one found is as far back as this keyword was read.
+    return { keyword, searched: found.length, total, oldestSearched: found.at(-1)?.sentAt ?? null };
   });
-  return [...hits.values()].sort((left, right) => right.score - left.score || right.message.sentAt - left.message.sentAt);
+  const ranked = [...hits.values()].sort((left, right) => right.score - left.score || right.message.sentAt - left.message.sentAt);
+  return { ranked, keywordHits };
+};
+
+// What the answer was based on, said honestly: matchedMessages were searched;
+// when a keyword had more than its cap, totalMatches is how many there are in
+// all and searchedFrom the latest point any capped keyword was read back to
+// (a rare keyword's old hit must not make the search look deeper than it was).
+const retrievalStats = (db, terms, scope, { ranked, keywordHits }) => {
+  const cut = keywordHits.filter((item) => item.total > item.searched);
+  const capped = cut.length > 0;
+  return {
+    matchedMessages: ranked.length,
+    totalMatches: capped ? countMatches(db, terms, scope) : ranked.length,
+    capped,
+    keywordHits,
+    searchedFrom: capped ? Math.max(...cut.map((item) => item.oldestSearched)) : null,
+  };
 };
 
 const neighbours = (db, message, count, direction) => {
@@ -55,7 +87,7 @@ const neighbours = (db, message, count, direction) => {
   `).all(message.groupId, message.sentAt, message.sentAt, message.rowId, count);
 };
 
-const byTime = (left, right) => left.sentAt - right.sentAt || Number(left.rowId) - Number(right.rowId);
+const byTime = (left, right) => left.sentAt - right.sentAt || compareRowIds(left.rowId, right.rowId);
 
 // Windows around the best hits until the character budget is used; windows
 // that share a message are merged.
@@ -126,13 +158,13 @@ const summaryClues = (db, keywords, { fromUnix, toUnix, groupIds, limit }) => {
 const findEvidence = (db, { keywords, fromUnix, toUnix, groupIds = [] }, limits) => {
   const terms = cleanKeywords(keywords);
   const scope = { fromUnix, toUnix, groupIds };
-  const ranked = terms.length > 0 ? rankHits(db, terms, { ...scope, limit: limits.hitsPerKeyword }) : [];
-  const windows = buildWindows(db, ranked, limits);
+  const hits = terms.length > 0 ? rankHits(db, terms, { ...scope, limit: limits.hitsPerKeyword }) : { ranked: [], keywordHits: [] };
+  const windows = buildWindows(db, hits.ranked, limits);
   return {
     keywords: terms,
     messages: windows.messages,
     clues: summaryClues(db, terms, { ...scope, limit: limits.summaryHits }),
-    stats: { matchedMessages: ranked.length, hitsUsed: windows.hitsUsed, contextMessages: windows.messages.length },
+    stats: { ...retrievalStats(db, terms, scope, hits), hitsUsed: windows.hitsUsed, contextMessages: windows.messages.length },
   };
 };
 

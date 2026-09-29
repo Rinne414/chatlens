@@ -129,7 +129,9 @@ const trendTitle = (event) => {
     return href === null ? el("h3", {}, event.title) : el("h3", {}, el("a", { href, target: "_blank", rel: "noreferrer" }, event.title));
   }
   if (event.kind === "picture") {
-    return el("h3", {}, `${event.origin.speaker || "有人"}发的${event.ai ? " AI " : ""}图，传到了 ${event.groupCount} 个群`);
+    const count = 1 + (event.more ?? []).length;
+    const ai = event.ai || (event.more ?? []).some((item) => item.ai);
+    return el("h3", {}, `${event.origin.speaker || "有人"}发的${count > 1 ? ` ${count} 张` : ""}${ai ? " AI " : ""}图，传到了 ${event.groupCount} 个群`);
   }
   const href = safeHref(event.link);
   return el("h3", {}, event.title,
@@ -167,6 +169,15 @@ const trendCard = (event, data) => {
         el("button", { class: "kb-linkish", type: "button", onclick: () => openTrendChat(event.origin) }, event.origin.groupName || event.origin.groupId),
         el("span", { class: "kb-meta" }, ` ${event.origin.speaker || ""} · ${trendWhen(event.firstAt)}`),
         event.kind === "picture" || !event.origin.text ? null : el("q", {}, event.origin.text)),
+      (event.more ?? []).length === 0
+        ? null
+        : el("div", { class: "tr-set", "aria-label": "同一组的其他图" }, event.more.map((item) =>
+          el("button", {
+            class: "tr-set-thumb",
+            type: "button",
+            title: `同一个人同一时间发的，传到了 ${item.groupCount} 个群`,
+            onclick: () => openTrendPicture({ ...event, md5: item.md5, ai: item.ai, groupCount: item.groupCount, firstAt: item.firstAt }),
+          }, el("img", { src: pictureUrl(item.md5, "thumb"), alt: "", loading: "lazy", decoding: "async" })))),
       trendTrack(event, data),
       (event.related ?? []).length === 0
         ? null

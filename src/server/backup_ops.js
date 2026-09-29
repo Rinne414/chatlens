@@ -117,6 +117,10 @@ const start = ({ mode, groupIds, fromDay, toDay, categories, remote, targetDir }
     remote: remote === true,
     targetDir: target,
   };
+  // Before writing anything: a running job may still read request.json.
+  if (jobs.isJobRunning()) {
+    throw new Error("已有任务在运行中，请等待完成或先取消。");
+  }
   fs.mkdirSync(backupDir, { recursive: true });
   fs.writeFileSync(requestPath, `${JSON.stringify(request, null, 2)}\n`, "utf8");
   const raw = state.loadRawConfig();

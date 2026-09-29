@@ -39,15 +39,31 @@ const README = [
 const ledgerPath = (targetDir) => path.join(targetDir, LEDGER_DIR, LEDGER_FILE);
 
 // Entries whose file the user has since deleted or moved count as not saved.
+// No ledger yet = nothing saved. A damaged one stops the save: read as empty,
+// every file would be saved a second time under a new name.
 const loadLedger = (targetDir) => {
-  try {
-    const ledger = JSON.parse(fs.readFileSync(ledgerPath(targetDir), "utf8"));
-    const items = Object.fromEntries(Object.entries(ledger.items ?? {})
-      .filter(([, item]) => typeof item?.path === "string" && fs.existsSync(path.join(targetDir, item.path))));
-    return { version: 1, items };
-  } catch {
+  const filePath = ledgerPath(targetDir);
+  if (!fs.existsSync(filePath)) {
     return { version: 1, items: {} };
   }
+  let content;
+  try {
+    content = fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    throw new Error(`读不了备份记录文件：${filePath}（${error.code ?? error.message}，可能正被其他程序占用），请稍后重试`);
+  }
+  let ledger = null;
+  try {
+    ledger = JSON.parse(content);
+  } catch {
+    // Reported below.
+  }
+  if (ledger === null || typeof ledger !== "object") {
+    throw new Error(`备份记录文件损坏，无法解析：${filePath}（重命名或删除后重试；删除后已保存的文件会再存一份）`);
+  }
+  const items = Object.fromEntries(Object.entries(ledger.items ?? {})
+    .filter(([, item]) => typeof item?.path === "string" && fs.existsSync(path.join(targetDir, item.path))));
+  return { version: 1, items };
 };
 
 const saveLedger = (targetDir, ledger) => {

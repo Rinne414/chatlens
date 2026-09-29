@@ -8,6 +8,9 @@ const https = require("node:https");
 const { Readable } = require("node:stream");
 const test = require("node:test");
 
+// Never start a real updater from a test (see update_ops.spawnUpdater).
+process.env.CHATLENS_TEST_NO_UPDATER = "1";
+
 const updateOps = require("../src/server/update_ops");
 
 const LATEST = "https://api.github.com/repos/Rinne414/chatlens/releases/latest";

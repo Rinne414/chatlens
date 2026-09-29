@@ -130,8 +130,11 @@
 /* search results */
 .review-results-head { margin-bottom: 18px; }
 .review-results-head h2 { margin: 0 0 4px; font-family: var(--serif); font-size: clamp(22px, 1.2vw + 14px, 30px); letter-spacing: .02em; overflow-wrap: anywhere; }
+.review-search-range { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 8px; }
+.review-search-range .wall-modes { flex-wrap: wrap; }
 .review-day-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
 .review-chip-count { margin-left: 6px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.review-chip-more { border-style: dashed; color: var(--muted); }
 .review-hit-list { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .review-hit { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 12px 16px; }
 .review-hit + .review-hit { border-top: 1px solid var(--line); }

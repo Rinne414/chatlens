@@ -113,6 +113,27 @@ const fetchLatestRelease = async () => {
   };
 };
 
+// The updater's own log (dist/update/update.log): when its last line says the
+// update failed, the console says so (it used to fail silently, the console
+// gone). { at, message } or null.
+const UPDATE_FAILED = /更新失败|update failed/u;
+const LOG_LINE = /^\[([^\]]+)\]\s*(.*)$/u;
+const withoutBom = (line) => (line.charCodeAt(0) === 0xfeff ? line.slice(1) : line);
+const lastUpdateFailure = () => {
+  let text;
+  try {
+    text = fs.readFileSync(path.join(state.toolRoot, "dist", "update", "update.log"), "utf8");
+  } catch {
+    return null;
+  }
+  const last = text.split(/\r?\n/u).map((line) => withoutBom(line).trim()).filter(Boolean).at(-1) ?? "";
+  if (!UPDATE_FAILED.test(last)) {
+    return null;
+  }
+  const match = LOG_LINE.exec(last);
+  return { at: match?.[1] ?? "", message: (match?.[2] ?? last).slice(0, 300) };
+};
+
 // maxAgeMs 0 (the 检查更新 button, applyUpdate) always asks GitHub.
 const checkUpdate = async ({ maxAgeMs = 0, now = Date.now() } = {}) => {
   const age = lastCheck === null ? Infinity : now - lastCheck.at;
@@ -259,6 +280,11 @@ const updaterScriptText = () =>
     "    }",
     "} catch {",
     "    Write-Log ('更新失败: ' + $_.Exception.Message)",
+    "    # The console quit for the update: start it again (still the old version if nothing was copied).",
+    "    $launcher = Join-Path $InstallDir 'Start-QQ-Console.cmd'",
+    "    if (Test-Path -LiteralPath $launcher) {",
+    "        try { Start-Process -FilePath $launcher -WorkingDirectory $InstallDir -WindowStyle Minimized } catch { Write-Log ('重新启动失败: ' + $_.Exception.Message) }",
+    "    }",
     "}",
     "",
   ].join("\r\n");
@@ -273,10 +299,11 @@ const LINUX_UPDATER_SCRIPT = [
   "log \"waiting for server pid $SERVER_PID\"",
   "i=0; while kill -0 \"$SERVER_PID\" 2>/dev/null && [ $i -lt 60 ]; do sleep 1; i=$((i+1)); done",
   "rm -rf \"$WORK_DIR/extracted\" && mkdir -p \"$WORK_DIR/extracted\"",
-  "if ! tar -xzf \"$ARCHIVE\" -C \"$WORK_DIR/extracted\"; then log 'extract failed'; exit 1; fi",
+  "restart() { cd \"$INSTALL_DIR\" && nohup sh ./start.sh >/dev/null 2>&1 & }",
+  "if ! tar -xzf \"$ARCHIVE\" -C \"$WORK_DIR/extracted\"; then log 'update failed: extract failed'; restart; exit 1; fi",
   "SRC=\"$WORK_DIR/extracted\"",
   "if [ \"$(ls -1 \"$SRC\" | wc -l)\" -eq 1 ] && [ -d \"$SRC/$(ls -1 \"$SRC\")\" ]; then SRC=\"$SRC/$(ls -1 \"$SRC\")\"; fi",
-  "if ! cp -a \"$SRC/.\" \"$INSTALL_DIR/\"; then log 'copy failed'; exit 1; fi",
+  "if ! cp -a \"$SRC/.\" \"$INSTALL_DIR/\"; then log 'update failed: copy failed'; restart; exit 1; fi",
   "rm -rf \"$WORK_DIR/extracted\" \"$ARCHIVE\"",
   "log 'update installed, restarting'",
   "cd \"$INSTALL_DIR\" && nohup sh ./start.sh >/dev/null 2>&1 &",
@@ -309,6 +336,12 @@ const startWindowsUpdater = (scriptPath, archivePath) =>
 const WINDOWS_UNSAFE_PATH = /[%"]/u;
 
 const spawnUpdater = (updateDir, archivePath) => {
+  // A test that reaches this by mistake (a check that should have refused)
+  // must not unpack anything over the working copy: it once started a real
+  // updater from a test run (the fake archive failed to open, luckily).
+  if (process.env.CHATLENS_TEST_NO_UPDATER === "1") {
+    throw new Error("updater disabled in tests");
+  }
   if (platform.isWindows) {
     // BOM so Windows PowerShell 5.1 reads the Chinese log strings correctly.
     const scriptPath = path.join(updateDir, "apply_update.ps1");
@@ -346,20 +379,23 @@ const applyUpdate = async () => {
     throw new Error("最新版本没有适用于本安装方式的安装包，请到 GitHub 发布页手动下载。");
   }
 
+  // Every install ships the key; without it nothing can be verified, so the
+  // update is refused (it used to install unchecked).
   const publicKeyPem = readPublicKey();
-  const signed = publicKeyPem === null ? null : await fetchSignedSums(info);
+  if (publicKeyPem === null) {
+    throw unsignedError(info.htmlUrl, `读不到更新签名公钥（${PUBLIC_KEY_FILE}），无法核对安装包。`);
+  }
+  const signed = await fetchSignedSums(info);
 
   const updateDir = path.join(state.toolRoot, "dist", "update");
   fs.mkdirSync(updateDir, { recursive: true });
   const archivePath = path.join(updateDir, path.basename(asset.name));
   await downloadToFile(asset.downloadUrl, archivePath);
-  if (signed !== null) {
-    try {
-      signature.verifyArchive({ archivePath, archiveName: asset.name, ...signed, publicKeyPem, version: info.latestVersion });
-    } catch (error) {
-      fs.rmSync(archivePath, { force: true });
-      throw unsignedError(info.htmlUrl, error.message);
-    }
+  try {
+    signature.verifyArchive({ archivePath, archiveName: asset.name, ...signed, publicKeyPem, version: info.latestVersion });
+  } catch (error) {
+    fs.rmSync(archivePath, { force: true });
+    throw unsignedError(info.htmlUrl, error.message);
   }
   // The download took a while: re-check, and stop the scheduler so no new
   // refresh starts between now and exit.
@@ -374,4 +410,4 @@ const applyUpdate = async () => {
   return { updating: true, targetVersion: info.latestVersion };
 };
 
-module.exports = { AUTO_CHECK_MAX_AGE_MS, checkUpdate, applyUpdate, pickAssetFor, isNewerVersion, windowsUpdaterArgs };
+module.exports = { AUTO_CHECK_MAX_AGE_MS, checkUpdate, applyUpdate, lastUpdateFailure, pickAssetFor, isNewerVersion, windowsUpdaterArgs };

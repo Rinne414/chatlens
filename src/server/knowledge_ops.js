@@ -771,8 +771,20 @@ const originalPathFor = (row) => {
   return cachePath;
 };
 
+const IMAGE_HASH = /^[a-f0-9]{32}$/u;
+
+const imageFileRowQuery = (db) => {
+  const capabilities = probeCapabilities(db);
+  return db.prepare(`
+    SELECT file_path,
+           ${capabilities.fileMissing ? "file_missing" : "0 AS file_missing"},
+           ${capabilities.objectPath ? "object_path" : "'' AS object_path"}
+    FROM images WHERE hash = ?
+  `);
+};
+
 const loadImageFileRow = (toolRoot, hash) => {
-  if (!/^[a-f0-9]{32}$/u.test(String(hash ?? ""))) {
+  if (!IMAGE_HASH.test(String(hash ?? ""))) {
     return null;
   }
   const db = openReadOnly(toolRoot);
@@ -780,13 +792,7 @@ const loadImageFileRow = (toolRoot, hash) => {
     return null;
   }
   try {
-    const capabilities = probeCapabilities(db);
-    return db.prepare(`
-      SELECT file_path,
-             ${capabilities.fileMissing ? "file_missing" : "0 AS file_missing"},
-             ${capabilities.objectPath ? "object_path" : "'' AS object_path"}
-      FROM images WHERE hash = ?
-    `).get(hash) ?? null;
+    return imageFileRowQuery(db).get(hash) ?? null;
   } finally {
     db.close();
   }
@@ -799,11 +805,18 @@ const thumbDirFor = (filePath) => {
   return path.join(path.dirname(path.dirname(filePath)), "Thumb");
 };
 
-const smallestThumbIn = (thumbDir, hash) => {
-  let names;
+const readDirOrNull = (dir) => {
   try {
-    names = fs.readdirSync(thumbDir);
+    return fs.readdirSync(dir);
   } catch {
+    return null;
+  }
+};
+
+// listDir(dir) -> names or null; callers checking many pictures pass a cached one.
+const smallestThumbIn = (thumbDir, hash, listDir = readDirOrNull) => {
+  const names = listDir(thumbDir);
+  if (names === null) {
     return null;
   }
   const candidates = [];
@@ -846,14 +859,10 @@ const imageFilePath = (toolRoot, hash) => {
 // When the original lives in media-objects, thumbs are still resolved from the
 // recorded cache path. Returns null when no thumbnail exists, letting the
 // caller fall back.
-const thumbnailFilePath = (toolRoot, hash) => {
-  const row = loadImageFileRow(toolRoot, hash);
-  if (row === null) {
-    return null;
-  }
+const thumbnailFromRow = (toolRoot, row, hash, listDir) => {
   const cachePath = row.file_missing === 1 ? "" : String(row.file_path ?? "");
   if (cachePath !== "") {
-    const fromCache = smallestThumbIn(thumbDirFor(cachePath), hash);
+    const fromCache = smallestThumbIn(thumbDirFor(cachePath), hash, listDir);
     if (fromCache !== null) {
       return fromCache;
     }
@@ -866,7 +875,45 @@ const thumbnailFilePath = (toolRoot, hash) => {
   if (!objectRootCheck.startsWith("..") && !path.isAbsolute(objectRootCheck)) {
     return null;
   }
-  return smallestThumbIn(thumbDirFor(original), hash);
+  return smallestThumbIn(thumbDirFor(original), hash, listDir);
+};
+
+const thumbnailFilePath = (toolRoot, hash) => {
+  const row = loadImageFileRow(toolRoot, hash);
+  return row === null ? null : thumbnailFromRow(toolRoot, row, hash, readDirOrNull);
+};
+
+// Whether many pictures can be shown (a QQ thumbnail or the original is on
+// disk), for the briefing's ~200 pictures per build: one connection and one
+// listing per Thumb folder instead of one of each per picture (measured
+// 412 ms -> a few ms). Call close() when done.
+const openDisplayableCheck = (toolRoot) => {
+  const db = openReadOnly(toolRoot);
+  if (db === null) {
+    return { has: () => false, close: () => {} };
+  }
+  const select = imageFileRowQuery(db);
+  const listings = new Map();
+  const listDir = (dir) => {
+    if (!listings.has(dir)) {
+      listings.set(dir, readDirOrNull(dir));
+    }
+    return listings.get(dir);
+  };
+  return {
+    has: (hash) => {
+      const row = IMAGE_HASH.test(String(hash ?? "")) ? select.get(hash) ?? null : null;
+      if (row === null) {
+        return false;
+      }
+      if (thumbnailFromRow(toolRoot, row, hash, listDir) !== null) {
+        return true;
+      }
+      const original = originalPathFor(row);
+      return original !== null && fs.existsSync(original);
+    },
+    close: () => db.close(),
+  };
 };
 
 const promptRequests = (toolRoot, { onlyAnswered = false, limit } = {}) => {
@@ -1112,6 +1159,7 @@ module.exports = {
   imageByHash,
   imageFilePath,
   thumbnailFilePath,
+  openDisplayableCheck,
   promptRequests,
   overview,
   coverage,

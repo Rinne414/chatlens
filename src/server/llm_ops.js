@@ -6,7 +6,7 @@
 
 const state = require("./toolkit_state");
 const background = require("./background");
-const { ensureBriefingSchema, markChunksForRedo, redoStats, standardChunksSince, detailProgress, getState, setState } = require("../briefing_store");
+const { ensureBriefingSchema, markChunksForRedo, releaseBackfillJob, redoStats, standardChunksSince, detailProgress, detailedDoneSince, getState, setState } = require("../briefing_store");
 const review = require("../review_store");
 const { formatHkt } = require("../unviewed_range");
 const { usageByGroupDay } = require("../llm_usage");
@@ -56,7 +56,10 @@ const setDetail = ({ detail }) => {
   }
   const raw = state.loadRawConfig();
   state.writeConfig({ ...raw, llm: { ...(raw.llm ?? {}), detail } });
-  return { detail };
+  // Job chunks wait for the detailed level; messages that have no summary at
+  // all must not wait forever, so they become ordinary (standard) work.
+  const released = detail === "standard" ? releaseBackfillJob(ensureBriefingSchema(state.getStore())) : 0;
+  return { detail, released };
 };
 
 // Beijing days: today and the span - 1 days before it, oldest first.
@@ -132,18 +135,36 @@ const getRedoReport = () => {
     measured,
   };
   const remainingMessages = sumOf(progress, "queuedMessages");
+  const remainingChunks = sumOf(progress, "queuedChunks");
   return {
     job,
     rows,
     spent,
     remaining: {
-      chunks: sumOf(progress, "queuedChunks"),
+      chunks: remainingChunks,
       messages: remainingMessages,
       tokens: Math.round(remainingMessages * perMessage.tokens),
       listUsd: Math.round(remainingMessages * perMessage.usd * 100) / 100,
+      etaMinutes: jobEtaMinutes(db, job, remainingChunks),
     },
     perMessage,
   };
+};
+
+// At the pace chunks have been summarized since the job started (new
+// messages included, they share the same refreshes); null until there is a
+// pace worth extrapolating.
+const MIN_ETA_SAMPLE = { chunks: 10, seconds: 30 * 60 };
+const jobEtaMinutes = (db, job, remainingChunks) => {
+  if (remainingChunks === 0) {
+    return 0;
+  }
+  const elapsed = nowUnix() - job.startedAt;
+  const done = detailedDoneSince(db, job.startedAt);
+  if (done < MIN_ETA_SAMPLE.chunks || elapsed < MIN_ETA_SAMPLE.seconds) {
+    return null;
+  }
+  return Math.round((remainingChunks * elapsed) / done / 60);
 };
 
 const getProviders = () => {

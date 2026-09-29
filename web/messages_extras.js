@@ -51,7 +51,8 @@ const loadInboxExtras = async () => {
 
 const inboxBadges = (extra) => [
   extra.mentions > 0 ? el("span", { class: "inbox-flag at", title: "有人 @你 或回复你" }, `@你 ${extra.mentions}`) : null,
-  extra.newAi > 0 ? el("span", { class: "inbox-flag ai", title: "上次看过之后的新 AI 图" }, `AI 图 ${extra.newAi}`) : null,
+  // The server counts up to 999 (rail_status MAX_COUNTED); at the cap it says so.
+  extra.newAi > 0 ? el("span", { class: "inbox-flag ai", title: "上次看过之后的新 AI 图" }, `AI 图 ${extra.newAi >= 999 ? "999+" : extra.newAi}`) : null,
 ];
 
 /* ---------- side panel: the group's AI summary for this stretch ---------- */

@@ -8,6 +8,8 @@ const fs = require("node:fs");
 const Database = require("better-sqlite3-multiple-ciphers");
 const messageStore = require("./message_store");
 const briefingStore = require("./briefing_store");
+const { failedChunkReasons } = require("./briefing_engine");
+const { wordHits } = require("./watch_words");
 
 // Everything in the window is returned; the page shows a short preview of
 // each section and expands to the rest on request.
@@ -35,6 +37,20 @@ const unsummarizedCount = (db, groupId, fromUnix) => {
     SELECT COUNT(*) AS n FROM messages WHERE group_id = ? AND is_media = 0
       AND (sent_at > ? OR (sent_at = ? AND CAST(row_id AS INTEGER) > CAST(? AS INTEGER)))
   `).get(String(groupId), boundary.sentAt, boundary.sentAt, boundary.rowId).n;
+};
+
+// Messages of the window that come after the group's read mark (all of the
+// window when the chat was never opened, or read up to before it): what the
+// user has not gone through yet.
+const unseenCount = (db, groupId, fromUnix) => {
+  const mark = messageStore.getReadMark(db, groupId);
+  if (mark === null || mark.sentAt < fromUnix) {
+    return db.prepare("SELECT COUNT(*) AS n FROM messages WHERE group_id = ? AND sent_at >= ?").get(String(groupId), fromUnix).n;
+  }
+  return db.prepare(`
+    SELECT COUNT(*) AS n FROM messages WHERE group_id = ?
+      AND (sent_at > ? OR (sent_at = ? AND CAST(row_id AS INTEGER) > CAST(? AS INTEGER)))
+  `).get(String(groupId), mark.sentAt, mark.sentAt, mark.rowId).n;
 };
 
 const withGroup = (group) => (item) => ({ ...item, groupId: group.groupId, groupName: group.name });
@@ -111,7 +127,7 @@ const popularImages = (knowledgeDbPath, fromUnix, toUnix, isAvailable = () => tr
   }
 };
 
-const buildBriefing = ({ db, knowledgeDbPath, watchlist, nowUnix, extraSelfUins = [], status = {}, isImageAvailable }) => {
+const buildBriefing = ({ db, knowledgeDbPath, watchlist, watchWords = [], mutedUins = [], nowUnix, extraSelfUins = [], status = {}, isImageAvailable }) => {
   briefingStore.ensureBriefingSchema(db);
   const windowStart = Number(briefingStore.getState(db, "briefing_since", nowUnix - 24 * 3600));
   const watchNames = new Map(watchlist.map((item) => [item.groupId, item.name ?? ""]));
@@ -132,12 +148,18 @@ const buildBriefing = ({ db, knowledgeDbPath, watchlist, nowUnix, extraSelfUins 
       speakers: row?.speakers ?? 0,
       lastSentAt: row?.lastSentAt ?? null,
       unsummarized: unsummarizedCount(db, groupId, windowStart),
+      unseen: row === undefined ? 0 : unseenCount(db, groupId, windowStart),
       brief,
     };
   }).sort((left, right) => (right.textMessages + right.mediaMessages) - (left.textMessages + left.mediaMessages));
 
   const identity = messageStore.getSelfIdentity(db, extraSelfUins);
-  const mentions = messageStore.getMentions(db, { fromUnix: windowStart, toUnix: nowUnix + 60, identity });
+  // Muted people's mentions stay in the list, flagged: the page folds them
+  // into one line and notifications skip them (their followed-word hits too:
+  // mostly bots echoing prompts).
+  const muted = new Set(mutedUins.map(String));
+  const flagMuted = (item) => ({ ...item, muted: muted.has(String(item.speakerUin)) });
+  const mentions = messageStore.getMentions(db, { fromUnix: windowStart, toUnix: nowUnix + 60, identity }).map(flagMuted);
   const chunkStats = briefingStore.chunkStatsInWindow(db, windowStart);
 
   return {
@@ -151,8 +173,13 @@ const buildBriefing = ({ db, knowledgeDbPath, watchlist, nowUnix, extraSelfUins 
       unsummarized: groups.reduce((total, group) => total + group.unsummarized, 0),
       queuedChunks: chunkStats.reduce((total, row) => total + row.queued, 0),
       failedChunks: chunkStats.reduce((total, row) => total + row.failed, 0),
+      // Why they failed, most common first ({ kind, text, chunks, messages }).
+      failedReasons: failedChunkReasons(db, windowStart),
     },
     mentions,
+    // 关注词: where each followed word was said in the window.
+    watch: wordHits(db, { fromUnix: windowStart, toUnix: nowUnix + 60, words: watchWords })
+      .map((entry) => ({ ...entry, latest: entry.latest.map(flagMuted) })),
     highlights: crossGroupHighlights(groups),
     images: popularImages(knowledgeDbPath, windowStart, nowUnix + 60, isImageAvailable),
     groups: groups.map(({ brief, ...group }) => ({

@@ -122,8 +122,9 @@ const sleep = (milliseconds) => new Promise((resolve) => {
   setTimeout(resolve, milliseconds);
 });
 
-// A bad request or a refused credential fails the same way every time.
-const NON_RETRYABLE_STATUSES = new Set([400, 401, 403, 404, 413, 422]);
+// A bad request, a refused credential or an empty balance (402) fails the
+// same way every time.
+const NON_RETRYABLE_STATUSES = new Set([400, 401, 402, 403, 404, 413, 422]);
 
 // A timed-out request is not repeated either: a long detailed call that hit
 // its limit would only block the run for another full timeout.
@@ -199,7 +200,13 @@ const providerExtras = (url, detail = "standard") => {
 // refused request (Grok silently returns empty summaries for some adult
 // chat) — is retried on the fallback for that one call only.
 const UNUSABLE_ANSWER = /truncated|not valid JSON|did not contain|Invalid LLM JSON|stream ended before|timed out after/u;
+// A malformed answer (JSON cut mid-string, a stray comma) is that answer's
+// problem: counted as "down", one bad answer from Grok moved a whole run and
+// the next 15 minutes to DeepSeek (2026-09-30).
 const shouldFallBack = (error) => {
+  if (error instanceof SyntaxError) {
+    return false;
+  }
   const status = Number(error?.status);
   if (!Number.isFinite(status)) {
     return !UNUSABLE_ANSWER.test(String(error?.message));
@@ -218,7 +225,7 @@ const parseJsonContent = (content) => {
     try {
       return JSON.parse(candidate);
     } catch {
-      throw firstError;
+      throw new SyntaxError(`LLM answer was not valid JSON: ${firstError.message}`);
     }
   }
 };
@@ -271,6 +278,9 @@ const currentDetail = (client) => activeClient(client).detail;
 // redo work) — its failure is thrown, though a primary that is down is still
 // switched away from for the process's other calls. meta.onAnswered(endpoint)
 // learns which endpoint (model, detail) produced the accepted answer.
+// An error from an endpoint with nothing left to try after it carries
+// `lastResort: true` (briefing_engine stops a run when such an error says the
+// account itself was refused).
 const callLlm = async (client, build, meta = { purpose: "other" }) => {
   const { validate = () => {}, allowFallback = true, onAnswered = () => {}, ...usageMeta } = meta;
   const ask = async (endpoint) => {
@@ -279,13 +289,21 @@ const callLlm = async (client, build, meta = { purpose: "other" }) => {
     onAnswered(endpoint);
     return raw;
   };
+  const askLastResort = async (endpoint) => {
+    try {
+      return await ask(endpoint);
+    } catch (error) {
+      error.lastResort = true;
+      throw error;
+    }
+  };
   const active = activeClient(client);
+  if (active !== client || client.fallback === null) {
+    return askLastResort(active);
+  }
   try {
     return await ask(active);
   } catch (error) {
-    if (active !== client || client.fallback === null) {
-      throw error;
-    }
     const reason = String(error.message).slice(0, 200);
     const down = shouldFallBack(error);
     if (down) {
@@ -300,9 +318,15 @@ const callLlm = async (client, build, meta = { purpose: "other" }) => {
       client.state.answeredByFallback += 1;
       console.warn(`llm ${client.model} gave no usable answer, asking ${client.fallback.model} for this one: ${reason}`);
     }
-    return ask(client.fallback);
+    return askLastResort(client.fallback);
   }
 };
+
+// The smallest possible call through the same route: it tells "the account is
+// refused" apart from "this one request fails" (a chunk that always gets a
+// 500 or a dropped connection), so one bad chunk cannot pass for an outage.
+const probeClient = (client) =>
+  callLlm(client, () => ({ system: "只回复这个 JSON 对象，不要别的：{\"ok\": true}", user: "ping", maxTokens: 32 }), { purpose: "probe" });
 
 /* ---------- prompts ---------- */
 
@@ -521,7 +545,7 @@ const buildReducePrompt = (analysis, partials, detail = "standard") => {
           "qa 最多 " + caps.qa + " 个；同一问题合并；某段没人回答、后段有人回答的，改成有回答并 resolved=true。",
           "timeline 最多 " + caps.timeline + " 段，按时间顺序合并，相邻同话题可合并成一段。",
           "uncategorized 最多 " + caps.uncategorized + " 条、links 最多 " + caps.links + " 条，去重合并。",
-          "summary 用 " + summarySentences + " 句概括这一整个时间范围最值得知道的内容。",
+          "summary 用 " + summarySentences + " 句概括这一整个时间范围最值得知道的内容；第一句直接说最重要的事，不要用时间范围或日期开头（界面上已经显示时间）。",
           "不要输出 actions 或 risks 字段。如果没有某类内容，用空数组或 null。",
         ],
         outputSchema: OUTPUT_SCHEMA,
@@ -550,90 +574,70 @@ const requiredString = (value, pathName) => {
   return value.trim();
 };
 
-const optionalString = (value, pathName) => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    throw new Error(`Invalid LLM JSON. Expected string or null: ${pathName}`);
-  }
-  return value.trim();
-};
-
-const requiredArray = (value, pathName) => {
-  if (!Array.isArray(value)) {
-    throw new Error(`Invalid LLM JSON. Expected array: ${pathName}`);
-  }
-  return value;
-};
-
-const requiredNumber = (value, pathName) => {
-  if (!Number.isFinite(value)) {
-    throw new Error(`Invalid LLM JSON. Expected finite number: ${pathName}`);
-  }
-  return value;
-};
-
-const normalizeImportance = (value, pathName) => {
-  if (value === "high" || value === "medium" || value === "low") {
-    return value;
-  }
-  throw new Error(`Invalid LLM JSON. Expected high, medium, or low: ${pathName}`);
-};
-
-const normalizeTopic = (topic, index) => ({
-  title: requiredString(topic.title, `topics[${index}].title`),
-  summary: requiredString(topic.summary, `topics[${index}].summary`),
-  importance: normalizeImportance(topic.importance, `topics[${index}].importance`),
-  messageCountEstimate: requiredNumber(topic.messageCountEstimate, `topics[${index}].messageCountEstimate`),
-  details: requiredArray(topic.details, `topics[${index}].details`).map((detail, detailIndex) =>
-    requiredString(detail, `topics[${index}].details[${detailIndex}]`)),
-  evidence: requiredArray(topic.evidence, `topics[${index}].evidence`).map((evidence, evidenceIndex) =>
-    requiredString(evidence, `topics[${index}].evidence[${evidenceIndex}]`)),
-});
-
-const normalizeActionStatus = (value) => (value === "resolved" ? "resolved" : "open");
-
-const normalizeAction = (action, index) => ({
-  owner: optionalString(action.owner, `actions[${index}].owner`),
-  task: requiredString(action.task, `actions[${index}].task`),
-  status: normalizeActionStatus(action.status),
-  resolution: typeof action.resolution === "string" && action.resolution.trim().length > 0 ? action.resolution.trim() : null,
-  evidence: requiredString(action.evidence, `actions[${index}].evidence`),
-});
-
-const normalizeTimelineItem = (item, index) => ({
-  start: requiredString(item.start, `timeline[${index}].start`),
-  end: optionalString(item.end ?? null, `timeline[${index}].end`),
-  title: requiredString(item.title, `timeline[${index}].title`),
-  summary: requiredString(item.summary, `timeline[${index}].summary`),
-  messageCountEstimate: Number.isFinite(item.messageCountEstimate) ? item.messageCountEstimate : 0,
-});
-
-const normalizeUncategorizedItem = (item, index) => ({
-  hkt: requiredString(item.hkt, `uncategorized[${index}].hkt`),
-  speaker: requiredString(item.speaker, `uncategorized[${index}].speaker`),
-  note: requiredString(item.note, `uncategorized[${index}].note`),
-});
-
-const normalizeRisk = (risk, index) => ({
-  severity: normalizeImportance(risk.severity, `risks[${index}].severity`),
-  risk: requiredString(risk.risk, `risks[${index}].risk`),
-  evidence: requiredString(risk.evidence, `risks[${index}].evidence`),
-});
-
-const normalizeLink = (link, index) => ({
-  title: requiredString(link.title, `links[${index}].title`),
-  url: requiredString(link.url, `links[${index}].url`),
-  why: requiredString(link.why, `links[${index}].why`),
-});
-
 const text = (value) => (typeof value === "string" ? value.trim() : "");
 const nonEmpty = (value) => text(value).length > 0;
 const URL_PATTERN = /^https?:\/\/\S+$/iu;
 
-// New lists are lenient: an incomplete item is dropped rather than failing
-// the whole summary (the old lists keep their strict validation).
+// Every list is lenient: an incomplete item is dropped and a secondary field
+// defaulted, rather than failing the whole summary. Strict lists once threw
+// away a whole detailed Grok answer (and its tokens) over one uncategorized
+// item without a speaker, re-asking DeepSeek at the standard level.
+const IMPORTANCE = new Set(["high", "medium", "low"]);
+const importanceOf = (value) => (IMPORTANCE.has(value) ? value : "medium");
+const strings = (value) => arrayOf(value).filter(nonEmpty).map(text);
+const countOf = (value) => (Number.isFinite(value) ? value : 0);
+
+const normalizeTopics = (items) =>
+  arrayOf(items)
+    .filter((topic) => topic && nonEmpty(topic.title) && nonEmpty(topic.summary))
+    .map((topic) => ({
+      title: text(topic.title),
+      summary: text(topic.summary),
+      importance: importanceOf(topic.importance),
+      messageCountEstimate: countOf(topic.messageCountEstimate),
+      details: strings(topic.details),
+      evidence: strings(topic.evidence),
+    }));
+
+const normalizeTimeline = (items) =>
+  arrayOf(items)
+    .filter((item) => item && nonEmpty(item.start) && nonEmpty(item.title) && nonEmpty(item.summary))
+    .map((item) => ({
+      start: text(item.start),
+      end: nonEmpty(item.end) ? text(item.end) : null,
+      title: text(item.title),
+      summary: text(item.summary),
+      messageCountEstimate: countOf(item.messageCountEstimate),
+    }));
+
+const normalizeUncategorized = (items) =>
+  arrayOf(items)
+    .filter((item) => item && nonEmpty(item.note))
+    .map((item) => ({ hkt: text(item.hkt), speaker: text(item.speaker), note: text(item.note) }));
+
+// No longer requested; old stored summaries may still carry them.
+const normalizeActions = (items) =>
+  arrayOf(items)
+    .filter((action) => action && nonEmpty(action.task))
+    .map((action) => ({
+      owner: nonEmpty(action.owner) ? text(action.owner) : null,
+      task: text(action.task),
+      status: action.status === "resolved" ? "resolved" : "open",
+      resolution: nonEmpty(action.resolution) ? text(action.resolution) : null,
+      evidence: text(action.evidence),
+    }));
+
+const normalizeRisks = (items) =>
+  arrayOf(items)
+    .filter((risk) => risk && nonEmpty(risk.risk))
+    .map((risk) => ({ severity: importanceOf(risk.severity), risk: text(risk.risk), evidence: text(risk.evidence) }));
+
+// Links come from chat text via the model: only http(s) may become an href.
+const normalizeLinks = (items) =>
+  arrayOf(items)
+    .filter((link) => link && URL_PATTERN.test(text(link.url)))
+    .map((link) => ({ title: nonEmpty(link.title) ? text(link.title) : text(link.url), url: text(link.url), why: text(link.why) }));
+
 const normalizeNewThings = (items) =>
   arrayOf(items)
     .filter((item) => item && nonEmpty(item.name) && nonEmpty(item.detail))
@@ -666,19 +670,15 @@ const normalizeLlmSummary = (rawSummary, provider) => ({
   schemaVersion: 3,
   generatedAt: new Date().toISOString(),
   summary: requiredString(rawSummary.summary, "summary"),
-  topics: requiredArray(rawSummary.topics ?? [], "topics").map(normalizeTopic),
+  topics: normalizeTopics(rawSummary.topics),
   newThings: normalizeNewThings(rawSummary.newThings),
   qa: normalizeQa(rawSummary.qa),
-  // Every list except topics is optional: tolerate models that omit fields.
-  timeline: requiredArray(rawSummary.timeline ?? [], "timeline").map(normalizeTimelineItem),
-  uncategorized: requiredArray(rawSummary.uncategorized ?? [], "uncategorized").map(normalizeUncategorizedItem),
-  actions: requiredArray(rawSummary.actions ?? [], "actions").map(normalizeAction),
-  risks: requiredArray(rawSummary.risks ?? [], "risks").map(normalizeRisk),
-  // Links come from chat text via the model: only http(s) may become an href.
-  links: requiredArray(rawSummary.links ?? [], "links")
-    .filter((link) => URL_PATTERN.test(text(link?.url)))
-    .map(normalizeLink),
-  announcementDraft: optionalString(rawSummary.announcementDraft ?? null, "announcementDraft"),
+  timeline: normalizeTimeline(rawSummary.timeline),
+  uncategorized: normalizeUncategorized(rawSummary.uncategorized),
+  actions: normalizeActions(rawSummary.actions),
+  risks: normalizeRisks(rawSummary.risks),
+  links: normalizeLinks(rawSummary.links),
+  announcementDraft: nonEmpty(rawSummary.announcementDraft) ? text(rawSummary.announcementDraft) : null,
 });
 
 /* ---------- deterministic merge (fallback when the reduce call fails) ---------- */
@@ -797,11 +797,37 @@ const deterministicMerge = (partials) => {
 /* ---------- orchestration ---------- */
 
 // callLlm validators: an answer that fails them is asked again elsewhere.
+// Items are lenient (normalizeLlmSummary drops incomplete ones) but the shape
+// is not: a refusal dressed as {"summary": "抱歉…"} would otherwise pass and,
+// in the detailed redo, replace a good summary with an empty one.
+const SUMMARY_LISTS = ["newThings", "qa", "timeline", "uncategorized", "links"];
+// A model that declines still answers in the right shape, every list empty
+// and the refusal as the summary ("我不能整理、摘录或复述"); 3 chunks / 456
+// messages were stored that way on 2026-09-30. Only first-person refusal
+// wording counts, and only with nothing listed: a quiet chunk stays valid.
+const DECLINED = /(不能|无法)(按要求)?(为你)?(整理|总结|摘录|复述|概括|做完整摘要)|(can't|cannot|won't|unable to) (help|summari[sz]e|assist|comply)/iu;
+const ITEM_LISTS = ["topics", "newThings", "qa", "timeline"];
+// summary: a normalized summary (normalizeLlmSummary), fresh or stored.
+const isDeclinedSummary = (summary) =>
+  ITEM_LISTS.every((key) => arrayOf(summary?.[key]).length === 0) && DECLINED.test(String(summary?.summary ?? ""));
 const validateSummary = (raw) => {
-  normalizeLlmSummary(raw, {});
+  if (!Array.isArray(raw?.topics)) {
+    throw new Error("Invalid LLM JSON. Expected array: topics");
+  }
+  const wrong = SUMMARY_LISTS.find((key) => raw[key] !== undefined && raw[key] !== null && !Array.isArray(raw[key]));
+  if (wrong !== undefined) {
+    throw new Error(`Invalid LLM JSON. Expected array: ${wrong}`);
+  }
+  const summary = normalizeLlmSummary(raw, {});
+  if (isDeclinedSummary(summary)) {
+    throw new Error(`Invalid LLM JSON. The model declined to summarize: ${summary.summary.slice(0, 80)}`);
+  }
 };
 const requireSummaryText = (raw) => {
-  requiredString(raw?.summary, "summary");
+  const summary = requiredString(raw?.summary, "summary");
+  if (arrayOf(raw.topics).length === 0 && DECLINED.test(summary)) {
+    throw new Error(`Invalid LLM JSON. The model declined to summarize: ${summary.slice(0, 80)}`);
+  }
 };
 
 // Summarize one chunk of formatted lines (the "map" step).
@@ -848,7 +874,7 @@ const buildBriefMergePrompt = (analysis, partials) => ({
     {
       task: `把同一个群的多段摘要合并成总览：一段 summary 和最多 ${BRIEF_MERGE_TOPICS} 个话题。`,
       rules: [
-        "summary 用 2-4 句概括整段时间最值得知道的内容，不要逐段复述。",
+        "summary 用 2-4 句概括整段时间最值得知道的内容，不要逐段复述；第一句直接说最重要的事，不要用时间范围或日期开头（界面上已经显示时间）。",
         `topics 最多 ${BRIEF_MERGE_TOPICS} 个：同一话题在多段出现时合并成一个，按热度和重要性排序；每个 topic 的 summary 1-2 句。`,
         "messageCountEstimate 汇总各段的估计值。",
       ],
@@ -957,6 +983,8 @@ const createClient = (options, { fallback = null, onFallback = () => {} } = {}) 
 });
 
 module.exports = {
+  validateSummary,
+  isDeclinedSummary,
   MAX_CHUNKS,
   setUsageRecorder,
   providerExtras,
@@ -964,6 +992,7 @@ module.exports = {
   OUTPUT_SCHEMA,
   createClient,
   callLlm,
+  probeClient,
   currentModel,
   currentDetail,
   shouldFallBack,

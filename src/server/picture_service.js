@@ -30,7 +30,10 @@ const objectDir = path.join(storeDir, "media-objects");
 const tmpDir = path.join(storeDir, "tmp");
 const knowledgeDbPath = path.join(storeDir, "knowledge.db");
 
-const DEFAULTS = { enabled: true, budgetGB: 10, keepAllGroups: [] };
+// keepAi: save every AI picture's original for good (media-objects, outside
+// the budget), soonest expiry first. Off unless the user turns it on: it
+// costs ~1.5 MB per picture.
+const DEFAULTS = { enabled: true, budgetGB: 10, keepAllGroups: [], keepAi: false };
 const BUDGETS_GB = new Set([2, 5, 10, 20, 50, 100]);
 const GB = 1024 ** 3;
 const CACHE_SHARE = 0.3;
@@ -54,6 +57,9 @@ const saveSettings = (patch) => {
   const next = { ...DEFAULTS, ...(raw.pictures ?? {}) };
   if (typeof patch.enabled === "boolean") {
     next.enabled = patch.enabled;
+  }
+  if (typeof patch.keepAi === "boolean") {
+    next.keepAi = patch.keepAi;
   }
   if (patch.budgetGB !== undefined) {
     if (!BUDGETS_GB.has(Number(patch.budgetGB))) {

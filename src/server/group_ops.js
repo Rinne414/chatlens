@@ -27,10 +27,23 @@ const getGroupInsights = (params) => {
   }
 };
 
+// The same on connections of its own, for the read worker (read_worker.js):
+// 30 days of a busy group took 1.4 s on the server's thread.
+const getGroupInsightsReadOnly = ({ groupId, fromUnix, toUnix }) => {
+  const db = new Database(path.join(state.toolRoot, "store", "messages.db"), { readonly: true, fileMustExist: true });
+  const kb = fs.existsSync(knowledgePath()) ? new Database(knowledgePath(), { readonly: true, fileMustExist: true }) : null;
+  try {
+    return groupInsights(db, kb, { groupId: String(groupId ?? ""), nowUnix: Math.floor(Date.now() / 1000), fromUnix: Number(fromUnix), toUnix: Number(toUnix) });
+  } finally {
+    kb?.close();
+    db.close();
+  }
+};
+
 const getGroupTimeline = (params) => timelineBetween(briefingStore.ensureBriefingSchema(state.getStore()), {
   groupId: params.get("groupId") ?? "",
   fromUnix: Number(params.get("fromUnix")),
   toUnix: Number(params.get("toUnix")),
 });
 
-module.exports = { getGroupInsights, getGroupTimeline };
+module.exports = { getGroupInsights, getGroupInsightsReadOnly, getGroupTimeline };

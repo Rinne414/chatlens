@@ -3,6 +3,7 @@ const path = require("node:path");
 const { readJson } = require("../report_utils");
 const { collectRun, collectRuns, pathExists, dirSize, parseRunTimestamp } = require("../run_index");
 const messageStore = require("../message_store");
+const briefingStore = require("../briefing_store");
 const pictureStore = require("../picture_store");
 const { summarizeCatchup } = require("../run_catchup");
 const { normalizeLlmError, readLlmError, readLlmUnused } = require("../llm_status");
@@ -30,6 +31,28 @@ const loadConfig = () => {
     }
   }
   return config;
+};
+
+// getGroupSummaries reads every stored message (~0.4 s on 422k rows) and
+// /api/state alone needed it twice; it is reused until a message arrives or a
+// read mark moves (row deletions are rare: repairs, never routine pruning).
+const summariesCache = new Map();
+const groupSummaries = (db, floor = 0) => {
+  const key = JSON.stringify([
+    db.prepare("SELECT MAX(rowid) AS n FROM messages").get().n,
+    db.prepare("SELECT COUNT(*) AS n, MAX(updated_at) AS at, TOTAL(sent_at) AS marks FROM read_marks").get(),
+  ]);
+  const cached = summariesCache.get(floor);
+  if (cached?.key === key) {
+    return cached.rows;
+  }
+  const rows = messageStore.getGroupSummaries(db, { unreadFloor: floor });
+  summariesCache.set(floor, { key, rows });
+  // Only the current floors matter; an old one is never asked for again.
+  if (summariesCache.size > 4) {
+    summariesCache.delete(summariesCache.keys().next().value);
+  }
+  return rows;
 };
 
 let storeHandle = null;
@@ -152,7 +175,7 @@ const historicalCoverageWindow = (days, toUnix) => ({
 const getWatchlistHealth = (watchlist, nowUnix) => {
   const db = getStore();
   const { fromUnix, toUnix } = currentCoverageWindow(7, nowUnix);
-  const summaries = new Map(messageStore.getGroupSummaries(db).map((group) => [group.groupId, group]));
+  const summaries = new Map(groupSummaries(db, unreadFloor(db)).map((group) => [group.groupId, group]));
   const coverageEnds = messageStore.getCoverageEnds(db);
   return watchlist.map((entry) => {
     const health = messageStore.getCoverageHealth(db, [entry.groupId], fromUnix, toUnix);
@@ -172,7 +195,7 @@ const getWatchlistHealth = (watchlist, nowUnix) => {
 
 const getGroupActivity = () => {
   const db = getStore();
-  const summaries = new Map(messageStore.getGroupSummaries(db).map((group) => [group.groupId, group]));
+  const summaries = new Map(groupSummaries(db, unreadFloor(db)).map((group) => [group.groupId, group]));
   return Object.entries(messageStore.getCoverageEnds(db))
     .map(([groupId, latestScanUnix]) => ({
       groupId,
@@ -409,10 +432,20 @@ const getStoreMessages = (query) => {
   };
 };
 
+// Before the briefing's first "看完了" (or on a store without it) nothing is
+// floored: a group without a read mark counts its whole history.
+const unreadFloor = (db) => {
+  try {
+    return Number(briefingStore.getState(db, "briefing_since", 0)) || 0;
+  } catch {
+    return 0;
+  }
+};
+
 const getStoreOverview = () => {
   const db = getStore();
   return {
-    groups: messageStore.getGroupSummaries(db).map((group) => ({
+    groups: groupSummaries(db, unreadFloor(db)).map((group) => ({
       ...group,
       readMark: messageStore.getReadMark(db, group.groupId),
     })),
@@ -498,7 +531,7 @@ const prepareQuickSummary = ({ groupId, fromUnix, toUnix }) => {
     throw new Error("选中的范围内没有文本消息。");
   }
 
-  const groupName = messageStore.getGroupSummaries(db).find((group) => group.groupId === normalizedGroupId)?.name ?? "";
+  const groupName = db.prepare("SELECT name FROM group_names WHERE group_id = ?").get(normalizedGroupId)?.name ?? "";
   const tmpDir = path.join(toolRoot, "store", "tmp");
   fs.mkdirSync(tmpDir, { recursive: true });
   const stamp = Date.now();
@@ -565,9 +598,6 @@ const saveReadMark = ({ groupId, sentAt, rowId, toLatest }) => {
   return messageStore.getReadMark(db, normalizedGroupId);
 };
 
-const MEDIA_INDEX_TTL_MS = 30 * 1000;
-let mediaIndexCache = null;
-let mediaManifestCache = new Map();
 
 const finalizeMediaIndex = (allItems, scannedRefs) => {
   const primaryByKey = new Map();
@@ -589,95 +619,146 @@ const finalizeMediaIndex = (allItems, scannedRefs) => {
   };
 };
 
-const buildMediaIndex = (forceRefresh) => {
-  if (forceRefresh !== true && mediaIndexCache !== null && Date.now() - mediaIndexCache.builtAt < MEDIA_INDEX_TTL_MS) {
-    return mediaIndexCache.payload;
+const STAT_BATCH = 64;
+
+const sizeOrNull = async (filePath) => {
+  try {
+    return (await fs.promises.stat(filePath)).size;
+  } catch {
+    return null;
   }
+};
 
-  const config = loadConfig();
-  const allItems = [];
+// One run's manifest turned into index items. Every copied file is stat()ed
+// here (missing ones are left out), so this runs once per manifest version,
+// asynchronously in batches: the server keeps answering meanwhile.
+const buildManifestItems = async (runsDir, runId, manifestPath, manifestStat) => {
+  let manifest;
+  try {
+    manifest = readJson(manifestPath);
+  } catch (error) {
+    // A truncated manifest from a killed run must not break the whole index.
+    console.error(`media-index: 跳过无法解析的 manifest（${runId}）: ${error.message}`);
+    return null;
+  }
+  const candidates = [];
   let scannedRefs = 0;
-  const seenManifestPaths = new Set();
-
-  if (pathExists(config.runsDir)) {
-    for (const entry of fs.readdirSync(config.runsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !entry.name.startsWith("qq-")) {
-        continue;
-      }
-      const manifestPath = path.join(config.runsDir, entry.name, "media", "media-manifest.json");
-      if (!pathExists(manifestPath)) {
-        continue;
-      }
-
-      seenManifestPaths.add(manifestPath);
-      let manifestStat;
-      try {
-        manifestStat = fs.statSync(manifestPath);
-      } catch (error) {
-        console.error(`media-index: 跳过无法读取的 manifest（${entry.name}）: ${error.message}`);
-        continue;
-      }
-      const cachedManifest = mediaManifestCache.get(manifestPath);
-      let manifest;
-      if (cachedManifest?.mtimeMs === manifestStat.mtimeMs && cachedManifest.size === manifestStat.size) {
-        manifest = cachedManifest.items;
-      } else {
-        try {
-          manifest = readJson(manifestPath);
-        } catch (error) {
-          // A truncated manifest from a killed run must not break the whole index.
-          console.error(`media-index: 跳过无法解析的 manifest（${entry.name}）: ${error.message}`);
-          continue;
-        }
-        mediaManifestCache.set(manifestPath, { mtimeMs: manifestStat.mtimeMs, size: manifestStat.size, items: manifest });
-      }
-
-      for (const item of manifest) {
-        if (typeof item.copiedPath !== "string" || item.copiedPath.length === 0) {
-          continue;
-        }
-        scannedRefs += 1;
-        const webPath = toWebPath(config.runsDir, item.copiedPath);
-        if (webPath === null) {
-          continue;
-        }
-
-        let bytes;
-        try {
-          bytes = fs.statSync(item.copiedPath).size;
-        } catch {
-          continue;
-        }
-
-        const contentKeySource = typeof item.hash === "string" && item.hash.length > 0 ? "hash" : "filename";
-        const contentKey = contentKeySource === "hash" ? item.hash : path.basename(item.copiedPath).toLowerCase();
-        allItems.push({
-          runId: entry.name,
-          groupId: String(item.groupId ?? ""),
-          groupName: item.groupName ?? "",
-          rowId: String(item.rowId ?? ""),
-          hkt: item.hkt ?? "",
-          speaker: item.speaker ?? "",
-          kind: item.kind ?? "file",
-          bytes,
-          webPath,
-          contentKey,
-          contentKeySource,
-          // Group-scoped key: the same file posted in two groups must stay
-          // visible under BOTH groups' filters in the media tab.
-          dedupKey: `${String(item.groupId ?? "")}|${contentKey}`,
-        });
-      }
+  for (const item of Array.isArray(manifest) ? manifest : []) {
+    if (typeof item.copiedPath !== "string" || item.copiedPath.length === 0) {
+      continue;
+    }
+    scannedRefs += 1;
+    const webPath = toWebPath(runsDir, item.copiedPath);
+    if (webPath !== null) {
+      candidates.push({ item, webPath });
     }
   }
+  const items = [];
+  for (let start = 0; start < candidates.length; start += STAT_BATCH) {
+    const batch = candidates.slice(start, start + STAT_BATCH);
+    const sizes = await Promise.all(batch.map(({ item }) => sizeOrNull(item.copiedPath)));
+    batch.forEach(({ item, webPath }, index) => {
+      if (sizes[index] !== null) {
+        items.push(manifestItem(runId, item, webPath, sizes[index]));
+      }
+    });
+  }
+  return { mtimeMs: manifestStat.mtimeMs, size: manifestStat.size, items, scannedRefs };
+};
 
-  mediaManifestCache = new Map([...mediaManifestCache.entries()].filter(([manifestPath]) => seenManifestPaths.has(manifestPath)));
+const manifestItem = (runId, item, webPath, bytes) => {
+  const contentKeySource = typeof item.hash === "string" && item.hash.length > 0 ? "hash" : "filename";
+  const contentKey = contentKeySource === "hash" ? item.hash : path.basename(item.copiedPath).toLowerCase();
+  return {
+    runId,
+    groupId: String(item.groupId ?? ""),
+    groupName: item.groupName ?? "",
+    rowId: String(item.rowId ?? ""),
+    hkt: item.hkt ?? "",
+    speaker: item.speaker ?? "",
+    kind: item.kind ?? "file",
+    bytes,
+    webPath,
+    contentKey,
+    contentKeySource,
+    // Group-scoped key: the same file posted in two groups must stay
+    // visible under BOTH groups' filters in the media tab.
+    dedupKey: `${String(item.groupId ?? "")}|${contentKey}`,
+  };
+};
 
+const newMediaIndexCache = () => ({ manifests: new Map(), signature: null, payload: null, building: null });
+
+// The run manifests on disk right now: [{ runId, manifestPath, stat }].
+const listManifests = (runsDir) => {
+  if (!pathExists(runsDir)) {
+    return [];
+  }
+  return fs.readdirSync(runsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("qq-"))
+    .flatMap((entry) => {
+      const manifestPath = path.join(runsDir, entry.name, "media", "media-manifest.json");
+      try {
+        return [{ runId: entry.name, manifestPath, stat: fs.statSync(manifestPath) }];
+      } catch {
+        return [];
+      }
+    });
+};
+
+const rebuildMediaIndex = async (runsDir, cache, found, key) => {
+  const manifests = new Map();
+  for (const { runId, manifestPath, stat } of found) {
+    const cached = cache.manifests.get(manifestPath);
+    const built = cached?.mtimeMs === stat.mtimeMs && cached.size === stat.size
+      ? cached
+      : await buildManifestItems(runsDir, runId, manifestPath, stat);
+    if (built !== null) {
+      manifests.set(manifestPath, built);
+    }
+  }
   // Duplicates stay in the index (the chat view joins by timestamp and needs every
   // occurrence); the media tab hides dup=true so each file shows once.
-  const payload = finalizeMediaIndex(allItems, scannedRefs);
-  mediaIndexCache = { builtAt: Date.now(), payload };
-  return payload;
+  const all = [...manifests.values()];
+  cache.manifests = manifests;
+  cache.payload = finalizeMediaIndex(all.flatMap((built) => built.items), all.reduce((total, built) => total + built.scannedRefs, 0));
+  cache.signature = key;
+  return cache.payload;
+};
+
+// The media copies of every past run. A run's copies never change after it
+// ends, so each manifest is built once (stat()ing ~90k copied files on every
+// rebuild took 13.6 s, measured 2026-09-30) and the whole index is reused
+// until a manifest appears, changes or goes away. One build at a time.
+const collectMediaIndex = async (runsDir, cache) => {
+  const found = listManifests(runsDir);
+  const key = found.map(({ manifestPath, stat }) => `${manifestPath}|${stat.mtimeMs}|${stat.size}`).join("\n");
+  if (cache.payload !== null && cache.signature === key) {
+    return cache.payload;
+  }
+  if (cache.building === null) {
+    cache.building = rebuildMediaIndex(runsDir, cache, found, key).finally(() => {
+      cache.building = null;
+    });
+  }
+  return cache.building;
+};
+
+// One group's part, for a chat (the whole index is ~45 MB).
+const mediaIndexForGroup = (payload, groupId) => {
+  const items = payload.items.filter((item) => item.groupId === String(groupId));
+  return { ...payload, items, totalItems: items.filter((item) => !item.dup).length };
+};
+
+let mediaIndex = newMediaIndexCache();
+
+// refresh: read every manifest again (e.g. after copied files were deleted).
+const buildMediaIndex = async (forceRefresh, groupId = null) => {
+  if (forceRefresh === true && mediaIndex.building === null) {
+    mediaIndex = newMediaIndexCache();
+  }
+  const payload = await collectMediaIndex(loadConfig().runsDir, mediaIndex);
+  return groupId === null ? payload : mediaIndexForGroup(payload, groupId);
 };
 
 // Free disk space by removing per-run temp data. "clean-db" copies are always
@@ -770,6 +851,9 @@ module.exports = {
   advanceLocalReadMarks: (groupIds) => messageStore.advanceLocalReadMarks(getStore(), groupIds),
   buildMediaIndex,
   finalizeMediaIndex,
+  collectMediaIndex,
+  newMediaIndexCache,
+  mediaIndexForGroup,
   prepareQuickSummary,
   resolveKnowledgeExportDir,
 };

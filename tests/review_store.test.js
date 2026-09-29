@@ -89,6 +89,21 @@ test("tagCoverage compares row ids numerically across a digit rollover", () => {
   assert.deepEqual(review.uncoveredRuns(messages, tags).map((run) => run.map((item) => item.rowId)), [["9999998"], ["10000001"]]);
 });
 
+test("tagCoverage tells apart real 19-digit QQ ids of one second (a double cannot)", () => {
+  const at = 1790700000;
+  // Real ids of one second differ in the last digits; as doubles all three are equal.
+  const messages = [
+    { sentAt: at, rowId: "7552461346541412001" },
+    { sentAt: at, rowId: "7552461346541412002" },
+    { sentAt: at, rowId: "7552461346541412003" },
+  ];
+  assert.equal(Number(messages[0].rowId), Number(messages[2].rowId));
+  const chunks = [{ startSentAt: at, firstRowId: "7552461346541412002", endSentAt: at, lastRowId: "7552461346541412002", status: "done" }];
+  const tags = review.tagCoverage(messages, chunks);
+  assert.deepEqual(tags, [null, "done", null]);
+  assert.deepEqual(review.uncoveredRuns(messages, tags).map((run) => run.map((item) => item.rowId)), [["7552461346541412001"], ["7552461346541412003"]]);
+});
+
 test("calendar reports volume per day and which days have AI summaries", () => {
   const db = seed();
   const result = review.calendar(db, { fromDay: "2026-09-20", toDay: "2026-09-24" });
@@ -158,4 +173,23 @@ test("search finds topics in cached summaries and raw messages, by day", () => {
   assert.equal(review.search(db, { query: "_" }).messages.total, 0);
   assert.equal(review.search(db, { query: "   " }).terms.length, 0);
   db.close();
+});
+
+test("search keeps to a date range, and a further page brings only the next messages", () => {
+  const db = seed();
+  // "画图" is in 30 messages on 09-22; "今天" in 10 on 09-24.
+  const all = review.search(db, { query: "画图" });
+  assert.equal(all.messages.total, 30);
+  const range = { fromUnix: beijing(2026, 9, 24, 0), toUnix: beijing(2026, 9, 25, 0) };
+  const onlyThe24th = review.search(db, { query: "画图", ...range });
+  assert.equal(onlyThe24th.messages.total, 0);
+  assert.equal(review.search(db, { query: "今天", ...range }).messages.total, 10);
+  // The summary hit (09-22) is outside the range too.
+  assert.equal(review.search(db, { query: "int8", ...range }).summaries.total, 0);
+  assert.ok(review.search(db, { query: "int8" }).summaries.total > 0);
+
+  const more = review.search(db, { query: "画图", messageOffset: 20, messagesOnly: true });
+  assert.equal(more.messages.items.length, 10);
+  assert.equal(more.summaries, undefined);
+  assert.equal(more.messages.byDay, undefined);
 });

@@ -8,7 +8,7 @@ const path = require("node:path");
 const test = require("node:test");
 const route = require("../src/llm_route");
 const { GrokAuthError, authFromTokenResponse } = require("../src/grok_auth");
-const { assembleStream, callLlm, createClient, currentModel, shouldFallBack } = require("../src/llm_summarizer");
+const { assembleStream, callLlm, createClient, currentModel, parseJsonContent, shouldFallBack } = require("../src/llm_summarizer");
 
 const NOW = 1_800_000_000;
 const KEY_ENV = "CHATLENS_TEST_LLM_KEY";
@@ -95,6 +95,21 @@ test("only an unavailable provider falls back, never a bad request or an unusabl
   }
   assert.equal(shouldFallBack(new Error("connect ECONNREFUSED")), true);
   assert.equal(shouldFallBack(new Error("LLM response was truncated. Body=...")), false);
+});
+
+test("one malformed JSON answer is that answer's problem, not the provider being down", () => {
+  // Seen live 2026-09-30 03:28: Grok's answer cut mid-string switched the whole
+  // run (and the next 15 minutes) to DeepSeek.
+  for (const text of ["{\"summary\": \"abc", "{\"a\": 1,, }", "not json at all"]) {
+    let error;
+    try {
+      parseJsonContent(text);
+    } catch (caught) {
+      error = caught;
+    }
+    assert.ok(error instanceof Error, text);
+    assert.equal(shouldFallBack(error), false, error.message);
+  }
 });
 
 // One mock server plays both providers: /grok answers with `grokStatus`,

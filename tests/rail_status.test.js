@@ -70,3 +70,19 @@ test("without a known identity nobody gets a mention mark", () => {
     assert.ok(result.groups.every((group) => group.mentions === 0));
   });
 });
+
+test("a group never opened counts only what came after the briefing's last 看完了", () => {
+  withStore((db) => {
+    seed(db);
+    const message = db.prepare("INSERT INTO messages (group_id, row_id, sent_at, speaker, speaker_uin, text, at_uins, reply_to_uin) VALUES (?, ?, ?, ?, ?, ?, '', '')");
+    message.run("3", "30", NOW - 9000, "E", "5", "old");
+    message.run("3", "31", NOW - 60, "F", "6", "new");
+    const group3 = [{ groupId: "3", name: "三群" }];
+    assert.equal(railStatus(db, { watchlist: group3, identity, nowUnix: NOW }).groups[0].unread, 2);
+    briefingStore.setState(db, "briefing_since", NOW - 1000);
+    assert.equal(railStatus(db, { watchlist: group3, identity, nowUnix: NOW }).groups[0].unread, 1);
+    // A read mark still wins.
+    messageStore.setReadMark(db, "3", NOW - 60, "31");
+    assert.equal(railStatus(db, { watchlist: group3, identity, nowUnix: NOW }).groups[0].unread, 0);
+  });
+});

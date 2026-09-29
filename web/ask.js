@@ -101,7 +101,10 @@ const deleteAskItem = async (id) => {
     if (askState.current?.id === id) {
       askState.current = null;
     }
-    await loadAskStatus();
+    // Dropped in place: reloading went back to page 1 and folded the older
+    // questions the user had opened. The next page's offset (history.length)
+    // still matches the list the server now has.
+    askState.history = askState.history.filter((item) => item.id !== id);
   } catch (error) {
     askState.error = error.message;
   }
@@ -170,6 +173,24 @@ const askCitation = (citation) =>
     el("span", { class: "brief-meta" }, `#${citation.ref} · ${citation.groupName} · ${unixToHkt(citation.sentAt).slice(5, 16)} · ${citation.speaker}`),
     el("span", { class: "ask-citation-text" }, citation.text)));
 
+// Each keyword searches only its newest messages (200, or 600 at the
+// detailed level); when that cut anything off, say how many there are and how
+// far back the search reached. Older answers never had these fields.
+const askFoundText = (stats) => {
+  if (!stats) {
+    return null;
+  }
+  const read = `读了其中 ${briefNumber(stats.hitsUsed)} 处的上下文`;
+  if (stats.capped !== true) {
+    return `找到 ${briefNumber(stats.matchedMessages)} 条相关消息，${read}`;
+  }
+  return `相关消息共 ${briefNumber(stats.totalMatches)} 条，搜了最新的 ${briefNumber(stats.matchedMessages)} 条（${unixToHkt(stats.searchedFrom).slice(0, 10)} 以后），${read}`;
+};
+
+const askOlderHint = (result) => (result.stats?.capped === true
+  ? el("p", { class: "brief-meta ask-older-hint" }, "更早的相关消息没有读到。想问更早的事：在问题里写上时间（如「去年五月」），或者选好时间范围再问。")
+  : null);
+
 const askScopeLine = (result) => {
   const scope = result.scope ?? {};
   const when = scope.fromDay || scope.toDay ? `${scope.fromDay ?? "最早"} 到 ${scope.toDay ?? "现在"}` : "全部时间";
@@ -177,7 +198,7 @@ const askScopeLine = (result) => {
     result.keywords?.length > 0 ? `关键词：${result.keywords.join("、")}` : null,
     when,
     scope.groups?.length > 0 ? `群：${scope.groups.join("、")}` : null,
-    result.stats ? `找到 ${briefNumber(result.stats.matchedMessages)} 条相关消息，读了其中 ${briefNumber(result.stats.hitsUsed)} 处的上下文` : null,
+    askFoundText(result.stats),
     result.model ? `${result.model}${result.detail === "detailed" ? " · 详细" : ""}` : null,
   ];
   return parts.filter(Boolean).join(" · ");
@@ -199,6 +220,7 @@ const askResult = () => {
       result.found === false ? el("span", { class: "tag plain" }, "没找到直接相关的内容") : null),
     el("div", { class: "ask-answer" }, result.answer),
     el("p", { class: "brief-meta" }, askScopeLine(result)),
+    askOlderHint(result),
     citations.length > 0
       ? el("section", { class: "ask-citations" },
         el("h4", {}, "出处", el("span", { class: "brief-panel-count" }, citations.length), el("span", { class: "brief-sub" }, "点一条打开当时的聊天")),

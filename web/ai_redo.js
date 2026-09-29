@@ -65,6 +65,8 @@ const aiRedoTable = (rows) => {
     el("tbody", {}, body));
 };
 
+const aiDuration = (minutes) => (minutes < 90 ? `${Math.max(1, minutes)} 分钟` : `${Math.round(minutes / 6) / 10} 小时`);
+
 const aiRedoReport = (report) => {
   if (!report?.job) {
     return null;
@@ -74,7 +76,7 @@ const aiRedoReport = (report) => {
   return el("div", { class: "ai-redo" },
     el("p", { class: "card-sub", style: "margin:10px 0 4px" },
       `${job.fromDay} – ${job.toDay}：重做 ${job.redoChunks} 段已有摘要，补齐 ${job.backfillChunks} 段没摘要过的消息（${briefNumber(job.backfillMessages)} 条）。`,
-      `后台每次刷新处理一批（新消息优先），Grok 不能用时自动暂停，不会改用付费 API。`),
+      `后台每次刷新处理一批（新消息优先，还有待做时两次刷新之间只隔 2 分钟），Grok 不能用时自动暂停，不会改用付费 API。`),
     el("div", { class: "ai-tiles" },
       el("div", { class: "ai-tile" },
         el("span", { class: "ai-tile-label" }, "已用"),
@@ -87,6 +89,9 @@ const aiRedoReport = (report) => {
         el("span", { class: "ai-tile-meta" }, remaining.chunks === 0
           ? "所有段都已是详细模式（Grok 拒绝总结的保留原摘要）"
           : `${remaining.chunks} 段 · ${briefNumber(remaining.messages)} 条消息 · 订阅原价约 ${aiUsd(remaining.listUsd)}`),
+        remaining.chunks > 0 && Number.isFinite(remaining.etaMinutes)
+          ? el("span", { class: "ai-tile-meta" }, `照目前的速度，大约还要 ${aiDuration(remaining.etaMinutes)}（控制台开着才会继续）`)
+          : null,
         el("span", { class: "ai-tile-meta" }, perMessage.measured ? "按这次已完成部分的实测平均估算" : "按试跑实测（每条约 122 token）估算，跑一阵后会更准"))),
     aiRedoTable(report.rows));
 };

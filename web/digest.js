@@ -161,8 +161,12 @@ const digestList = (key, title, items, renderItem) => {
 const digestTitledItem = (title, detail, extra = null) =>
   el("li", {}, el("strong", {}, title), el("p", {}, detail), extra);
 
+// Stars as on the briefing (bookmarks.js); digest items name their groups, not one group.
+const digestStar = (item) => bookmarkStar(item, () => renderCurrentView());
+
 const digestNewThing = (item) =>
-  el("li", {},
+  el("li", { class: "digest-savable" },
+    digestStar({ kind: "thing", title: item.name, body: item.detail ?? "", link: item.link ?? "", groupName: (item.groups ?? []).join("、") }),
     el("strong", {}, item.name, safeHref(item.link) ? el("a", { href: safeHref(item.link), target: "_blank", rel: "noopener noreferrer", class: "brief-link" }, " ↗") : null),
     el("p", {}, item.detail),
     digestGroupsLine(item.groups));
@@ -180,7 +184,11 @@ const digestDayBody = (digest, keyPrefix) => {
   const summary = digest.summary;
   return [
     digestList(`${keyPrefix}:highlights`, "重点", summary.highlights, (item) =>
-      digestTitledItem(item.importance === "high" ? `★ ${item.title}` : item.title, item.detail, digestGroupsLine(item.groups))),
+      el("li", { class: "digest-savable" },
+        digestStar({ kind: "topic", title: item.title, body: item.detail ?? "", groupName: (item.groups ?? []).join("、") }),
+        el("strong", {}, item.importance === "high" ? `★ ${item.title}` : item.title),
+        el("p", {}, item.detail),
+        digestGroupsLine(item.groups))),
     digestList(`${keyPrefix}:cross`, "多个群都在聊", summary.crossGroup, (item) => digestTitledItem(item.topic, item.detail, digestGroupsLine(item.groups))),
     digestList(`${keyPrefix}:things`, "新东西", summary.newThings, digestNewThing),
     digestList(`${keyPrefix}:open`, "没人回答的问题", summary.openQuestions, (item) =>
@@ -283,6 +291,6 @@ const digestReportList = (kind, onPick, selected) => {
           onclick: () => onPick(kind, period),
         },
         el("span", {}, digestPeriodLabel(kind, period)),
-        el("span", { class: "brief-meta" }, item ? item.headline || "已生成" : "未生成")));
+        el("span", { class: "brief-meta" }, item ? item.headline || "已生成" : "未生成 · 点开可生成")));
     })));
 };

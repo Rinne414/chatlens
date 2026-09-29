@@ -138,6 +138,10 @@ const runPass = async ({ reason = "tick" } = {}) => {
     await drain("previews", () => store.needingPreviews(db(), { now: now(), limit: 20 }), jobs.previewOne, deadline);
     await drain("keep", () => store.needingKeep(db(), { now: now(), limit: 10, groupIds: current.keepAllGroups }), keepWork, deadline);
     await drain("thumbs", () => store.needingThumbs(db(), { now: now(), limit: 60 }), jobs.thumbOne, deadline);
+    // After the thumbnails, so a big backlog of AI originals never holds up new pictures.
+    if (current.keepAi) {
+      await drain("keep", () => store.needingKeepAi(db(), { now: now(), limit: 10 }), keepWork, deadline);
+    }
     enforceBudget();
   } catch (error) {
     pass.error = error.message;
@@ -184,6 +188,7 @@ const expiring = () => {
   return {
     items: items.map((item) => ({ ...item, daysLeft: Math.max(0, Math.floor((item.expiresAt - now) / 86400)) })),
     total: store.countExpiringAi(db(), { now }),
+    keepAi: service.settings().keepAi === true,
     soon: store.countExpiringAi(db(), { now, withinSeconds: EXPIRING_DAYS * 86400 }),
   };
 };

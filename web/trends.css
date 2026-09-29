@@ -43,6 +43,10 @@
 .tr-dot.first { width: 12px; height: 12px; margin-left: -6px; top: 3px; background: var(--ok); }
 .tr-track-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; }
 
+/* The rest of one person's picture set, folded under the first. */
+.tr-set { display: flex; flex-wrap: wrap; gap: 6px; }
+.tr-set-thumb { width: 56px; height: 56px; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: var(--line); cursor: zoom-in; }
+.tr-set-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tr-related { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 0; }
 .tr-toggle { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .tr-toggle:hover { text-decoration: underline; }
