@@ -176,11 +176,30 @@ const ingestExport = (db, exportData, runId) => {
     // copy) carry coveredFromUnix — only the actually-scanned span becomes
     // coverage, so the missing part can still be re-fetched later. Legacy
     // exports without the field keep the old whole-window behavior.
+    // A group listed in incompleteGroups was read newest first and stopped
+    // part way: only what it read is covered, from the second after the
+    // oldest one it reached (groupReadFrom; that second may be half read) —
+    // the whole window when the stop came past it, nothing when it read
+    // nothing. The rest stays uncovered, so the next refresh reads it again.
     const hasCoveredField = Object.prototype.hasOwnProperty.call(exportData, "coveredFromUnix");
     const defaultCoveredFrom = hasCoveredField ? exportData.coveredFromUnix : exportData.startUnix;
-    for (const groupId of exportData.groupIds ?? []) {
+    const incomplete = new Set((exportData.incompleteGroups ?? []).map(String));
+    // An export that lists its incomplete groups vouches for every other one.
+    const knowsIncomplete = Array.isArray(exportData.incompleteGroups);
+    const coveredFromOf = (groupId) => {
       const keyed = Number(exportData.groupStarts?.[groupId]);
-      const coveredFrom = Number.isFinite(keyed) && keyed > 0 ? keyed : defaultCoveredFrom;
+      if (!incomplete.has(String(groupId))) {
+        if (Number.isFinite(keyed) && keyed > 0) {
+          return keyed;
+        }
+        return knowsIncomplete ? Number(exportData.startUnix) : defaultCoveredFrom;
+      }
+      const readFrom = Number(exportData.groupReadFrom?.[groupId]);
+      const windowStart = Number.isFinite(keyed) && keyed > 0 ? keyed : Number(exportData.startUnix);
+      return Number.isFinite(readFrom) && readFrom > 0 ? Math.max(readFrom + 1, windowStart) : null;
+    };
+    for (const groupId of exportData.groupIds ?? []) {
+      const coveredFrom = coveredFromOf(groupId);
       if (Number.isFinite(coveredFrom) && Number.isFinite(exportData.endUnix) && coveredFrom < exportData.endUnix) {
         insertRange.run(String(groupId), coveredFrom, exportData.endUnix, runId ?? "");
       }
@@ -248,6 +267,30 @@ const queryMessages = (db, { groupId, fromUnix, toUnix, afterSentAt, afterRowId,
 // Per-group latest coverage end straight from scan_ranges — unlike
 // getGroupSummaries this also covers groups whose messages were all pruned,
 // so "自上次记录" never silently skips their gap.
+// Where the background refresh goes on from, per group: the end of the first
+// unbroken run of coverage among spans still inside the look-back. With no
+// gap that is the newest end; a gap (a refresh that stopped part way while QQ
+// was writing) is read again from its start.
+const getCoverageResume = (db, sinceUnix) => {
+  const resume = {};
+  const broken = new Set();
+  const rows = db.prepare(
+    "SELECT group_id AS groupId, start_unix AS startUnix, end_unix AS endUnix FROM scan_ranges WHERE end_unix > ? ORDER BY group_id, start_unix",
+  ).all(sinceUnix);
+  for (const row of rows) {
+    if (broken.has(row.groupId)) {
+      continue;
+    }
+    const current = resume[row.groupId];
+    if (current === undefined || row.startUnix <= current) {
+      resume[row.groupId] = Math.max(current ?? row.endUnix, row.endUnix);
+    } else {
+      broken.add(row.groupId);
+    }
+  }
+  return resume;
+};
+
 const getCoverageEnds = (db) =>
   Object.fromEntries(
     db
@@ -694,6 +737,7 @@ module.exports = {
   getCoverageHealth,
   getCoverageTimeline,
   getCoverageEnds,
+  getCoverageResume,
   getStoredGroups,
   getGroupSummaries,
   getReadMark,

@@ -2,9 +2,9 @@
 
 /* ---------- 首页 keyboard ----------
    j / k move between cards (和你有关, 关注的词, new things, Q&A, topics,
-   groups), o or Enter opens, s stars, m is 不看此人 on a mention, ? lists the
-   keys. No key marks anything read: read marks only move forward, so that
-   stays a deliberate click. */
+   groups), o or Enter opens, s stars, ? lists the keys. No key marks
+   anything read: read marks only move forward, so that stays a deliberate
+   click. */
 
 const BRIEF_KEY_ITEMS = ["brief-mention", "brief-watch-hit", "brief-thing", "brief-qa", "brief-topic", "brief-group"]
   .map((name) => `.brief-page li.${name}`).join(", ");
@@ -12,7 +12,6 @@ const BRIEF_KEY_HELP = [
   ["j / k", "下一张 / 上一张卡片"],
   ["o 或 Enter", "打开（聊天、群）"],
   ["s", "收藏 / 取消收藏"],
-  ["m", "不看此人（「和你有关」里）"],
   ["Ctrl+K 或 /", "搜索，跳到任何页面、群"],
   ["?", "显示 / 隐藏这张说明"],
 ];
@@ -42,7 +41,7 @@ const briefKeyMove = (step) => {
   items[briefKeys.index].scrollIntoView({ block: "nearest", behavior: "smooth" });
 };
 
-// Clicks the current card's control (open, star, mute); false when it has none.
+// Clicks the current card's control (open, star); false when it has none.
 const briefKeyPress = (selector) => {
   const control = briefKeyItems()[briefKeys.index]?.querySelector(selector) ?? null;
   control?.click();
@@ -75,7 +74,6 @@ const briefKeyActions = {
   o: () => briefKeyPress(".brief-row-button"),
   enter: () => document.activeElement === document.body && briefKeyPress(".brief-row-button"),
   s: () => briefKeyPress(".bm-star"),
-  m: () => briefKeyPress(".brief-mute"),
   "?": toggleBriefKeyHelp,
   escape: () => {
     if (briefKeys.help === null) {

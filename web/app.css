@@ -94,6 +94,8 @@ body {
 main { padding: 0 28px 40px; min-width: 0; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 22px 0 16px; }
 .topbar h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
+.topbar-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.view-back[hidden] { display: none; }
 .job-pill {
   border: 1px solid var(--line);
   background: var(--panel);

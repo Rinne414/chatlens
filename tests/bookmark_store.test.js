@@ -15,14 +15,14 @@ const openTemp = () => bookmarks.ensureBookmarkSchema(
 test("a saved item keeps where it came from; saving it again does not duplicate it", () => {
   const db = openTemp();
   try {
-    const item = { kind: "thing", title: "  Wulver  ", body: "福瑞向 K2 微调", link: "https://example.com/w", groupId: "1001", groupName: "银龙", speaker: "萌萌", sentAt: 1_790_000_000 };
+    const item = { kind: "thing", title: "  Wulver  ", body: "福瑞向 K2 微调", link: "https://example.com/w", groupId: "1001", groupName: "示例群", speaker: "小红", sentAt: 1_790_000_000 };
     const id = bookmarks.addBookmark(db, item, 100);
     assert.equal(bookmarks.addBookmark(db, { ...item, body: "更新过的说明" }, 200), id);
     const { total, items } = bookmarks.listBookmarks(db);
     assert.equal(total, 1);
     assert.deepEqual({ ...items[0] }, {
       id, itemKey: "thing|1001|wulver", kind: "thing", title: "Wulver", body: "更新过的说明", link: "https://example.com/w",
-      groupId: "1001", groupName: "银龙", speaker: "萌萌", sentAt: 1_790_000_000, createdAt: 100,
+      groupId: "1001", groupName: "示例群", speaker: "小红", sentAt: 1_790_000_000, createdAt: 100,
     });
     assert.equal(bookmarks.removeBookmark(db, id), 1);
     assert.equal(bookmarks.listBookmarks(db).total, 0);

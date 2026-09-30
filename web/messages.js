@@ -305,8 +305,24 @@ const loadNewestPage = async () => {
   }
 };
 
+// A chat as a history step: enough to open it again where it was opened.
+const chatStep = ({ groupId, groupName, fromUnix, toUnix, fromLastRead, origin, scrollToTime, scrollToRowIds }) => ({
+  chat: {
+    groupId: String(groupId),
+    groupName: groupName ?? null,
+    fromUnix: Number.isFinite(fromUnix) ? fromUnix : null,
+    toUnix: Number.isFinite(toUnix) ? toUnix : null,
+    fromLastRead: fromLastRead === true,
+    origin: origin ?? null,
+    scrollToTime: Number.isFinite(scrollToTime) ? scrollToTime : null,
+    scrollToRowIds: Array.isArray(scrollToRowIds) ? [...scrollToRowIds] : [],
+  },
+});
+
 const openChat = async ({ groupId, groupName, fromUnix, toUnix, fromLastRead, origin, scrollToTime, scrollToRowIds }) => {
   const msg = app.msg;
+  msg.step = chatStep({ groupId, groupName, fromUnix, toUnix, fromLastRead, origin, scrollToTime, scrollToRowIds });
+  markViewStep(msg.step);
   // A pending auto-read from the previous chat must never fire against this group.
   if (msgObservers.readTimer !== null) {
     clearTimeout(msgObservers.readTimer);
@@ -358,15 +374,26 @@ const openChat = async ({ groupId, groupName, fromUnix, toUnix, fromLastRead, or
 const openMessagesView = async (preset) => {
   showView("messages");
   if (preset?.groupId !== undefined) {
+    // Labels the entry before the wait below, so back during it lands right.
+    const wanted = chatStep({ ...preset, fromLastRead: preset.fromLastRead === true });
+    markViewStep(wanted);
     try {
       app.msg.overview = await api("/api/store-overview");
     } catch {
       app.msg.overview = app.msg.overview ?? null;
     }
+    // The reader went elsewhere meanwhile (another page, or back to the
+    // inbox): opening the chat now would label that entry with it.
+    const entry = currentEntry();
+    if (app.view !== "messages" || (entry !== null && !sameStep(entry.step, wanted))) {
+      return;
+    }
     await openChat({ ...preset, fromLastRead: preset.fromLastRead === true });
     return;
   }
   app.msg.mode = "inbox";
+  app.msg.step = { chat: null };
+  markViewStep(app.msg.step);
   renderMessagesView();
   try {
     app.msg.overview = await api("/api/store-overview");
@@ -394,12 +421,49 @@ const rangeCoverage = (coverage, fromUnix, toUnix) => {
 
 const returnToMessageOrigin = () => {
   const origin = app.msg.origin;
-  if (origin?.view === "reader" && typeof origin.runId === "string") {
-    openReader(origin.runId);
+  goBackTo((prev) => prev.view === origin?.view, () => {
+    if (origin?.view === "reader" && typeof origin.runId === "string") {
+      openReader(origin.runId);
+      return;
+    }
+    showView(origin?.view ?? "messages");
+    renderCurrentView();
+  });
+};
+
+const backToInbox = () => goBackTo((prev) => prev.view === "messages" && prev.step?.chat === null, () => openMessagesView());
+
+// A hidden list loses its scroll position: the chat keeps its place while
+// another page is open, for when back returns to it.
+VIEW_LEAVE_HOOKS.push(() => {
+  if (app.view === "messages" && app.msg.mode === "chat") {
+    app.msg.leftScrollTop = document.querySelector(".chat-scroll")?.scrollTop ?? null;
+  }
+});
+
+const restoreChatStep = (step) => {
+  if (!step?.chat) {
+    openMessagesView();
     return;
   }
-  showView(origin?.view ?? "messages");
-  renderCurrentView();
+  if (app.msg.mode !== "chat" || !sameStep(app.msg.step, step)) {
+    openMessagesView(step.chat);
+    return;
+  }
+  // The same chat is still drawn underneath: show it as it was left.
+  showView("messages");
+  const scrollTop = app.msg.leftScrollTop;
+  const list = document.querySelector(".chat-scroll");
+  if (list !== null && Number.isFinite(scrollTop)) {
+    list.scrollTop = scrollTop;
+  }
+};
+
+VIEW_STEP_RESTORERS.messages = (step, overlay) => {
+  restoreChatStep(step);
+  // A picture was open over the chat when the reader left: open it again, so
+  // the next back closes it instead of doing nothing.
+  reopenPictureOverlay(overlay);
 };
 
 /* ---------- read mark ---------- */
@@ -957,7 +1021,7 @@ const renderChat = () => {
     el("div", { class: "row", style: "margin-bottom:10px" },
       el("button", {
         class: "btn small",
-        onclick: () => msg.origin === null ? openMessagesView() : returnToMessageOrigin(),
+        onclick: () => msg.origin === null ? backToInbox() : returnToMessageOrigin(),
       }, msg.origin === null ? "← 群列表" : `← ${msg.origin.label}`),
       avatarEl(msg.groupName, msg.groupId, "sm", groupAvatarUrl(msg.groupId)),
       el("h2", { style: "margin:0;font-size:16px" }, msg.groupName),

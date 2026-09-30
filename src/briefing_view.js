@@ -127,7 +127,7 @@ const popularImages = (knowledgeDbPath, fromUnix, toUnix, isAvailable = () => tr
   }
 };
 
-const buildBriefing = ({ db, knowledgeDbPath, watchlist, watchWords = [], mutedUins = [], nowUnix, extraSelfUins = [], status = {}, isImageAvailable }) => {
+const buildBriefing = ({ db, knowledgeDbPath, watchlist, watchWords = [], nowUnix, extraSelfUins = [], status = {}, isImageAvailable }) => {
   briefingStore.ensureBriefingSchema(db);
   const windowStart = Number(briefingStore.getState(db, "briefing_since", nowUnix - 24 * 3600));
   const watchNames = new Map(watchlist.map((item) => [item.groupId, item.name ?? ""]));
@@ -154,12 +154,7 @@ const buildBriefing = ({ db, knowledgeDbPath, watchlist, watchWords = [], mutedU
   }).sort((left, right) => (right.textMessages + right.mediaMessages) - (left.textMessages + left.mediaMessages));
 
   const identity = messageStore.getSelfIdentity(db, extraSelfUins);
-  // Muted people's mentions stay in the list, flagged: the page folds them
-  // into one line and notifications skip them (their followed-word hits too:
-  // mostly bots echoing prompts).
-  const muted = new Set(mutedUins.map(String));
-  const flagMuted = (item) => ({ ...item, muted: muted.has(String(item.speakerUin)) });
-  const mentions = messageStore.getMentions(db, { fromUnix: windowStart, toUnix: nowUnix + 60, identity }).map(flagMuted);
+  const mentions = messageStore.getMentions(db, { fromUnix: windowStart, toUnix: nowUnix + 60, identity });
   const chunkStats = briefingStore.chunkStatsInWindow(db, windowStart);
 
   return {
@@ -178,8 +173,7 @@ const buildBriefing = ({ db, knowledgeDbPath, watchlist, watchWords = [], mutedU
     },
     mentions,
     // 关注词: where each followed word was said in the window.
-    watch: wordHits(db, { fromUnix: windowStart, toUnix: nowUnix + 60, words: watchWords })
-      .map((entry) => ({ ...entry, latest: entry.latest.map(flagMuted) })),
+    watch: wordHits(db, { fromUnix: windowStart, toUnix: nowUnix + 60, words: watchWords }),
     highlights: crossGroupHighlights(groups),
     images: popularImages(knowledgeDbPath, windowStart, nowUnix + 60, isImageAvailable),
     groups: groups.map(({ brief, ...group }) => ({

@@ -14,115 +14,7 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-const ROOT = path.join(__dirname, "..");
-const WEB = path.join(ROOT, "web");
-
-// The scripts the page actually loads, in the order it loads them.
-const pageScripts = () => {
-  const html = fs.readFileSync(path.join(WEB, "index.html"), "utf8");
-  return [...html.matchAll(/<script src="\/([^"]+)"><\/script>/gu)].map((match) => match[1]);
-};
-
-const makeNode = (tag) => ({
-  tagName: String(tag).toUpperCase(),
-  children: [],
-  dataset: {},
-  style: { setProperty() {}, removeProperty() {} },
-  attributes: {},
-  isConnected: true,
-  classList: {
-    _set: new Set(),
-    add(...names) { for (const name of names) { this._set.add(name); } },
-    remove(...names) { for (const name of names) { this._set.delete(name); } },
-    toggle(name, on) { if (on) { this._set.add(name); } else { this._set.delete(name); } },
-    contains(name) { return this._set.has(name); },
-  },
-  setAttribute(key, value) { this.attributes[key] = value; },
-  addEventListener() {},
-  removeEventListener() {},
-  append(...kids) { this.children.push(...kids); },
-  replaceChildren(...kids) { this.children = kids; },
-  getBoundingClientRect() { return { top: 0, left: 0, width: 1200, height: 800 }; },
-  get clientWidth() { return 1200; },
-  querySelector() { return null; },
-  querySelectorAll() { return []; },
-  set textContent(value) { this._text = value; },
-  get textContent() { return this._text ?? ""; },
-  set className(value) { this._class = value; },
-  get className() { return this._class ?? ""; },
-  set innerHTML(value) { this._html = value; },
-  get innerHTML() { return this._html ?? ""; },
-  focus() {},
-  scrollIntoView() {},
-  remove() {},
-  closest() { return null; },
-  insertBefore() {},
-});
-
-const makeSandbox = () => {
-  const nodes = new Map();
-  const sandbox = {
-    console: { log() {}, warn() {}, error() {} },
-    document: {
-      createElement: makeNode,
-      createDocumentFragment: () => makeNode("fragment"),
-      querySelector: (selector) => {
-        if (!nodes.has(selector)) { nodes.set(selector, makeNode("div")); }
-        return nodes.get(selector);
-      },
-      querySelectorAll: () => [],
-      addEventListener() {},
-      removeEventListener() {},
-      documentElement: makeNode("html"),
-      body: makeNode("body"),
-      head: makeNode("head"),
-      activeElement: null,
-      visibilityState: "visible",
-    },
-    localStorage: {
-      _data: new Map(),
-      getItem(key) { return this._data.has(key) ? this._data.get(key) : null; },
-      setItem(key, value) { this._data.set(key, String(value)); },
-      removeItem(key) { this._data.delete(key); },
-    },
-    navigator: { clipboard: { writeText: async () => {} }, userAgent: "test" },
-    requestAnimationFrame: (fn) => { fn(); return 1; },
-    cancelAnimationFrame() {},
-    queueMicrotask(fn) { fn(); },
-    fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
-    alert() {},
-    confirm: () => false,
-    prompt: () => null,
-    setTimeout,
-    clearTimeout,
-    setInterval: () => 0,
-    clearInterval() {},
-    URLSearchParams,
-    URL,
-    Intl,
-    Date,
-    // el() checks `child instanceof Node`; without it, boot's async work throws
-    // after the test ends and surfaces as an unhandled rejection.
-    Node: class Node {},
-    // Boot fetches state on DOMContentLoaded. Rejecting immediately keeps the
-    // scripts from starting real work we do not want to assert on here.
-    Promise,
-    _nodes: nodes,
-  };
-  sandbox.window = {
-    addEventListener() {},
-    removeEventListener() {},
-    innerHeight: 800,
-    innerWidth: 1200,
-    scrollY: 0,
-    location: { href: "http://127.0.0.1:8321/", search: "" },
-    matchMedia: () => ({ matches: false, addEventListener() {} }),
-    open() {},
-    devicePixelRatio: 1,
-  };
-  sandbox.globalThis = sandbox;
-  return sandbox;
-};
+const { WEB, pageScripts, makeSandbox } = require("./web_sandbox");
 
 test("every page script loads together without a global collision", () => {
   const sandbox = makeSandbox();
@@ -139,7 +31,9 @@ test("every page script loads together without a global collision", () => {
     } catch (error) {
       // A ReferenceError deep in a render path is expected in a fake DOM; a
       // SyntaxError or a duplicate declaration is a genuine page-breaking bug.
-      if (error instanceof SyntaxError || /already been declared/u.test(error.message)) {
+      // The error comes from the context's realm, so `instanceof SyntaxError`
+      // is always false here: compare the name.
+      if (error?.name === "SyntaxError" || /already been declared/u.test(error.message)) {
         failures.push(`${script}: ${error.message}`);
       }
     }
@@ -157,12 +51,15 @@ test("index.html references only scripts that exist", () => {
 test("the pure helper modules are reachable under their own global names", () => {
   const sandbox = makeSandbox();
   const context = vm.createContext(sandbox);
-  for (const file of ["wall_layout.js", "kb_tokens.js"]) {
+  for (const file of ["wall_layout.js", "kb_tokens.js", "relation_graph.js", "qq_collection_days.js", "brief_text.js"]) {
     vm.runInContext(fs.readFileSync(path.join(WEB, file), "utf8"), context, { filename: file });
   }
 
   assert.equal(typeof sandbox.window.WallLayout.layoutWall, "function");
   assert.equal(typeof sandbox.window.KbTokens.tokenLabel, "function");
+  assert.equal(typeof sandbox.window.RelationGraph.layoutGraph, "function");
+  assert.equal(typeof sandbox.window.QqcDays.qqcUnsavedRuns, "function");
+  assert.equal(typeof sandbox.window.BriefText.summaryParts, "function");
 });
 
 test("reader back returns to the view that opened the report", () => {
@@ -552,9 +449,9 @@ test("chat pictures get their thumbnail's size before they load", () => {
 test("an avatar's letter is a whole character even when the name starts with an emoji", () => {
   const context = loadPageContext();
   const firstGrapheme = vm.runInContext("firstGrapheme", context);
-  assert.equal(firstGrapheme("🥛威爾沃夫乳业有限公司🐺"), "🥛");
-  assert.equal(firstGrapheme("⭕怠惰的小Kの难民营"), "⭕");
-  assert.equal(firstGrapheme("  银龙女仆咖啡厅"), "银");
+  assert.equal(firstGrapheme("🥛示例牛奶工厂🐺"), "🥛");
+  assert.equal(firstGrapheme("⭕示例的小Kの群"), "⭕");
+  assert.equal(firstGrapheme("  示例咖啡厅"), "示");
   assert.equal(firstGrapheme(""), "");
 });
 
@@ -727,7 +624,7 @@ test("Ctrl+K: pages, groups and words match every word typed, and any text can g
   const entries = vm.runInContext("paletteEntries", context);
   const sources = {
     pages: [["brief", "简报"], ["knowledge", "咒语库"], ["settings", "设置"]],
-    groups: [{ groupId: "1001", name: "银龙女仆咖啡厅" }, { groupId: "1002", name: "解构原典MKII" }],
+    groups: [{ groupId: "1001", name: "示例咖啡厅" }, { groupId: "1002", name: "示例画室MKII" }],
     words: [{ word: "anima", total: 47 }],
   };
   const labels = (query) => JSON.parse(JSON.stringify(entries(sources, query))).map((entry) => entry.label);
@@ -739,10 +636,10 @@ test("Ctrl+K: pages, groups and words match every word typed, and any text can g
 
   // A page by an alias, a group by part of its name, a word; hand-offs last.
   assert.deepEqual(labels("lora").slice(0, 1), ["咒语库"]);
-  assert.deepEqual(labels("银龙").slice(0, 1), ["银龙女仆咖啡厅"]);
+  assert.deepEqual(labels("示例咖啡").slice(0, 1), ["示例咖啡厅"]);
   assert.deepEqual(labels("ANIMA"), ["关注的词：anima", "在回顾里搜「ANIMA」", "问群聊：ANIMA", "在收藏里找「ANIMA」"]);
   // Every word must match.
-  assert.deepEqual(labels("解构 mkii").slice(0, 1), ["解构原典MKII"]);
+  assert.deepEqual(labels("示例 mkii").slice(0, 1), ["示例画室MKII"]);
   assert.deepEqual(labels("关闭").slice(0, 1), ["关闭控制台"]);
   assert.equal(labels("完全不存在的词").length, 3);
 });

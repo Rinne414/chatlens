@@ -2,7 +2,7 @@
 
 // Copying chosen pictures out to a folder the user can use (画廊 and the
 // backup page's expiring AI originals). File names say when, where and who:
-//   20260924-2053_AI朋友交流群_青苇_6d8112a1.png
+//   20260924-2053_示例交流群_小明_6d8112a1.png
 // with a same-named .txt holding the prompt when the library has one.
 
 const fs = require("node:fs");

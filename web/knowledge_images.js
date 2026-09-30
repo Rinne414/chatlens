@@ -81,6 +81,10 @@ const loadKnowledgeFacets = async () => {
 // Every filter change goes through here, so the results, the counts and the
 // chips always describe the same filter.
 const applyKnowledgeFilter = (patch) => {
+  // A filter picked inside the open picture closes it the way back would.
+  if (app.knowledgeTab.detail !== null) {
+    dismissOverlay(closeKnowledgeDetail);
+  }
   replaceKnowledgeTab({ ...patch, detail: null });
   renderKnowledgeDetailLayer();
   loadKnowledgeResults();

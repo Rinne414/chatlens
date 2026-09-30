@@ -74,6 +74,14 @@ test("deterministic merge lets a later answer resolve an earlier open question",
   assert.doesNotThrow(() => normalizeLlmSummary(merged, {}));
 });
 
+test("deterministic merge keeps the summary short: the first sentence of each part, not every part in full", () => {
+  const merged = deterministicMerge([
+    { summary: "先吵了一架。然后讲了很多技术细节，细节一，细节二。" },
+    { summary: "后来发了新模型！大家都去试了。" },
+  ]);
+  assert.equal(merged.summary, "先吵了一架。 后来发了新模型！");
+});
+
 test("desktop entries quote paths with spaces and mark autostart entries", () => {
   const app = desktopEntry({ background: false });
   assert.match(app, /^Exec=".+" ".+launcher\.js"$/mu);

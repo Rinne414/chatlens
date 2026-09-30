@@ -14,9 +14,24 @@
 .gp-head-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 
 .gp-brief { display: grid; gap: 6px; padding: 16px 20px; border-left: 4px solid var(--accent); border-radius: var(--radius); background: var(--panel); }
-.gp-brief p { margin: 0; font-size: 14px; line-height: 1.7; }
+.gp-brief p { margin: 0; font-size: 14px; line-height: 1.75; max-width: 72em; }
+.gp-brief .gp-brief-lead { font-size: 15.5px; font-weight: 600; }
+.gp-brief-more { justify-self: start; }
+.gp-brief-timeline { margin-top: 6px; }
+.gp-brief-timeline ol { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.gp-brief-moment { display: grid; grid-template-columns: 9.5em minmax(0, auto) minmax(0, 1fr); gap: 4px 12px; align-items: baseline; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 13.5px; text-align: left; }
+button.gp-brief-moment { cursor: pointer; }
+button.gp-brief-moment:hover { background: var(--bg); }
+.gp-brief-moment-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gp-brief-moment strong { white-space: nowrap; }
+.gp-brief-moment-sum { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 720px) {
+  .gp-brief-moment { grid-template-columns: 1fr; }
+  .gp-brief-moment strong, .gp-brief-moment-sum { white-space: normal; }
+}
 .gp-label { display: block; margin: 10px 0 6px; color: var(--muted); font-size: 11.5px; font-weight: 700; letter-spacing: .4px; }
 .gp-brief .gp-label { margin: 0; }
+.gp-brief-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
 
 .gp-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
 .gp-col { display: grid; gap: 16px; min-width: 0; }

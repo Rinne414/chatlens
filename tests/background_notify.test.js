@@ -17,12 +17,13 @@ const briefingWith = ({ watch = [], mentions = [] } = {}) => ({
 });
 
 // One tick against an in-memory app_state; returns what was sent.
-const tick = async ({ saved, briefing, notifyWatchWords = true, notifyMentions = true }) => {
+const tick = async ({ saved, briefing, notifyWatchWords = true, notifyMentions = true, lateBefore = null }) => {
   const sent = [];
   const store = { notify_state: saved };
   await background.notifyAfterTick({
     db: null,
     briefing,
+    lateBefore,
     getState: (_db, key, fallback) => store[key] ?? fallback,
     setState: (_db, key, value) => {
       store[key] = value;
@@ -38,6 +39,37 @@ const tick = async ({ saved, briefing, notifyWatchWords = true, notifyMentions =
 
 test("followed words are not notified unless switched on", () => {
   assert.equal(background.DEFAULTS.notifyWatchWords, false);
+});
+
+test("old replies the reply backfill added (older than the group's window this refresh) are not news; new ones still are", async () => {
+  const mention = (rowId, sentAt, text) => ({ kind: "reply", groupId: "100", groupName: "炼丹群", rowId, sentAt, speaker: "阿明", text });
+  const { sent, saved } = await tick({
+    saved: { lastWatchAt: NOW - 3000, lastMentionAt: NOW - 3000 },
+    lateBefore: { 100: NOW - 900 },
+    briefing: briefingWith({
+      mentions: [mention("9", NOW - 60, "刚刚的回复"), mention("7", NOW - 2000, "二十小时前的回复")],
+      watch: [{ word: "anima", total: 2, latest: [hit(10, NOW - 30), hit(8, NOW - 1500)] }],
+    }),
+  });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].body, "刚刚的回复");
+  assert.equal(sent[1].body, "阿明：anima 新版本 10");
+  assert.equal(saved.lastMentionAt, NOW - 60);
+  assert.equal(saved.lastWatchAt, NOW - 30);
+});
+
+test("with only old backfilled replies, nothing is sent and the marks move past them", async () => {
+  const { sent, saved } = await tick({
+    saved: { lastWatchAt: NOW - 3000, lastMentionAt: NOW - 3000 },
+    lateBefore: { 100: NOW - 900 },
+    briefing: briefingWith({
+      mentions: [{ kind: "reply", groupId: "100", groupName: "炼丹群", rowId: "7", sentAt: NOW - 2000, speaker: "阿明", text: "旧回复" }],
+      watch: [{ word: "anima", total: 1, latest: [hit(8, NOW - 1500)] }],
+    }),
+  });
+  assert.equal(sent.length, 0);
+  assert.equal(saved.lastMentionAt, NOW - 2000);
+  assert.equal(saved.lastWatchAt, NOW - 1500);
 });
 
 test("the first tick only remembers where it is, so old hits never fire at once", async () => {
@@ -75,7 +107,7 @@ test("several hits fold into one notice; a message matching two words counts onc
 });
 
 test("a hit that already is an @ / reply to you is not notified twice", async () => {
-  const mention = { ...hit(5, NOW - 20), kind: "at", youWereThere: false, muted: false };
+  const mention = { ...hit(5, NOW - 20), kind: "at", youWereThere: false };
   const { sent } = await tick({
     saved: { lastWatchAt: NOW - 300, lastMentionAt: NOW - 300 },
     briefing: briefingWith({ mentions: [mention], watch: [{ word: "anima", total: 1, latest: [hit(5, NOW - 20)] }] }),
@@ -92,16 +124,6 @@ test("switched off, hits still move the mark, so switching on later does not rep
   });
   assert.deepEqual(sent, []);
   assert.equal(saved.lastWatchAt, NOW - 60);
-});
-
-test("a muted person's followed-word hits are not notified (mostly bots echoing prompts)", async () => {
-  const { sent, saved } = await tick({
-    saved: { lastWatchAt: NOW - 300, lastMentionAt: NOW - 300 },
-    briefing: briefingWith({ watch: [{ word: "anima", total: 1, latest: [hit(7, NOW - 10, { muted: true })] }] }),
-  });
-  assert.deepEqual(sent, []);
-  // The mark moves past it: it is never notified later either.
-  assert.equal(saved.lastWatchAt, NOW - 10);
 });
 
 test("a message of the mark's own second that arrives a refresh later is still notified, once", async () => {
@@ -121,7 +143,7 @@ test("a message of the mark's own second that arrives a refresh later is still n
 });
 
 test("an @ that was not notified (mentions switched off) still counts as a followed-word hit", async () => {
-  const mention = { ...hit(5, NOW - 20), kind: "at", youWereThere: false, muted: false };
+  const mention = { ...hit(5, NOW - 20), kind: "at", youWereThere: false };
   const { sent } = await tick({
     notifyMentions: false,
     saved: { lastWatchAt: NOW - 300, lastMentionAt: NOW - 300 },

@@ -103,22 +103,22 @@ test("one person's set of pictures sent to several groups at once is one event",
     const message = db.prepare("INSERT INTO messages (group_id, row_id, sent_at, speaker, speaker_uin, text, is_media) VALUES (?, ?, ?, ?, ?, '', 1)");
     const picture = db.prepare("INSERT INTO pictures (group_id, row_id, seq, md5, sent_at, expires_at) VALUES (?, ?, 0, ?, ?, ?)");
     const post = (groupId, rowId, md5, sentAt, speaker) => {
-      message.run(groupId, rowId, sentAt, speaker, speaker === "青苇" ? "77" : "1");
+      message.run(groupId, rowId, sentAt, speaker, speaker === "小明" ? "77" : "1");
       picture.run(groupId, rowId, md5, sentAt, NOW + 86400);
     };
     for (const [index, md5] of ["a", "b", "c"].map((letter) => letter.repeat(32)).entries()) {
-      post("1", `q1-${index}`, md5, NOW - 4 * HOUR + index * 60, "青苇");
-      post("2", `q2-${index}`, md5, NOW - 4 * HOUR + 600 + index * 60, "青苇");
+      post("1", `q1-${index}`, md5, NOW - 4 * HOUR + index * 60, "小明");
+      post("2", `q2-${index}`, md5, NOW - 4 * HOUR + 600 + index * 60, "小明");
     }
     // Hours later, and someone else's: separate stories.
-    post("1", "q1-late", "d".repeat(32), NOW - HOUR, "青苇");
-    post("3", "q3-late", "d".repeat(32), NOW - HOUR + 60, "青苇");
+    post("1", "q1-late", "d".repeat(32), NOW - HOUR, "小明");
+    post("3", "q3-late", "d".repeat(32), NOW - HOUR + 60, "小明");
     post("1", "al-1", "e".repeat(32), NOW - 4 * HOUR, "Alice");
     post("3", "al-3", "e".repeat(32), NOW - 4 * HOUR + 60, "Alice");
 
     const events = trends(db, { nowUnix: NOW, days: 1 }).events.filter((event) => event.kind === "picture");
     assert.equal(events.length, 3);
-    const set = events.find((event) => event.origin.speaker === "青苇" && event.more.length > 0);
+    const set = events.find((event) => event.origin.speaker === "小明" && event.more.length > 0);
     assert.deepEqual([set.md5, ...set.more.map((item) => item.md5)].sort(), ["a", "b", "c"].map((letter) => letter.repeat(32)));
     assert.deepEqual(events.filter((event) => event !== set).map((event) => event.more.length), [0, 0]);
   });

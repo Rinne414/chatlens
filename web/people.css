@@ -1,0 +1,268 @@
+/* ---------- 群 → 关系网 (group_relations.js) and 个人页 (group_person.js) ----------
+   Colours: the first categorical slots of the dataviz palette, validated
+   (circles: 3 slots all-pairs; trend lines: 4 slots adjacent) on the panel
+   surfaces of both themes. Circles and lines are always named in text too. */
+
+.gp-rel, .pp-page {
+  --rel-c0: #2a78d6;
+  --rel-c1: #eb6834;
+  --rel-c2: #1baf7a;
+  --rel-c3: #eda100;
+  --rel-other: #a3a8b0;
+  --rel-edge: #8f98a3;
+  --rel-stage-a: #fafbfd;
+  --rel-stage-b: #eef1f5;
+}
+html[data-theme="dark"] .gp-rel, html[data-theme="dark"] .pp-page {
+  --rel-c0: #3987e5;
+  --rel-c1: #d95926;
+  --rel-c2: #199e70;
+  --rel-c3: #c98500;
+  --rel-other: #69717d;
+  --rel-edge: #6b7480;
+  --rel-stage-a: #1c222a;
+  --rel-stage-b: #13161b;
+}
+
+/* the map */
+.rel-stage {
+  position: relative;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--ink) 7%, transparent) 1px, transparent 1.5px) 0 0 / 22px 22px,
+    radial-gradient(ellipse at 50% 40%, var(--rel-stage-a), var(--rel-stage-b));
+}
+.rel-svg { display: block; width: 100%; height: auto; touch-action: none; user-select: none; cursor: grab; }
+.rel-svg:active { cursor: grabbing; }
+
+.rel-edge { fill: none; stroke: var(--rel-edge); stroke-linecap: round; transition: opacity var(--dur); }
+.rel-edge.c0 { stroke: var(--rel-c0); }
+.rel-edge.c1 { stroke: var(--rel-c1); }
+.rel-edge.c2 { stroke: var(--rel-c2); }
+.has-focus .rel-edge { opacity: .07; }
+.has-focus .rel-edge.lit { opacity: 1; stroke-opacity: .9; }
+
+.rel-node { cursor: pointer; outline: none; transition: opacity var(--dur); }
+.has-focus .rel-node { opacity: .25; }
+.has-focus .rel-node.lit { opacity: 1; }
+.rel-node-body { transform-box: fill-box; transform-origin: center; animation: rel-pop .55s cubic-bezier(.2, .8, .3, 1.25) both; }
+@keyframes rel-pop {
+  from { opacity: 0; transform: scale(.35); }
+  to { opacity: 1; transform: scale(1); }
+}
+.rel-entered .rel-node-body { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .rel-node-body { animation: none; }
+}
+.rel-hit { fill: transparent; }
+.rel-ring { fill: var(--panel); stroke: var(--rel-other); stroke-width: 3; transition: stroke-width var(--dur); }
+.rel-node.c0 .rel-ring { stroke: var(--rel-c0); }
+.rel-node.c1 .rel-ring { stroke: var(--rel-c1); }
+.rel-node.c2 .rel-ring { stroke: var(--rel-c2); }
+.rel-node:hover .rel-ring { stroke-width: 5; }
+/* The person a 所有群 page is about: the thickest ring. */
+.rel-node.focus .rel-ring { stroke: var(--ink); stroke-width: 6; }
+.rel-node.picked .rel-ring, .rel-node:focus-visible .rel-ring { stroke: var(--accent); stroke-width: 5; filter: drop-shadow(0 0 6px var(--accent)); }
+.rel-initial { fill: #fff; font-weight: 700; text-anchor: middle; pointer-events: none; }
+.rel-label {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--rel-stage-a);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.rel-self-tag { fill: #fff; font-size: 11px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: var(--accent); stroke-width: 7px; stroke-linejoin: round; pointer-events: none; }
+
+.rel-tip, .rel-card {
+  position: absolute;
+  z-index: 2;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px rgb(0 0 0 / .16);
+}
+/* An author `display` beats the hidden attribute; restate it. */
+.rel-tip[hidden], .rel-card[hidden], .pp-tip[hidden] { display: none; }
+.rel-tip { max-width: 250px; padding: 8px 10px; font-size: 12.5px; pointer-events: none; }
+.rel-tip p { margin: 4px 0 0; line-height: 1.5; }
+.rel-tip-head { display: flex; gap: 8px; align-items: center; }
+.rel-card { top: 12px; right: 12px; display: grid; gap: 6px; width: 290px; max-width: calc(100% - 24px); padding: 12px; }
+.rel-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.rel-card-head strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.rel-card-head p { margin: 2px 0 0; }
+.rel-card-close { padding: 0 4px; border: 0; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.rel-card-close:hover { color: var(--ink); }
+.rel-card > .btn { justify-self: start; margin-top: 4px; }
+.rel-card .gp-label { margin: 4px 0 0; }
+
+.rel-zoom { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 4px; }
+.rel-zoom button {
+  min-width: 32px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgb(0 0 0 / .08);
+}
+.rel-zoom button:hover { border-color: var(--accent); }
+
+/* shared person rows */
+.rel-card-partners, .rel-pair-list, .pp-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; }
+.rel-card-partners button, .rel-pair-list button, .pp-person {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.rel-card-partners button:hover, .rel-pair-list button:hover, .pp-person:hover { background: var(--bg); }
+.rel-pair-names { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-pair-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rel-pair-faces { display: inline-flex; flex: none; }
+.rel-pair-faces .av + .av { margin-left: -8px; box-shadow: 0 0 0 2px var(--panel); }
+
+/* under the map */
+.rel-under { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; margin-top: 14px; }
+.rel-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.rel-chip {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 14px 5px 6px;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--rel-other);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color var(--dur), background var(--dur);
+}
+.rel-chip.c0 { border-left-color: var(--rel-c0); }
+.rel-chip.c1 { border-left-color: var(--rel-c1); }
+.rel-chip.c2 { border-left-color: var(--rel-c2); }
+.rel-chip:hover { border-color: var(--line-strong); }
+.rel-chip.active { border-color: var(--accent); background: var(--accent-soft); }
+.rel-chip-faces { display: inline-flex; }
+.rel-chip-faces .av { border-radius: 50%; box-shadow: 0 0 0 2px var(--panel); }
+.rel-chip-faces .av + .av { margin-left: -9px; }
+.rel-members { margin: 10px 0 0; font-size: 13px; line-height: 1.7; }
+
+/* 个人页 */
+.pp-head { display: grid; gap: 12px; }
+.pp-back { justify-self: start; }
+.pp-head-main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: start; }
+.pp-avatar .av { width: 80px; height: 80px; border-radius: 50%; font-size: 32px; box-shadow: 0 0 0 4px var(--accent-soft); }
+.pp-head h2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 0; font-size: 24px; }
+.pp-head .gp-head-actions { justify-content: flex-start; }
+
+.pp-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 8px; }
+.pp-legend-item { display: inline-flex; gap: 6px; align-items: center; padding: 3px 6px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.pp-legend-item:hover { background: var(--bg); }
+.pp-legend-item small { color: var(--muted); }
+.pp-swatch { display: inline-block; flex: none; width: 14px; height: 4px; border-radius: 2px; background: var(--rel-c0); }
+.pp-swatch.s1 { background: var(--rel-c1); }
+.pp-swatch.s2 { background: var(--rel-c2); }
+.pp-swatch.s3 { background: var(--rel-c3); }
+
+.pp-trend-chart { position: relative; }
+.pp-trend-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.pp-grid { stroke: var(--line); stroke-width: 1; }
+.pp-axis { fill: var(--muted); font-size: 10.5px; }
+.pp-line { fill: none; stroke: var(--rel-c0); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pp-line.s1 { stroke: var(--rel-c1); }
+.pp-line.s2 { stroke: var(--rel-c2); }
+.pp-line.s3 { stroke: var(--rel-c3); }
+.pp-end { fill: var(--rel-c0); stroke: var(--panel); stroke-width: 2; }
+.pp-end.s1 { fill: var(--rel-c1); }
+.pp-end.s2 { fill: var(--rel-c2); }
+.pp-end.s3 { fill: var(--rel-c3); }
+.pp-end-label { fill: var(--ink); font-size: 11.5px; }
+.pp-cross { stroke: var(--muted); stroke-width: 1; }
+.pp-hit { fill: transparent; cursor: crosshair; }
+.pp-tip {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 6px 18px rgb(0 0 0 / .12);
+  font-size: 12px;
+  pointer-events: none;
+}
+.pp-tip-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: center; margin-top: 3px; }
+/* Every column is data here (nothing is "outside the range"): full strength. */
+.pp-bar { background: color-mix(in srgb, var(--accent) 72%, var(--panel)); cursor: default; }
+.pp-bar.empty { background: var(--line); }
+.pp-bar.pickable { cursor: pointer; }
+
+.pp-changes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+
+.pp-msgs { display: grid; margin: 0; padding: 0; list-style: none; }
+.pp-msgs li + li { border-top: 1px solid var(--line); }
+.pp-msgs button {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 8px 4px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pp-msgs button:hover { background: var(--bg); }
+.pp-msg-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pp-msg-body { min-width: 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pp-msg-body .kb-badge { margin-right: 6px; }
+
+/* 所有群 page (person_across.js) */
+.pa-groups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; }
+.pa-group { display: grid; grid-template-columns: auto minmax(0, 1.2fr) minmax(60px, 1fr) auto; gap: 10px; align-items: center; width: 100%; padding: 6px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.pa-group:hover { background: var(--bg); }
+.pa-group-name { display: grid; min-width: 0; }
+.pa-group-name strong, .pa-group-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pa-group-name small { color: var(--muted); font-size: 11.5px; }
+.pa-partner { display: grid; gap: 2px; }
+.pa-partner-groups { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px 6px 44px; }
+.pa-partner-groups .tag { font-size: 11px; }
+.pp-msg-group { margin-right: 6px; }
+.pp-group-filter { max-width: 220px; }
+
+@media (max-width: 1100px) {
+  .rel-under { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .pp-head-main { grid-template-columns: 1fr; }
+  .pp-changes { grid-template-columns: 1fr; }
+  .pp-msgs button { grid-template-columns: 1fr; gap: 2px; }
+  .rel-card { top: auto; bottom: 52px; }
+}

@@ -137,4 +137,11 @@ const parseMessageMeta = (body) => {
   return atUins.length === 0 && !atAll && replyTo === null ? EMPTY_META : { atUins, atAll, replyTo };
 };
 
-module.exports = { parseMessageMeta, parseFields, readVarint };
+// A reply element embeds the quoted message (its text under 47423, the
+// quoted sender's name under 47413); text extraction must skip all of it.
+const isReplyElement = (buf) => {
+  const fields = parseFields(buf);
+  return fields !== null && varintOf(fields, ELEMENT_TYPE) === TYPE_REPLY;
+};
+
+module.exports = { parseMessageMeta, parseFields, readVarint, isReplyElement };

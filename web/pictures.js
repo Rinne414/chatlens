@@ -207,6 +207,12 @@ const closePictureViewer = () => {
   pictureUi.viewer = null;
 };
 
+// 关闭, Esc or a click beside it: back closes the picture the same way.
+const dismissPictureViewer = () => dismissOverlay(closePictureViewer);
+
+// The viewer belongs to the chat that opened it.
+VIEW_LEAVE_HOOKS.push(closePictureViewer);
+
 const pictureViewerActions = (viewer) => {
   const notice = el("p", { class: "card-sub picture-viewer-notice" }, viewer.notice);
   return el("div", { class: "picture-viewer-actions" },
@@ -291,7 +297,7 @@ const renderPictureViewer = () => {
     class: "picture-viewer",
     onclick: (event) => {
       if (event.target === event.currentTarget) {
-        closePictureViewer();
+        dismissPictureViewer();
       }
     },
   },
@@ -299,7 +305,7 @@ const renderPictureViewer = () => {
   el("div", { class: "picture-viewer-side" },
     el("div", { class: "row" },
       el("strong", {}, viewer.probe === "ai" ? "AI 图" : "群图片"),
-      el("button", { class: "btn small", onclick: closePictureViewer }, "关闭")),
+      el("button", { class: "btn small", onclick: dismissPictureViewer }, "关闭")),
     meta.length > 0 ? el("p", { class: "card-sub" }, meta) : null,
     el("p", { class: "card-sub" }, viewer.md5),
     pictureViewerActions(viewer))));
@@ -323,6 +329,18 @@ const openPictureViewer = (picture) => {
     busy: false,
   };
   renderPictureViewer();
+  // Enough to reopen it the same way when back returns to it (AI picture,
+  // kept original, deleted by Tencent).
+  const { md5, probe, kept, gone } = pictureUi.viewer;
+  openOverlayEntry({ kind: "picture", key: md5, probe, kept, gone }, closePictureViewer);
+};
+
+// A page's step restorer: the picture that was open over it when back or
+// forward returns to that entry.
+const reopenPictureOverlay = (overlay) => {
+  if (overlay?.kind === "picture") {
+    openPictureViewer({ md5: overlay.key, probe: overlay.probe, kept: overlay.kept, gone: overlay.gone });
+  }
 };
 
 /* ---------- settings card ---------- */
@@ -405,6 +423,6 @@ const renderPictureSettingsCard = () => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && pictureUi.viewer !== null) {
     event.stopImmediatePropagation();
-    closePictureViewer();
+    dismissPictureViewer();
   }
 });

@@ -22,6 +22,7 @@ const knowledge = require("./knowledge_ops");
 const readWorker = require("./read_worker");
 const bookmarkOps = require("./bookmark_ops");
 const pictureRoutes = require("./picture_routes");
+const qqCollectionOps = require("./qq_collection_ops");
 const galleryOps = require("./gallery_ops");
 const railOps = require("./rail_ops");
 const groupOps = require("./group_ops");
@@ -334,6 +335,30 @@ const handleApi = async (request, response, url) => {
         fromUnix: url.searchParams.get("fromUnix"),
         toUnix: url.searchParams.get("toUnix"),
       }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/group/person") {
+      sendJson(response, 200, await readWorker.call("groupPerson", {
+        groupId: url.searchParams.get("groupId") ?? "",
+        uin: url.searchParams.get("uin") ?? "",
+        fromUnix: url.searchParams.get("fromUnix"),
+        toUnix: url.searchParams.get("toUnix"),
+      }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/person-across") {
+      sendJson(response, 200, await readWorker.call("personAcross", {
+        uin: url.searchParams.get("uin") ?? "",
+        fromUnix: url.searchParams.get("fromUnix"),
+        toUnix: url.searchParams.get("toUnix"),
+      }));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/group/person/messages") {
+      sendJson(response, 200, groupOps.getPersonMessages(url.searchParams));
       return;
     }
 
@@ -754,11 +779,6 @@ const handleApi = async (request, response, url) => {
       return;
     }
 
-    if (request.method === "POST" && url.pathname === "/api/mentions/mute") {
-      sendJson(response, 200, briefing.setSpeakerMuted(await readBody(request)));
-      return;
-    }
-
     if (request.method === "GET" && url.pathname === "/api/background") {
       sendJson(response, 200, { ...background.getStatus(), desktop: desktop.getDesktopStatus() });
       return;
@@ -889,6 +909,10 @@ const handleApi = async (request, response, url) => {
     }
 
     if (await pictureRoutes.handlePictureApi(request, response, url, { sendJson, sendError, readBody })) {
+      return;
+    }
+
+    if (await qqCollectionOps.handleQqCollectionApi(request, response, url, { sendJson, readBody })) {
       return;
     }
 

@@ -545,7 +545,7 @@ const buildReducePrompt = (analysis, partials, detail = "standard") => {
           "qa 最多 " + caps.qa + " 个；同一问题合并；某段没人回答、后段有人回答的，改成有回答并 resolved=true。",
           "timeline 最多 " + caps.timeline + " 段，按时间顺序合并，相邻同话题可合并成一段。",
           "uncategorized 最多 " + caps.uncategorized + " 条、links 最多 " + caps.links + " 条，去重合并。",
-          "summary 用 " + summarySentences + " 句概括这一整个时间范围最值得知道的内容；第一句直接说最重要的事，不要用时间范围或日期开头（界面上已经显示时间）。",
+          "summary 用 " + summarySentences + " 句概括这一整个时间范围最值得知道的内容；第一句直接说最重要的事，不要用时间范围或日期开头（界面上已经显示时间）；每句简短（大约 40 字以内），不要按时间段逐段复述（按时间的内容写进 timeline）。",
           "不要输出 actions 或 risks 字段。如果没有某类内容，用空数组或 null。",
         ],
         outputSchema: OUTPUT_SCHEMA,
@@ -752,10 +752,14 @@ const mergeQa = (partials) => {
   return [...byQuestion.values()].slice(0, 10);
 };
 
+// The first sentence of a part's summary: pasting whole parts together made
+// a 2,000-character wall on the 群 page whenever a merge failed.
+const firstSentence = (value) => /^[^。！？!?]*[。！？!?]*/u.exec(value)[0].trim() || value;
+
 const deterministicMerge = (partials) => {
   const summaries = partials.map((partial) => text(partial.summary)).filter((value) => value.length > 0);
   return {
-    summary: summaries.slice(0, 4).join(" ") || "本时间段消息较多，已按话题合并汇总。",
+    summary: summaries.slice(0, 4).map(firstSentence).join(" ") || "本时间段消息较多，已按话题合并汇总。",
     topics: mergeTopics(partials),
     newThings: dedupeAcross(
       partials,

@@ -97,6 +97,26 @@ test("the chat panel gets the timeline entries inside the range", () => {
   });
 });
 
+test("the group's current brief says since when it covers (the last 看完了) and when it was written", () => {
+  withStore((db) => {
+    seed(db);
+    const windowStart = MONDAY_9PM - 36 * 3600;
+    const timeline = [
+      { start: "2026-09-28 21:53", end: "2026-09-28 22:54", title: "炼丹参数", summary: "讨论 1536", messageCountEstimate: 40 },
+      { start: "", end: "", title: "   ", summary: "no title: dropped" },
+    ];
+    briefingStore.saveGroupBrief(db, "12345", { windowStart, chunkKey: "k", summary: { summary: "在聊 anima", topics: [{ title: "anima" }], timeline }, updatedAt: NOW - 600 });
+    const { brief } = groupInsights(db, null, { groupId: "12345", nowUnix: NOW });
+    assert.deepEqual(brief, {
+      summary: "在聊 anima",
+      topics: ["anima"],
+      timeline: [{ start: "2026-09-28 21:53", end: "2026-09-28 22:54", title: "炼丹参数", summary: "讨论 1536" }],
+      windowStart,
+      updatedAt: NOW - 600,
+    });
+  });
+});
+
 test("rejects a bad group id or range", () => {
   withStore((db) => {
     assert.throws(() => groupInsights(db, null, { groupId: "../1", nowUnix: NOW }), /群号/u);

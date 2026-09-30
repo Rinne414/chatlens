@@ -17,6 +17,7 @@ const messageStore = require("../message_store");
 const { ensureBriefingSchema, getState, setState, redoStats, requeueDeclined } = require("../briefing_store");
 const { REMOTE_LIFETIME_SECONDS, ingestPictures } = require("../picture_store");
 const { REPAIR_STATE_KEY } = require("../repair_picture_text");
+const { backfillStarts, recordFailedExport } = require("../backfill_replies");
 const engine = require("../briefing_engine");
 const { createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary } = require("../llm_summarizer");
 const digestEngine = require("../digest_engine");
@@ -52,12 +53,15 @@ const createWorkDir = () => {
   return fs.mkdtempSync(path.join(refreshRoot, `${process.pid}-`));
 };
 
+// From the end of each group's unbroken coverage (a gap inside the look-back
+// is read again), else from its newest coverage end.
 const groupStartsFor = (groupIds, now) => {
   const db = messageStore.openStore(common.storeDbPath);
   try {
     const ends = messageStore.getCoverageEnds(db);
+    const resume = messageStore.getCoverageResume(db, now - MAX_LOOKBACK_SECONDS);
     return Object.fromEntries(groupIds.map((groupId) => {
-      const end = Number(ends[groupId]);
+      const end = Number(resume[groupId] ?? ends[groupId]);
       const start = Number.isFinite(end) && end > 0 ? end - OVERLAP_SECONDS : now - FIRST_SCAN_SECONDS;
       return [groupId, Math.max(start, now - MAX_LOOKBACK_SECONDS)];
     }));
@@ -109,6 +113,30 @@ const pictureTextRepairDone = () => {
   const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
   try {
     return getState(db, REPAIR_STATE_KEY, null) !== null;
+  } finally {
+    db.close();
+  }
+};
+
+// Replies stored before v0.0.21 are missing (only msg_type1 2 was exported);
+// added over each group's stored span until every group's export completed
+// (src/backfill_replies.js keeps track). null when nothing is left to do.
+const replyBackfillStarts = (groupIds) => {
+  const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
+  try {
+    const starts = backfillStarts(db, groupIds);
+    return Object.keys(starts).length > 0 ? starts : null;
+  } finally {
+    db.close();
+  }
+};
+
+// The replies-only export wrote nothing: counts as a try, so it is given up
+// after enough of them instead of re-reading all history every refresh.
+const replyBackfillFailed = (groupIds) => {
+  const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
+  try {
+    recordFailedExport(db, groupIds);
   } finally {
     db.close();
   }
@@ -290,6 +318,10 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   const backfillGroups = pictureBackfillGroups(groupIds);
   const repairText = !pictureTextRepairDone();
   let textRepair = null;
+  const replyStarts = replyBackfillStarts(groupIds);
+  const replyStartsPath = path.join(workDir, "reply-starts.json");
+  const replyExportPath = path.join(workDir, "reply-export.json");
+  let replyBackfill = null;
   common.writeJson(startsPath, starts);
   const env = { NTQQ_DB_KEY: readSecretSync("ntqqKey"), QQ_GROUP_STARTS_JSON: startsPath };
   const scanLimit = Number(config.defaultScanLimit) > 0 ? Number(config.defaultScanLimit) : 1000000;
@@ -322,6 +354,19 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
         const line = repair.stdout.split(/\r?\n/u).find((item) => item.startsWith("repairResult="));
         textRepair = line === undefined ? { failed: true } : JSON.parse(line.slice("repairResult=".length));
       }
+      if (replyStarts !== null) {
+        common.writeJson(replyStartsPath, replyStarts);
+        const replyGroups = Object.keys(replyStarts);
+        const exported = await timed("replyExport", () => common.runNodeScript("export_group_recent.js", [
+          mirror.messageDb, mirror.groupDb, replyGroups.join(","), Math.min(...Object.values(replyStarts)), now, replyExportPath, scanLimit,
+        ], { env: { ...env, QQ_GROUP_STARTS_JSON: replyStartsPath, QQ_EXPORT_REPLIES_ONLY: "1" } }));
+        if (exported.code !== 0) {
+          common.warn(`补回旧的回复消息失败，下次刷新再试（退出码 ${exported.code}）`);
+        }
+        if (!fs.existsSync(replyExportPath)) {
+          replyBackfillFailed(replyGroups);
+        }
+      }
       if (backfillGroups.length > 0) {
         await timed("pictureBackfill", () => common.runNodeScript("export_pictures.js", [
           mirror.messageDb, backfillGroups.join(","), now - REMOTE_LIFETIME_SECONDS, now, picturesPath,
@@ -344,6 +389,11 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   const ingest = await timed("ingest", () => common.runNodeScript("ingest_store.js", [exportPath, common.storeDbPath, `bg-${common.localStamp()}`], { env }));
   const inserted = Number(/inserted=(\d+)/u.exec(ingest.stdout)?.[1] ?? 0);
   const picturesBackfilled = fs.existsSync(picturesPath) ? ingestPictureBackfill(picturesPath, backfillGroups) : 0;
+  if (fs.existsSync(replyExportPath)) {
+    const backfill = await timed("replyBackfill", () => common.runNodeScript("backfill_replies.js", [replyExportPath, common.storeDbPath], { env }));
+    const line = backfill.stdout.split(/\r?\n/u).find((item) => item.startsWith("backfillResult="));
+    replyBackfill = line === undefined ? { failed: true } : JSON.parse(line.slice("backfillResult=".length));
+  }
 
   const ntDataDir = String(config.ntDataDir ?? "").trim();
   if (ntDataDir.length > 0 && fs.existsSync(ntDataDir)) {
@@ -365,6 +415,10 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
     inserted,
     picturesBackfilled,
     textRepair,
+    replyBackfill,
+    // Where each group's window began: older messages of this tick came
+    // from the reply backfill (notices skip them).
+    windowStarts: starts,
     mirrorMs,
     elapsedMs: Date.now() - startedAt,
     timings,

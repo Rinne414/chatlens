@@ -16,7 +16,7 @@ const msg = (groupId, rowId, sentAt, text, fields = {}) => ({
 });
 
 test("words are trimmed, deduplicated case-insensitively and checked", () => {
-  assert.deepEqual(normalizeWords(["  Anima ", "anima", "Qwen  Image", "", "银龙"]), ["Anima", "Qwen Image", "银龙"]);
+  assert.deepEqual(normalizeWords(["  Anima ", "anima", "Qwen  Image", "", "示例群"]), ["Anima", "Qwen Image", "示例群"]);
   assert.throws(() => normalizeWords(["???"]), /至少要有一个字母/u);
   assert.throws(() => normalizeWords(["x".repeat(41)]), /太长/u);
   assert.throws(() => normalizeWords(["的"]), /至少 2 个字/u);

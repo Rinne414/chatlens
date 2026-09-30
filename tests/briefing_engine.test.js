@@ -258,17 +258,6 @@ test("a longer tail wait lets a quiet group's few messages keep accumulating", (
   assert.deepEqual(engine.planChunks(pendingOf(20, { start: NOW - 7 * HOUR, step: 60 }), { now: NOW, tailMaxAgeSeconds: 3 * HOUR }), [{ from: 0, to: 20 }]);
 });
 
-test("a muted person's mentions stay in the briefing, flagged", () => {
-  const db = seedStore();
-  try {
-    const build = (mutedUins) => buildBriefing({ db, knowledgeDbPath: "", watchlist: [], mutedUins, nowUnix: NOW });
-    assert.deepEqual(build([]).mentions.map((item) => [item.speaker, item.muted]), [["Alice", false]]);
-    assert.deepEqual(build(["222"]).mentions.map((item) => [item.speaker, item.muted]), [["Alice", true]]);
-  } finally {
-    db.close();
-  }
-});
-
 test("each group says how much of the window is still unread in the chat", () => {
   const db = seedStore();
   try {

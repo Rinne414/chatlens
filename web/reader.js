@@ -196,7 +196,7 @@ const readerBackButton = () => el("button", {
   class: "btn small",
   "data-testid": "reader-back",
   dataset: { backView: readerReturnView() },
-  onclick: returnFromReader,
+  onclick: () => goBackTo((prev) => prev.view === readerReturnView(), returnFromReader),
 }, readerBackLabel());
 
 const openReader = async (runId, origin) => {

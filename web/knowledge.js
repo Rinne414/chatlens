@@ -306,6 +306,7 @@ const requestAnswer = (row) => {
 const openDetail = async (item) => {
   replaceKnowledgeTab({ detail: item, detailLoading: true });
   renderKnowledgeDetailLayer();
+  openOverlayEntry({ kind: "knowledge", key: item.hash }, closeKnowledgeDetail);
   try {
     const full = await api(`/api/knowledge/image?hash=${encodeURIComponent(item.hash)}`);
     // Ignore a late response for an image the user has already navigated away from.
@@ -823,10 +824,7 @@ const renderKnowledgeDetail = () => {
     return null;
   }
   const params = item.params ?? {};
-  const close = () => {
-    replaceKnowledgeTab({ detail: null });
-    renderKnowledgeDetailLayer();
-  };
+  const close = () => dismissOverlay(closeKnowledgeDetail);
 
   const items = app.knowledgeTab.results?.items ?? [];
   const index = items.findIndex((entry) => entry.hash === item.hash);
@@ -995,6 +993,22 @@ const renderKnowledgeView = () => {
       body));
 };
 
+const closeKnowledgeDetail = () => {
+  replaceKnowledgeTab({ detail: null });
+  renderKnowledgeDetailLayer();
+};
+
+// Back from a page the picture led to opens it again.
+VIEW_STEP_RESTORERS.knowledge = (step, overlay) => {
+  showView("knowledge");
+  renderCurrentView();
+  if (overlay?.kind === "knowledge") {
+    openKnowledgeDetailByHash(overlay.key).catch(() => {});
+  }
+  // Forward to a picture opened from a detail (the detail comes back one step later).
+  reopenPictureOverlay(overlay);
+};
+
 // The detail overlay lives outside the view, so opening, stepping through and
 // closing it never rebuilds the picture wall underneath.
 const renderKnowledgeDetailLayer = () => {
@@ -1028,8 +1042,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape" && app.knowledgeTab.detail !== null) {
-    replaceKnowledgeTab({ detail: null });
-    renderKnowledgeDetailLayer();
+    dismissOverlay(closeKnowledgeDetail);
     return;
   }
   if (app.knowledgeTab.detail !== null && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {

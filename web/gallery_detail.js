@@ -37,12 +37,17 @@ const loadGalleryDetailExtras = (item) => {
 
 // index is the position in the current wall (-1 for a picture opened from the
 // "other pictures" strip, which has no neighbours to step to).
+// The last picture opened, so back from a page it led to opens it again.
+const galleryLastOpened = { item: null };
+
 const openGalleryItem = (item, index) => {
   replaceGallery({
     detail: { md5: item.md5, item, index, size: item.sticker ? "original" : "preview", notice: "", data: null, context: null, others: null, knowledge: null },
   });
+  galleryLastOpened.item = item;
   renderGalleryDetailLayer();
   loadGalleryDetailExtras(item);
+  openOverlayEntry({ kind: "gallery", key: item.md5 }, closeGalleryDetail);
 };
 
 const openGalleryDetail = (index) => {
@@ -55,6 +60,23 @@ const openGalleryDetail = (index) => {
 const closeGalleryDetail = () => {
   replaceGallery({ detail: null });
   renderGalleryDetailLayer();
+};
+
+// 关闭, Esc or a click beside the picture: back closes it the same way.
+const dismissGalleryDetail = () => dismissOverlay(closeGalleryDetail);
+
+VIEW_STEP_RESTORERS.media = (step, overlay) => {
+  openMediaView(false);
+  if (overlay?.kind !== "gallery") {
+    return;
+  }
+  const items = app.gallery.results?.items ?? [];
+  const index = items.findIndex((item) => item.md5 === overlay.key);
+  if (index >= 0) {
+    openGalleryItem(items[index], index);
+  } else if (galleryLastOpened.item?.md5 === overlay.key) {
+    openGalleryItem(galleryLastOpened.item, -1);
+  }
 };
 
 const stepGalleryDetail = (delta) => {
@@ -231,7 +253,7 @@ const galleryDetailOverlay = (detail) => {
     class: "kb-overlay view-layer",
     onclick: (event) => {
       if (event.target === event.currentTarget) {
-        closeGalleryDetail();
+        dismissGalleryDetail();
       }
     },
   },
@@ -242,7 +264,7 @@ const galleryDetailOverlay = (detail) => {
         detail.index >= 0 ? el("span", { class: "kb-meta" }, `${detail.index + 1} / ${items.length}`) : null,
         el("button", { class: "btn small", type: "button", title: "上一张（←）", disabled: detail.index <= 0, onclick: () => stepGalleryDetail(-1) }, "←"),
         el("button", { class: "btn small", type: "button", title: "下一张（→）", disabled: detail.index < 0 || detail.index >= items.length - 1, onclick: () => stepGalleryDetail(1) }, "→"),
-        el("button", { class: "btn small", type: "button", onclick: closeGalleryDetail }, "关闭"))),
+        el("button", { class: "btn small", type: "button", onclick: dismissGalleryDetail }, "关闭"))),
     el("div", { class: "kb-overlay-body" },
       el("div", { class: "kb-overlay-media" }, galleryDetailImage(detail)),
       el("div", { class: "kb-overlay-info" },
@@ -272,7 +294,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape") {
-    closeGalleryDetail();
+    dismissGalleryDetail();
   } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
     event.preventDefault();
     stepGalleryDetail(event.key === "ArrowRight" ? 1 : -1);

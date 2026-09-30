@@ -144,6 +144,10 @@ const loadGallery = async ({ append = false } = {}) => {
 };
 
 const applyGalleryFilter = (patch) => {
+  // A filter picked inside the open picture closes it the way back would.
+  if (app.gallery.detail !== null) {
+    dismissOverlay(closeGalleryDetail);
+  }
   replaceGallery({ ...patch, detail: null });
   renderGalleryDetailLayer();
   loadGallery();

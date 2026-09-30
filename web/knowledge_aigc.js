@@ -13,6 +13,7 @@ const openKnowledgeDetailByHash = async (hash) => {
   ensureKnowledgeLoaded();
   replaceKnowledgeTab({ detail: full, detailLoading: false });
   renderKnowledgeDetailLayer();
+  openOverlayEntry({ kind: "knowledge", key: hash }, closeKnowledgeDetail);
   loadKnowledgeRelated(hash);
 };
 

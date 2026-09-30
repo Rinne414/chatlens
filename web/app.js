@@ -303,8 +303,8 @@ const app = {
   },
 };
 
-const VIEW_TITLES = { brief: "简报", review: "回顾", bookmarks: "收藏", ask: "问群聊", trends: "热点", group: "群", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
-const NAV_ICONS = { brief: "📰", review: "📅", bookmarks: "🔖", ask: "🔎", trends: "🔥", group: "👥", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
+const VIEW_TITLES = { brief: "简报", review: "回顾", bookmarks: "收藏", ask: "问群聊", trends: "热点", group: "群", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", qqcollect: "QQ 收藏图", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
+const NAV_ICONS = { brief: "📰", review: "📅", bookmarks: "🔖", ask: "🔎", trends: "🔥", group: "👥", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", qqcollect: "📥", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
 const KIND_ICONS = { image: "📷", video: "🎬", sticker: "😃", face: "😃", emoji: "😃", audio: "🎵", file: "📎" };
 const KIND_LABELS = { image: "图片", video: "视频", sticker: "表情", face: "表情", emoji: "表情", audio: "语音", file: "文件" };
 
@@ -465,47 +465,7 @@ const NAV_PARENT = { run: "brief", reader: "brief", history: "settings", watchli
 // Run when the user leaves a view: overlays belong to the view that opened them.
 const VIEW_LEAVE_HOOKS = [];
 
-/* ---------- browser back / forward between pages ----------
-   Each page change is a history entry, and the entry being left remembers
-   how far down the reader was, so the browser's (or the mouse's) back button
-   returns to the briefing exactly where a jump into a chat started. */
-
-const viewHistory = { restoring: false };
-
-const recordViewHistory = (name) => {
-  if (viewHistory.restoring) {
-    return;
-  }
-  try {
-    if (typeof history.state?.view !== "string") {
-      history.replaceState({ view: name, scrollY: 0 }, "");
-      return;
-    }
-    if (app.view === name) {
-      return;
-    }
-    history.replaceState({ ...history.state, scrollY: window.scrollY }, "");
-    history.pushState({ view: name, scrollY: 0 }, "");
-  } catch {
-    // History is a convenience; a page that cannot use it still works.
-  }
-};
-
-window.addEventListener?.("popstate", (event) => {
-  const view = event.state?.view;
-  if (typeof view !== "string" || !document.getElementById(`view-${view}`)) {
-    return;
-  }
-  viewHistory.restoring = true;
-  try {
-    openView(view);
-  } finally {
-    viewHistory.restoring = false;
-  }
-  const scrollY = Number(event.state.scrollY) || 0;
-  // After the page has drawn from what it already holds.
-  requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, scrollY)));
-});
+// Back / forward between pages and inside them: view_history.js.
 
 const showView = (name) => {
   recordViewHistory(name);
@@ -2514,6 +2474,10 @@ const openView = (name) => {
     openStorageView();
     return;
   }
+  if (name === "qqcollect") {
+    openQqCollectionView();
+    return;
+  }
   showView(name);
   renderCurrentView();
 };
@@ -2537,6 +2501,7 @@ const boot = async () => {
     button.addEventListener("click", () => openView(button.dataset.view));
   }
   $("#view-refresh")?.addEventListener("click", refreshCurrentView);
+  $("#view-back")?.addEventListener("click", () => history.back());
   $("#theme-toggle")?.addEventListener("click", toggleTheme);
   $("#zoom-select")?.addEventListener("change", (event) => changeZoom(event.target.value));
   applyZoom();

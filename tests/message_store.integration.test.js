@@ -155,6 +155,102 @@ test("ingest records per-group coverage when groupStarts is present", () => {
   }
 });
 
+test("a group whose export stopped early (corrupt page while QQ writes) gets no coverage, so the next refresh reads it again", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-summary-incomplete-"));
+  const db = messageStore.openStore(path.join(tempDir, "messages.db"));
+  try {
+    messageStore.ingestExport(db, {
+      groupIds: ["1", "2"],
+      groupNames: { 1: "A", 2: "B" },
+      startUnix: 100,
+      endUnix: 500,
+      coveredFromUnix: null,
+      groupStarts: { 1: 100, 2: 400 },
+      incompleteGroups: ["2"],
+      messages: [{ groupId: "2", rowId: "9", sentAt: 480, senderName: "Bob", text: "read before the corrupt page" }],
+      mediaMessages: [],
+    }, "stopped-run");
+
+    assert.deepEqual(messageStore.getCoverage(db, "1"), [{ startUnix: 100, endUnix: 500 }]);
+    assert.deepEqual(messageStore.getCoverage(db, "2"), []);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM messages WHERE group_id = '2'").get().n, 1, "what was read is kept");
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("without per-group starts (a manual run), the groups that completed are covered even when another stopped early", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-summary-manual-incomplete-"));
+  const db = messageStore.openStore(path.join(tempDir, "messages.db"));
+  try {
+    messageStore.ingestExport(db, {
+      groupIds: ["1", "2"],
+      startUnix: 100,
+      endUnix: 500,
+      coveredFromUnix: null,
+      incompleteGroups: ["2"],
+      groupReadFrom: { 2: 300 },
+      messages: [],
+      mediaMessages: [],
+    }, "manual-run");
+    assert.deepEqual(messageStore.getCoverage(db, "1"), [{ startUnix: 100, endUnix: 500 }]);
+    assert.deepEqual(messageStore.getCoverage(db, "2"), [{ startUnix: 301, endUnix: 500 }]);
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("the refresh resumes each group where its first unbroken coverage (inside the look-back) ends, so a gap is read again", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-summary-resume-"));
+  const db = messageStore.openStore(path.join(tempDir, "messages.db"));
+  try {
+    const range = db.prepare("INSERT INTO scan_ranges (group_id, start_unix, end_unix, run_id) VALUES (?, ?, ?, 'r')");
+    range.run("1", 200, 300);
+    range.run("1", 100, 200);
+    range.run("2", 100, 200);
+    range.run("2", 250, 300);
+    range.run("3", 10, 50);
+    range.run("3", 100, 300);
+    range.run("4", 40, 120);
+    range.run("4", 150, 300);
+    range.run("5", 10, 40);
+
+    assert.deepEqual({ ...messageStore.getCoverageResume(db, 60) }, { 1: 300, 2: 200, 3: 300, 4: 120 });
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("a group that stopped early is covered from the oldest second it read (newest first) up", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-summary-read-from-"));
+  const db = messageStore.openStore(path.join(tempDir, "messages.db"));
+  try {
+    messageStore.ingestExport(db, {
+      groupIds: ["1", "2", "3"],
+      startUnix: 100,
+      endUnix: 500,
+      coveredFromUnix: null,
+      groupStarts: { 1: 100, 2: 100, 3: 100 },
+      incompleteGroups: ["1", "2", "3"],
+      // 1 stopped inside the window; 2 read past its start (the bad page was
+      // older than the window); 3 read nothing.
+      groupReadFrom: { 1: 450, 2: 60 },
+      messages: [],
+      mediaMessages: [],
+    }, "partial-run");
+
+    assert.deepEqual(messageStore.getCoverage(db, "1"), [{ startUnix: 451, endUnix: 500 }], "the oldest second may be half read");
+    assert.deepEqual(messageStore.getCoverage(db, "2"), [{ startUnix: 100, endUnix: 500 }]);
+    assert.deepEqual(messageStore.getCoverage(db, "3"), []);
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("advanceLocalReadMarks moves each group's cursor to its newest stored message", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-summary-advance-read-"));
   const db = messageStore.openStore(path.join(tempDir, "messages.db"));

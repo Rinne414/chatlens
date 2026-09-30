@@ -7,7 +7,8 @@
    each release (update WHATS_NEW_RELEASE with the list); "知道了" hides it
    until the next one (per browser: localStorage). */
 
-const WHATS_NEW_RELEASE = "2026-09-30";
+// v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
+const WHATS_NEW_RELEASE = "v0.0.21";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -16,19 +17,15 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
-  { title: "Ctrl+K 搜索一切", detail: "在任何页面按 Ctrl+K（或 /）：输入页面名、群名、关注的词直接跳过去，或者把任意内容拿去回顾、问群聊、收藏里找。", view: null, selector: null, run: "palette" },
-  { title: "首页键盘操作", detail: "j / k 在卡片间移动，o 打开，s 收藏，m 不看此人，? 看全部快捷键。", view: null, selector: null, run: "keys" },
-  { title: "关闭控制台", detail: "控制台在后台运行、没有窗口；现在左栏最下面和设置里都有「关闭控制台」。", view: null, selector: "#quit-console" },
-  { title: "关注的词", detail: "加几个词（模型、画师、你的作品名），哪个群提到就列在首页；想要的话还能弹桌面通知。", view: "brief", selector: ".brief-watch" },
-  { title: "收藏", detail: "简报、各群总览、回顾里的新东西、问答、话题点 ☆ 就收下，左栏「收藏」随时翻。", view: "bookmarks", selector: "#view-bookmarks" },
-  { title: "和你有关更清楚", detail: "同一个人连续 @ 你会折叠成一串；机器人可以「不看此人」；你当时就在聊的排在后面，也不再弹通知。", view: "brief", selector: ".brief-for-you" },
-  { title: "每个群看到哪了", detail: "右边的群卡片写着还没看几条、看到一半还是看完了，「标为看完」一键跟上；未读数不再全是 99+。", view: "brief", selector: ".brief-side" },
-  { title: "AI 出问题会直说", detail: "余额不足、密钥失效时首页写明原因，修好后点「重试」。之前余额不足漏掉的约 1.5 万条消息已重新排队总结。", view: "brief", selector: ".brief-mast" },
-  { title: "回顾搜索能选时间", detail: "搜索结果上方可以选 全部 / 最近 7 天 / 30 天 / 任意日期。", view: "review", selector: ".review-search" },
-  { title: "问群聊说清楚读了多少", detail: "会写明相关消息一共多少、实际读了最新的多少条，以及想问更早的事该怎么问。", view: "ask", selector: "#view-ask" },
-  { title: "备份更稳妥", detail: "消息没扫完时绝不说「可以放心清理」；可以打开「以后自动保存所有 AI 原图」。", view: "backup", selector: ".backup-auto-keep" },
-  { title: "后退 / 前进", detail: "浏览器或鼠标侧键的后退、前进可以在页面之间切换，并回到原来的位置。", view: null, selector: null },
-  { title: "更快", detail: "打开聊天、简报、咒语库、热点、群页明显更快，重的查询不再卡住整个控制台。", view: null, selector: null },
+  { title: "回复不再漏掉", detail: "以前「回复」某条消息发出的消息（约占聊天的两到三成）都没收进来：聊天、AI 总结和「和你有关」里都少了它们。现在都会收进来；升级后第一次后台刷新会把以前的回复补回来（约 1–2 分钟，只做一次，不另花 AI 费用）。", view: "brief", selector: ".brief-for-you" },
+  { title: "「现在在聊」好读了", detail: "群页的「现在在聊」先给两句重点，「展开全文」看完整的；下面「按时间」一行一段，点一段跳到那里的消息。", view: "group", selector: ".gp-brief" },
+  { title: "关系网", detail: "群页里谁回复 / @ 了谁，画成头像联络图：头像越大说话越多，线越粗来往越多，外圈同色是常互相回复的小圈子。点一个人看 TA 最常和谁来往，双击打开个人页。", view: "group", selector: ".gp-rel" },
+  { title: "个人页和好感度趋势", detail: "一个人在这个群说了多少、什么时候说、最常和谁来往，以及和几个人互相回复 / @ 的次数怎么变化。在关系网里双击一个人打开。", view: "group", selector: ".gp-rel" },
+  { title: "TA 在所有群", detail: "个人页上点「看 TA 在所有群」：TA 在你所在的哪些群说话、各群用的名字、跨群最常来往的人和跨群关系网。只统计这台电脑上有记录的群。", view: null, selector: null },
+  { title: "QQ 收藏图", detail: "左栏「QQ 收藏图」：收藏里的图按天排开，对照你电脑上的图片文件夹标出哪些还没存，挑一段一次存好。", view: "qqcollect", selector: ".qqc-head" },
+  { title: "后退 / 前进", detail: "顶上的「← 返回」、浏览器或鼠标侧键的后退，都会回到上一个画面和原来的位置：群页回到群列表，聊天回到群列表或打开它的页面，看大图时是关掉大图。", view: null, selector: null },
+  { title: "「不看此人」已移除", detail: "容易误点，点了又找不到地方撤回。以前设为不看的人，他们的 @ 会重新出现在「和你有关」；快捷键 m 也一起取消。", view: null, selector: null },
+  { title: "AI 会看到什么", detail: "开启 AI 时，要整理的消息会发给你在设置里选的 AI 服务商；不开 AI，聊天内容就不会离开这台电脑。关系网、个人页和所有群页只在本机统计，不用 AI。", view: null, selector: null },
 ];
 
 const whatsNewState = { hidden: false };

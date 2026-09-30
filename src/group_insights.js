@@ -6,6 +6,7 @@
 // calls the LLM. Lists are complete; the page decides how much to show first.
 
 const { hktToUnix } = require("./review_store");
+const { relationMap } = require("./group_relations");
 
 const DAY_SECONDS = 86400;
 const BEIJING_OFFSET_SECONDS = 8 * 3600;
@@ -169,12 +170,20 @@ const collectLists = (partials) => {
   };
 };
 
+// The group's part of the home briefing: it covers from the last 看完了
+// (windowStart) up to when it was last written, not the page's chosen range.
 const currentBrief = (db, groupId) => {
-  const row = db.prepare("SELECT summary_json AS json, updated_at AS updatedAt FROM group_briefs WHERE group_id = ?").get(groupId);
+  const row = db.prepare("SELECT summary_json AS json, window_start AS windowStart, updated_at AS updatedAt FROM group_briefs WHERE group_id = ?").get(groupId);
   const brief = row === undefined ? null : parsePartial(row.json);
-  return brief === null
-    ? null
-    : { summary: brief.summary ?? "", topics: (brief.topics ?? []).map((topic) => topic.title), updatedAt: row.updatedAt };
+  if (brief === null) {
+    return null;
+  }
+  // Its own timeline too: the page lists it under the summary (by time is
+  // easier to read than one long paragraph).
+  const timeline = (Array.isArray(brief.timeline) ? brief.timeline : [])
+    .filter((item) => typeof item?.title === "string" && item.title.trim() !== "")
+    .map((item) => ({ start: String(item.start ?? ""), end: String(item.end ?? ""), title: item.title, summary: String(item.summary ?? "") }));
+  return { summary: brief.summary ?? "", topics: (brief.topics ?? []).map((topic) => topic.title), timeline, windowStart: row.windowStart, updatedAt: row.updatedAt };
 };
 
 /* ---------- AIGC (prompt library) ---------- */
@@ -224,6 +233,7 @@ const groupInsights = (db, kb, { groupId, nowUnix, fromUnix = null, toUnix = nul
     daily: dailyActivity(db, id, range),
     heatmap: weeklyHeatmap(db, id, range),
     people: { active: activePeople(db, id, range), posters: picturePosters(db, id, range), helpers: answerers(partials) },
+    relations: relationMap(db, id, range),
     brief: currentBrief(db, id),
     timeline: topicTimeline(partials),
     ...collectLists(partials),

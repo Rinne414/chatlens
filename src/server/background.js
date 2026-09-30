@@ -334,8 +334,8 @@ const watchNotice = (hits) => {
 };
 
 // The first tick only remembers "now"; the mark also moves while switched
-// off, so switching on never replays old hits. Not notified: muted people,
-// and messages this tick already notified as an @ / reply (`skip`).
+// off, so switching on never replays old hits. Not notified: messages this
+// tick already notified as an @ / reply (`skip`).
 // Returns the new mark { at, keys } (keys: the messages of the mark's second
 // already handled); a future-dated message cannot push it past now.
 const notifyWatchWords = async ({ watch, mark, skip, current, send }) => {
@@ -344,7 +344,7 @@ const notifyWatchWords = async ({ watch, mark, skip, current, send }) => {
   // A message dated past now (clock skew) waits until real time reaches it,
   // or it would be notified again on every refresh.
   const unseen = unseenWatchHits(watch, mark.at, seen).filter((hit) => hit.sentAt <= now + 60);
-  const hits = unseen.filter((hit) => hit.muted !== true && !skip.has(messageKey(hit)));
+  const hits = unseen.filter((hit) => !skip.has(messageKey(hit)));
   if (current.notifyWatchWords && mark.at > 0 && hits.length > 0) {
     await send({ ...watchNotice(hits), url: serverUrl });
   }
@@ -356,14 +356,18 @@ const notifyWatchWords = async ({ watch, mark, skip, current, send }) => {
 // Called after each tick with a store handle: @/reply mentions newer than the
 // last notification, followed words (when switched on), plus one daily "your
 // briefing is ready" nudge. `current` / `send` are replaced in tests.
-const notifyAfterTick = async ({ db, briefing, getState, setState, current = settings(), send = notify }) => {
+// lateBefore { groupId: unix }: this tick also added old messages (the reply
+// backfill); anything of a group older than where its refresh window began
+// came from there and is not news. The marks move past them all the same.
+const notifyAfterTick = async ({ db, briefing, getState, setState, lateBefore = null, current = settings(), send = notify }) => {
   const saved = getState(db, NOTIFY_STATE_KEY, {}) ?? {};
   const next = { ...saved };
+  const isLate = (item) => lateBefore !== null && item.sentAt < (Number(lateBefore[item.groupId]) || 0);
   const direct = briefing.mentions.filter((item) => item.kind === "at" || item.kind === "reply");
   const lastMention = Number(saved.lastMentionAt) || 0;
   // Not while you were in that conversation yourself (a bot answering your
   // command): you saw those already.
-  const fresh = direct.filter((item) => item.sentAt > lastMention && item.youWereThere !== true && item.muted !== true);
+  const fresh = direct.filter((item) => item.sentAt > lastMention && item.youWereThere !== true && !isLate(item));
   if (current.notifyMentions && fresh.length > 0 && lastMention > 0) {
     const first = fresh[0];
     await send({
@@ -380,10 +384,11 @@ const notifyAfterTick = async ({ db, briefing, getState, setState, current = set
   }
 
   const mentionsNotified = current.notifyMentions && lastMention > 0 ? fresh : [];
+  const lateHits = (briefing.watch ?? []).flatMap((entry) => entry.latest).filter(isLate);
   const watchMark = await notifyWatchWords({
     watch: briefing.watch,
     mark: { at: Number(saved.lastWatchAt) || 0, keys: Array.isArray(saved.lastWatchKeys) ? saved.lastWatchKeys : [] },
-    skip: new Set(mentionsNotified.map(messageKey)),
+    skip: new Set([...mentionsNotified, ...lateHits].map(messageKey)),
     current,
     send,
   });

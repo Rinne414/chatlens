@@ -44,24 +44,6 @@ const watchWordsOf = (config) => {
   }).slice(0, MAX_WORDS));
 };
 
-// People whose mentions of you are not worth the 和你有关 list (a bot answering
-// your commands), by QQ number: [{ uin, name }].
-const mutedSpeakersOf = (config) =>
-  (Array.isArray(config.mutedMentionSpeakers) ? config.mutedMentionSpeakers : [])
-    .filter((item) => /^\d{5,12}$/u.test(String(item?.uin ?? "")))
-    .map((item) => ({ uin: String(item.uin), name: String(item.name ?? "").slice(0, 60) }));
-
-const setSpeakerMuted = ({ uin, name, muted }) => {
-  if (!/^\d{5,12}$/u.test(String(uin ?? ""))) {
-    throw new Error("QQ 号无效。");
-  }
-  const raw = state.loadRawConfig();
-  const others = mutedSpeakersOf(raw).filter((item) => item.uin !== String(uin));
-  const next = muted === true ? [...others, { uin: String(uin), name: String(name ?? "").slice(0, 60) }] : others;
-  state.writeConfig({ ...raw, mutedMentionSpeakers: next });
-  return { muted: next };
-};
-
 // 关注词 from the home page: validated, saved to the config, returned as stored.
 const saveWatchWords = ({ words }) => {
   const normalized = normalizeWords(words);
@@ -91,7 +73,6 @@ const briefingNow = () => {
       knowledgeDbPath,
       watchlist: watchlistOf(config),
       watchWords: watchWordsOf(config),
-      mutedUins: mutedSpeakersOf(config).map((item) => item.uin),
       nowUnix,
       extraSelfUins: uinFromPath(config.ntDbDir),
       isImageAvailable: displayable.has,
@@ -116,7 +97,6 @@ const briefingStamp = (db, config, nowUnix) => {
     engine.routeProblem(db),
     watchlistOf(config).map((item) => item.groupId),
     watchWordsOf(config),
-    mutedSpeakersOf(config),
     db.prepare("SELECT COUNT(*) AS n, TOTAL(length(name)) AS chars FROM group_names").get(),
     // Reading a chat moves its mark, which the group list shows as 看完了 / 没看 N 条.
     db.prepare("SELECT COUNT(*) AS n, MAX(updated_at) AS at, TOTAL(sent_at) AS marks FROM read_marks").get(),
@@ -155,7 +135,7 @@ const markSeen = ({ seenUnix }) => {
   return { windowStart: value };
 };
 
-const afterTick = async ({ ok }) => {
+const afterTick = async ({ ok, result }) => {
   if (!ok) {
     return;
   }
@@ -163,9 +143,12 @@ const afterTick = async ({ ok }) => {
   await background.notifyAfterTick({
     db: state.getStore(),
     briefing,
+    // Old replies added this tick (src/backfill_replies.js) are not news:
+    // they are older than where each group's refresh window began.
+    lateBefore: Number(result?.replyBackfill?.lastInserted) > 0 ? result.windowStarts ?? null : null,
     getState: briefingStore.getState,
     setState: briefingStore.setState,
   });
 };
 
-module.exports = { getBriefing, markSeen, retryFailed, saveWatchWords, setSpeakerMuted, afterTick, watchlistOf, uinFromPath };
+module.exports = { getBriefing, markSeen, retryFailed, saveWatchWords, afterTick, watchlistOf, uinFromPath };

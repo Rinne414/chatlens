@@ -25,7 +25,6 @@ const briefState = {
   watchDraft: "",
   watchError: null,
   watchExpanded: new Set(),
-  showMuted: false,
   renderPending: false,
 };
 
@@ -205,7 +204,7 @@ document.addEventListener?.("visibilitychange", async () => {
 });
 
 const briefUpdateBadge = () => {
-  const count = briefState.data?.mentions?.filter((item) => (item.kind === "at" || item.kind === "reply") && !item.muted && !item.youWereThere).length ?? 0;
+  const count = briefState.data?.mentions?.filter((item) => (item.kind === "at" || item.kind === "reply") && !item.youWereThere).length ?? 0;
   try {
     if (count > 0 && typeof navigator.setAppBadge === "function") {
       navigator.setAppBadge(count);
@@ -380,7 +379,7 @@ const briefSearchForm = () => {
 
 const briefMasthead = (data) => {
   const total = data.totals.textMessages + data.totals.mediaMessages;
-  const mentionCount = data.mentions.filter((item) => !item.muted).length;
+  const mentionCount = data.mentions.length;
   const watchCount = (data.watch ?? []).reduce((sum, item) => sum + item.total, 0);
   // Each count jumps to its section.
   const counts = [
@@ -481,14 +480,6 @@ const briefMentionThread = (thread) => {
     el("div", { class: "brief-thread-actions" },
       older.length > 0
         ? el("button", { class: "linklike brief-thread-toggle", onclick: toggle }, open ? "收起" : `展开前面 ${older.length} 条`)
-        : null,
-      /^\d+$/u.test(String(item.speakerUin ?? "")) && !item.muted
-        ? el("button", {
-            class: "linklike brief-mute",
-            title: `以后 ${item.speaker} 的 @ 和回复不再列在这里、也不再通知（可以随时恢复）`,
-            disabled: briefState.busy,
-            onclick: () => briefSetMuted(item, true),
-          }, "不看此人")
         : null),
     open
       ? el("ul", { class: "brief-thread-older" }, older.map((earlier) =>
@@ -499,60 +490,18 @@ const briefMentionThread = (thread) => {
       : null);
 };
 
-const briefSetMuted = async (item, muted) => {
-  briefState.busy = true;
-  renderBriefView();
-  try {
-    await api("/api/mentions/mute", { method: "POST", body: JSON.stringify({ uin: item.speakerUin, name: item.speaker, muted }) });
-    briefState.notice = muted
-      ? `以后 ${item.speaker} 的 @ 和回复收在「和你有关」最下面，不再通知。`
-      : `${item.speaker} 的 @ 和回复恢复显示。`;
-  } catch (error) {
-    briefState.notice = error.message;
-  }
-  briefState.busy = false;
-  await loadBriefing({ fresh: true });
-  renderBriefView();
-};
-
-// Muted people's mentions, one line per person: still one click away.
-const briefMutedLine = (muted) => {
-  if (muted.length === 0) {
-    return null;
-  }
-  const people = new Map();
-  for (const item of muted) {
-    const entry = people.get(item.speakerUin) ?? { item, count: 0 };
-    people.set(item.speakerUin, { ...entry, count: entry.count + 1 });
-  }
-  return el("div", { class: "brief-muted" },
-    el("span", { class: "brief-meta" }, "不看的人："),
-    [...people.values()].map(({ item, count }) => el("span", { class: "brief-muted-person" },
-      `${item.speaker} ${count} 条 `,
-      el("button", { class: "linklike", disabled: briefState.busy, onclick: () => briefSetMuted(item, false) }, "恢复"))),
-    el("button", {
-      class: "linklike",
-      onclick: () => {
-        briefState.showMuted = !briefState.showMuted;
-        renderBriefView();
-      },
-    }, briefState.showMuted ? "收起" : "显示"),
-    briefState.showMuted ? el("ul", { class: "brief-mention-list" }, briefMentionThreads(muted).map(briefMentionThread)) : null);
-};
-
 const briefMentions = (data) => {
   if (data.mentions.length === 0) {
     return data.identity.known
       ? el("p", { class: "brief-empty-line" }, "这段时间没有人 @ 你或回复你。")
       : null;
   }
-  const mentions = data.mentions.filter((item) => !item.muted);
+  const mentions = data.mentions;
   const threads = briefMentionThreads(mentions);
   const shown = briefState.showAllMentions ? threads : threads.slice(0, BRIEF_MENTION_PREVIEW);
   const hidden = threads.slice(shown.length).reduce((total, thread) => total + thread.items.length, 0);
   return el("section", { class: "brief-section brief-for-you" },
     el("h3", { class: "brief-section-title" }, "和你有关", el("span", { class: "brief-count" }, mentions.length)),
-    mentions.length === 0 ? el("p", { class: "brief-empty-line" }, "除了不看的人，这段时间没有人 @ 你或回复你。") : null,
     el("ul", { class: "brief-mention-list" }, shown.map(briefMentionThread)),
     hidden > 0
       ? el("button", {
@@ -562,8 +511,7 @@ const briefMentions = (data) => {
             renderBriefView();
           },
         }, `再看 ${hidden} 条`)
-      : null,
-    briefMutedLine(data.mentions.filter((item) => item.muted)));
+      : null);
 };
 
 /* ---------- 关注的词 ---------- */
@@ -601,7 +549,7 @@ const briefSetWatchNotify = async (enabled) => {
 };
 
 const briefWatchNotifyToggle = (data) =>
-  el("label", { class: "brief-watch-notify", title: "有新消息提到这些词时，在桌面通知（「不看此人」的人说的不算）" },
+  el("label", { class: "brief-watch-notify", title: "有新消息提到这些词时，在桌面通知" },
     el("input", {
       type: "checkbox",
       checked: data.status?.background?.settings?.notifyWatchWords === true,

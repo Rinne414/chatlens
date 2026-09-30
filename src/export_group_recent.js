@@ -1,7 +1,14 @@
 const fs = require("node:fs");
 const Database = require("better-sqlite3-multiple-ciphers");
-const { parseMessageMeta } = require("./message_meta");
+const { parseMessageMeta, parseFields, isReplyElement } = require("./message_meta");
 const { extractPictures, messagePictures, isPictureElement } = require("./picture_elements");
+
+// msg_type1 of messages people type: 2 is a normal message (text, mixed
+// text+image, forwards), 9 is a reply to someone (a fifth to a third of all
+// chat on real data; it used to be dropped entirely). 5 is a system tip.
+const REPLY_MESSAGE_TYPE = 9n;
+const CHAT_MESSAGE_TYPES = new Set([2n, REPLY_MESSAGE_TYPE]);
+const isChatMessageType = (msgType1) => typeof msgType1 === "bigint" && CHAT_MESSAGE_TYPES.has(msgType1);
 
 const sqlQuote = (value) => `'${value.replaceAll("'", "''")}'`;
 
@@ -53,6 +60,9 @@ const parseArgs = (argv) => {
     outputPath: argv[7],
     scanLimit: Number.parseInt(argv[8], 10),
     groupStarts: loadGroupStarts(),
+    // One-time backfill of replies stored by older versions (see
+    // src/backfill_replies.js): only reply text rows, no media.
+    repliesOnly: process.env.QQ_EXPORT_REPLIES_ONLY === "1",
   };
 };
 
@@ -253,8 +263,9 @@ const extractProtobufText = (hex) => {
     }
     // A picture or sticker element's strings are its file name, summary
     // ("[动画表情]"), host and URL parameters - never message text. Skipping
-    // the element also drops a picture quoted inside a reply.
-    if (depth > 0 && isPictureElement(buf)) {
+    // the element also drops a picture quoted inside a reply. A reply element
+    // holds the quoted message and its sender's name, not the replier's words.
+    if (depth > 0 && (isPictureElement(buf) || isReplyElement(buf))) {
       return;
     }
     for (const field of fields) {
@@ -276,6 +287,19 @@ const extractProtobufText = (hex) => {
   return parts.join(" ").replace(/[^\S\n]+/gu, " ").trim();
 };
 
+// The body minus its reply elements, as a byte run the legacy scanner can
+// read: a short reply like "?" is not "text" to the strict parser, and the
+// legacy scan would otherwise return the quoted message instead.
+const withoutReplyElements = (hex) => {
+  const top = parseFields(Buffer.from(hex, "hex"));
+  if (top === null || !top.some((field) => field.slice !== undefined && isReplyElement(field.slice))) {
+    return hex;
+  }
+  return Buffer.concat(top
+    .filter((field) => field.fieldNumber === 40800 && field.slice !== undefined && !isReplyElement(field.slice))
+    .map((field) => field.slice)).toString("hex");
+};
+
 const getMessageText = (hex) => {
   const extracted = extractProtobufText(hex);
   if (extracted.length > 0) {
@@ -283,7 +307,7 @@ const getMessageText = (hex) => {
   }
   // A picture- or sticker-only message has no text; the legacy byte scanner
   // would read noise out of its md5 bytes.
-  return extractPictures(hex).length > 0 ? "" : getMessageTextLegacy(hex);
+  return extractPictures(hex).length > 0 ? "" : getMessageTextLegacy(withoutReplyElements(hex));
 };
 
 const getBodyText = (hex) => {
@@ -511,6 +535,9 @@ const exportMessages = (args, key) => {
     // Groups whose iteration could not be completed (row cap hit or corrupt
     // page); used below to keep coverage honest.
     const incompleteGroups = new Set();
+    // Oldest sent_at an incomplete group reached: read newest first, so
+    // everything after that second was read (message_store covers it).
+    const groupReadFrom = {};
 
     for (const groupId of args.groupIds) {
       const groupIdInt = BigInt(groupId);
@@ -519,6 +546,7 @@ const exportMessages = (args, key) => {
       const resolvedGroupName = groupNames.get(groupId) ?? "";
       let groupScanned = 0;
       let olderStreak = 0;
+      let oldestRead = null;
       try {
         // Index-driven, newest-first (msg_seq desc) walk of just this group's rows.
         for (const row of stmt.iterate(groupIdInt, endUnix)) {
@@ -530,6 +558,9 @@ const exportMessages = (args, key) => {
           }
 
           const sentAt = BigInt(row.sent_at);
+          if (sentAt > 0n && (oldestRead === null || sentAt < oldestRead)) {
+            oldestRead = sentAt;
+          }
           // Only real timestamps before the window feed the streak; sent_at<=0
           // (system rows) and in/after-window rows reset it, so a stray 0 can
           // never trigger a false early stop.
@@ -542,6 +573,9 @@ const exportMessages = (args, key) => {
           }
           olderStreak = 0;
           if (sentAt < startUnix || sentAt >= endUnix) {
+            continue;
+          }
+          if (args.repliesOnly && row.msg_type1 !== REPLY_MESSAGE_TYPE) {
             continue;
           }
 
@@ -561,16 +595,18 @@ const exportMessages = (args, key) => {
             memberUin: member?.uin ?? null,
           };
 
-          // Type 2 covers normal chat messages across all subtypes (plain
-          // text, replies/quotes, mixed text+image, forwards) — extract text
-          // from any of them; empty extractions are filtered downstream.
-          if (row.msg_type1 === 2n) {
+          // Extract text from every chat message subtype; empty extractions
+          // are filtered downstream.
+          if (isChatMessageType(row.msg_type1)) {
             messages.push({
               ...messageBase,
               isSelf: row.is_self === 1n,
               ...parseMessageMeta(row.body_hex),
               text: getMessageText(row.body_hex),
             });
+          }
+          if (args.repliesOnly) {
+            continue;
           }
 
           // Structured picture facts (md5, size, where Tencent serves it);
@@ -591,6 +627,9 @@ const exportMessages = (args, key) => {
         // incomplete, and continue so the other groups still export.
         errors.push({ groupId, message: error.message, code: error.code });
         incompleteGroups.add(groupId);
+      }
+      if (incompleteGroups.has(groupId) && oldestRead !== null) {
+        groupReadFrom[groupId] = Number(oldestRead);
       }
     }
 
@@ -693,6 +732,8 @@ const exportMessages = (args, key) => {
       scanTruncated,
       scanAborted,
       coveredFromUnix,
+      incompleteGroups: [...incompleteGroups],
+      groupReadFrom,
       matched: messages.length,
       matchedMedia: dedupedMediaMessages.length,
       errors,
@@ -729,4 +770,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { getMessageText, extractMediaRefs, labelStickerRefs };
+module.exports = { getMessageText, extractMediaRefs, labelStickerRefs, isChatMessageType };

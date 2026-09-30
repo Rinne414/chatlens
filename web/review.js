@@ -138,13 +138,35 @@ const openReviewView = async (preset = {}) => {
     // it says otherwise), never the one last picked here.
     Object.assign(reviewState, { searchRange: "all" }, preset.range ?? {});
     await runReviewSearch(preset.query);
+    await loadReviewDay(preset.day ?? reviewState.day ?? reviewDefaultDay());
+    return;
   }
-  await loadReviewDay(preset.day ?? reviewState.day ?? reviewDefaultDay());
+  const loading = loadReviewDay(preset.day ?? reviewState.day ?? reviewDefaultDay());
+  markViewStep(reviewStepNow());
+  await loading;
+};
+
+/* ---------- back and forward between a day, a report and a search ---------- */
+
+// What the main column shows, as a history step.
+const reviewStepNow = () => {
+  if (reviewState.resultsOpen && reviewState.results !== null) {
+    return { search: reviewState.query };
+  }
+  return reviewState.report === null ? { day: reviewState.day } : { report: reviewState.report };
+};
+
+// One day to another is like turning a page of the calendar: it replaces the
+// entry, so back leaves the calendar instead of walking through every day.
+const markReviewStep = () => {
+  const step = reviewStepNow();
+  markViewStep(step, { replace: step.day !== undefined && currentEntry()?.step?.day !== undefined });
 };
 
 const reviewPickReport = (kind, period) => {
   reviewState.report = { kind, period };
   reviewState.resultsOpen = false;
+  markReviewStep();
   renderReviewView();
 };
 
@@ -153,8 +175,38 @@ const reviewPickDay = (day) => {
   reviewState.resultsOpen = false;
   reviewState.notice = null;
   reviewState.expanded = {};
+  reviewState.day = day;
+  markReviewStep();
   loadReviewDay(day);
   $("#view-review")?.scrollIntoView?.({ block: "start" });
+};
+
+const reviewBackToDay = () => goBackTo((prev) => prev.view === "review" && prev.step?.day === reviewState.day, () => {
+  reviewState.report = null;
+  markReviewStep();
+  renderReviewView();
+});
+
+const reviewBackToResults = () => goBackTo((prev) => prev.view === "review" && prev.step?.search === reviewState.query, () => {
+  reviewState.resultsOpen = true;
+  markReviewStep();
+  renderReviewView();
+});
+
+VIEW_STEP_RESTORERS.review = (step) => {
+  if (typeof step?.search === "string" && step.search !== "") {
+    if (reviewState.results !== null && reviewState.query === step.search) {
+      reviewState.resultsOpen = true;
+      showView("review");
+      renderReviewView();
+      return;
+    }
+    openReviewView({ query: step.search });
+    return;
+  }
+  reviewState.resultsOpen = false;
+  reviewState.report = step?.report ?? null;
+  openReviewView(typeof step?.day === "string" ? { day: step.day } : {});
 };
 
 const reviewToggle = (key) => {
@@ -245,6 +297,7 @@ const runReviewSearch = async (query) => {
     reviewState.results = null;
     reviewState.resultsOpen = false;
     reviewState.searching = false;
+    markReviewStep();
     renderReviewView();
     return;
   }
@@ -260,6 +313,10 @@ const runReviewSearch = async (query) => {
     reviewState.results = results;
     reviewState.resultsOpen = true;
     reviewState.error = null;
+    // Only while 回顾 is still the page shown: else it would label another page's entry.
+    if (app.view === "review") {
+      markReviewStep();
+    }
   } catch (error) {
     if (ticket !== reviewState.searchTicket) {
       return;
@@ -293,10 +350,7 @@ const reviewSearchBar = () => {
     ? el("button", {
         class: "btn ghost",
         type: "button",
-        onclick: () => {
-          reviewState.resultsOpen = true;
-          renderReviewView();
-        },
+        onclick: reviewBackToResults,
       }, `← 回到「${reviewState.query}」的结果`)
     : null);
 };
@@ -692,7 +746,7 @@ const renderReviewView = () => {
     ? reviewResults()
     : report !== null
       ? el("div", { class: "review-report" },
-        el("button", { class: "btn small ghost", onclick: () => { reviewState.report = null; renderReviewView(); } }, "‹ 回到这一天"),
+        el("button", { class: "btn small ghost", onclick: reviewBackToDay }, "‹ 回到这一天"),
         digestCard(report.kind, report.period, { emptyText: "还没有生成。点下面的按钮，缺的每日总览会先补上，再写成报告。" }))
       : reviewDayContent();
   setChildren(root, el("div", { class: "review-page" },

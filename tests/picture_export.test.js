@@ -21,7 +21,7 @@ test("export folders are named by Beijing time and nothing else is accepted", ()
 });
 
 test("file names say when, where and who, with unsafe characters replaced", () => {
-  assert.equal(fileStem(MD5, { sentAt: SENT_AT, groupName: "AI朋友交流群", speaker: "青苇" }), "20260924-2053_AI朋友交流群_青苇_6d8112a1");
+  assert.equal(fileStem(MD5, { sentAt: SENT_AT, groupName: "示例交流群", speaker: "小明" }), "20260924-2053_示例交流群_小明_6d8112a1");
   assert.equal(fileStem(MD5, { sentAt: SENT_AT, groupName: "a/b:c", speaker: "x?y" }), "20260924-2053_a_b_c_x_y_6d8112a1");
   assert.equal(fileStem(MD5, null), "6d8112a1");
 });

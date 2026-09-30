@@ -2,9 +2,10 @@
 
 /* ---------- 群: one group in depth ----------
    简报 and 回顾 look across all groups; this page stays with one, for any
-   dates: what it talked about day by day, who is active, who answers
-   questions, what AI setups and pictures it shares -- all from data the
-   background already stored, so opening it costs no AI calls. Every list is
+   dates: what it talked about day by day, who is active, who talks with
+   whom (web/group_relations.js), who answers questions, what AI setups and
+   pictures it shares -- all from data the background already stored, so
+   opening it costs no AI calls. Every list is
    complete: sections show the first few and open to the rest. */
 
 const GROUP_LAST_KEY = "cc-group-last";
@@ -16,11 +17,14 @@ const PEOPLE_TABS = [["active", "最能聊"], ["posters", "发图最多"], ["hel
 const TOPICS_PER_DAY = 6;
 const LIST_PREVIEW = 8;
 const RANK_PREVIEW = 10;
+const BRIEF_TIMELINE_PREVIEW = 6;
 const GROUP_PRESETS = [["today", "今天"], ["yesterday", "昨天"], ["7d", "7 天"], ["30d", "30 天"]];
 const DAY = 86400;
 
 app.groupPage = {
   groupId: wallReadPref(GROUP_LAST_KEY, ""),
+  // The list of groups is showing (the last group is still remembered).
+  choosing: false,
   range: { preset: "7d", fromDay: null, toDay: null },
   data: null,
   loading: false,
@@ -29,6 +33,17 @@ app.groupPage = {
   aiPictures: null,
   openDays: new Set(),
   expanded: new Set(),
+  // 个人页 (group_person.js): the person shown, or null for the group itself.
+  person: null,
+  // 所有群 page of the person (person_across.js), and its message filter.
+  personAll: false,
+  personGroupFilter: "",
+  personData: null,
+  // What personData was loaded for (group_person.js personRequestKey, as JSON).
+  personDataKey: null,
+  personLoading: false,
+  personError: null,
+  personMessages: null,
 };
 
 const replaceGroupPage = (patch) => {
@@ -75,7 +90,11 @@ const groupRangeLabel = () => {
 };
 
 const setGroupRange = (range) => {
-  replaceGroupPage({ range, openDays: new Set(), expanded: new Set() });
+  replaceGroupPage({ range, openDays: new Set(), expanded: new Set(), relFocus: null });
+  if (app.groupPage.person !== null) {
+    loadPersonPage();
+    return;
+  }
   loadGroupPage(app.groupPage.groupId);
 };
 
@@ -133,21 +152,46 @@ const loadGroupPage = async (groupId) => {
   renderGroupView();
 };
 
-// No group given: reopen the last one, or show the chooser.
-const openGroupView = (groupId) => {
+const showGroupChooser = () => {
   showView("group");
-  const target = groupId ?? app.groupPage.groupId;
-  if (/^\d+$/u.test(String(target ?? ""))) {
-    if (groupId !== undefined && groupId !== app.groupPage.groupId) {
-      replaceGroupPage({ openDays: new Set(), expanded: new Set() });
-    }
-    loadGroupPage(String(target));
-    return;
-  }
+  replaceGroupPage({ choosing: true, person: null });
+  markViewStep({ group: "" });
   renderGroupView();
 };
 
-VIEW_RELOADERS.group = () => openGroupView(app.groupPage.groupId || undefined);
+// No group given: back to what the page showed last -- the list of groups,
+// or the last group.
+const openGroupView = (groupId) => {
+  const target = groupId ?? (app.groupPage.choosing ? "" : app.groupPage.groupId);
+  if (!/^\d+$/u.test(String(target ?? ""))) {
+    showGroupChooser();
+    return;
+  }
+  showView("group");
+  if (groupId !== undefined && groupId !== app.groupPage.groupId) {
+    replaceGroupPage({ openDays: new Set(), expanded: new Set(), relFocus: null });
+  }
+  replaceGroupPage({ choosing: false, person: null });
+  markViewStep({ group: String(target) });
+  loadGroupPage(String(target));
+};
+
+// 「← 所有群」: the browser's back when the list is the screen before.
+const backToGroupChooser = () => goBackTo((prev) => prev.view === "group" && prev.step?.group === "", showGroupChooser);
+
+// A person's page reloads itself; it does not fall back to the group.
+VIEW_RELOADERS.group = () => (app.groupPage.person !== null && !app.groupPage.choosing ? loadPersonPage() : openGroupView());
+VIEW_STEP_RESTORERS.group = (step) => {
+  if (step?.group && step.person && step.all) {
+    openPersonAcross(step.person, step.group);
+  } else if (step?.group && step.person) {
+    openPersonView(step.person, step.group);
+  } else if (step?.group) {
+    openGroupView(step.group);
+  } else {
+    showGroupChooser();
+  }
+};
 VIEW_LEAVE_HOOKS.push(() => queueMicrotask(renderRailGroups));
 
 const groupOrigin = () => ({ view: "group", label: GROUP_ORIGIN_LABEL });
@@ -323,6 +367,7 @@ const groupHeader = (data) => {
     avatarEl(data.name, data.groupId, undefined, groupAvatarUrl(data.groupId)),
     el("div", { class: "gp-head-main" },
       el("div", { class: "gp-head-title" },
+        el("button", { class: "btn small gp-all", type: "button", title: "回到群列表，换一个群看", onclick: backToGroupChooser }, "← 所有群"),
         el("h2", {}, data.name),
         el("select", {
           class: "kb-select",
@@ -346,15 +391,59 @@ const groupHeader = (data) => {
       el("button", { class: "btn", type: "button", onclick: () => openGroupGallery({}) }, "看这段时间的图")));
 };
 
-// The group's current brief only describes "now", so it shows only while the
-// range reaches today.
+const briefMoment = (unix) => {
+  const hkt = unixToHkt(unix);
+  return `${hkt.slice(0, 10) === todayDay() ? "今天" : shortDay(hkt.slice(0, 10))} ${hkt.slice(11, 16)}`;
+};
+
+// "21:53–22:54", with the day when it is not today.
+const briefMomentSpan = (item) => {
+  const start = hktToUnix(item.start);
+  const end = hktToUnix(item.end);
+  if (start === null) {
+    return "";
+  }
+  const from = briefMoment(start);
+  return end === null || end === start ? from : `${from}–${unixToHkt(end).slice(11, 16)}`;
+};
+
+// The brief's own timeline, newest first: one line per stretch of the chat.
+const groupBriefTimeline = (items) => (items.length === 0 ? null : el("div", { class: "gp-brief-timeline" },
+  el("span", { class: "gp-label" }, "按时间（点一段跳到那里的消息）"),
+  expandable("briefTimeline", [...items].reverse(), BRIEF_TIMELINE_PREVIEW, (shown) => el("ol", {}, shown.map((item) => {
+    const start = hktToUnix(item.start);
+    return el("li", {}, el(start === null ? "div" : "button", {
+      class: "gp-brief-moment",
+      type: start === null ? undefined : "button",
+      title: item.summary,
+      onclick: start === null ? undefined : () => openGroupChatAt(start),
+    },
+    el("span", { class: "gp-brief-moment-time" }, briefMomentSpan(item)),
+    el("strong", {}, item.title),
+    item.summary ? el("span", { class: "gp-brief-moment-sum" }, item.summary) : null));
+  })), "段")));
+
+// The group's part of the home briefing: from the last 看完了 to its last
+// merge, whatever range the page shows, so it says so. It only describes
+// "now", so it shows only while the range reaches today. The summary reads
+// as a short lead with the rest behind 「展开全文」, then the same stretch by
+// time (one long paragraph was hard to read, and grows with the window).
 const groupBrief = (brief) => {
   if (brief === null || brief.summary === "" || groupRangeDays().toDay !== todayDay()) {
     return null;
   }
+  const span = Number.isFinite(brief.windowStart) ? `${briefMoment(brief.windowStart)} – ${briefMoment(brief.updatedAt)}` : `${briefMoment(brief.updatedAt)} 更新`;
+  const { lead, paragraphs } = window.BriefText.summaryParts(brief.summary);
+  const full = app.groupPage.expanded.has("briefFull");
   return el("section", { class: "gp-brief" },
-    el("span", { class: "gp-label" }, "现在在聊"),
-    el("p", {}, brief.summary),
+    el("div", { class: "gp-brief-head" },
+      el("span", { class: "gp-label" }, "现在在聊"),
+      el("span", { class: "kb-meta" }, `${span} · 从你上次在首页点「看完了」算起，和上面选的日期无关`)),
+    el("p", { class: "gp-brief-lead" }, lead),
+    full ? paragraphs.map((paragraph) => el("p", {}, paragraph)) : null,
+    paragraphs.length === 0 ? null : el("button", { class: "kb-facet-more gp-brief-more", type: "button", onclick: () => toggleGroupExpanded("briefFull") },
+      full ? "收起" : `展开全文（还有 ${paragraphs.length} 段）`),
+    groupBriefTimeline(brief.timeline ?? []),
     brief.topics.length === 0 ? null : el("div", { class: "brief-group-topics" }, brief.topics.map((topic) => el("span", { class: "tag plain" }, topic))));
 };
 
@@ -526,8 +615,12 @@ const renderGroupView = () => {
     return;
   }
   const page = app.groupPage;
-  if (!/^\d+$/u.test(String(page.groupId ?? ""))) {
+  if (page.choosing || !/^\d+$/u.test(String(page.groupId ?? ""))) {
     setChildren(root, groupChooser());
+    return;
+  }
+  if (page.person !== null) {
+    setChildren(root, groupPersonPage());
     return;
   }
   if (page.data === null) {
@@ -540,6 +633,7 @@ const renderGroupView = () => {
   setChildren(root, el("div", { class: `gp-page ${page.loading ? "is-loading" : ""}` },
     groupHeader(data),
     groupBrief(data.brief),
+    groupRelations(data),
     el("div", { class: "gp-grid" },
       el("div", { class: "gp-col" }, groupTimeline(data.timeline), groupQa(data.qa), groupNewThings(data.newThings), groupLinks(data.links)),
       el("div", { class: "gp-col" }, groupActivity(data), groupPeople(data), groupAigc(data)))));

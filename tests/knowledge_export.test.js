@@ -56,7 +56,7 @@ test("drops invisible and unassigned characters some nicknames carry", () => {
   const bidi = String.fromCodePoint(0x2067);
   const zeroWidth = String.fromCodePoint(0x200b);
   assert.equal(sanitizeStem(invisible, "fallback"), "fallback");
-  assert.equal(sanitizeStem(`${bidi}青苇${zeroWidth}`, "fallback"), "青苇");
+  assert.equal(sanitizeStem(`${bidi}小明${zeroWidth}`, "fallback"), "小明");
 });
 
 test("falls back when a name sanitises to nothing", () => {

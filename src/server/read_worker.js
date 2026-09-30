@@ -17,6 +17,8 @@ const HANDLERS = {
   coverage: ["./knowledge_ops", "coverage"],
   trends: ["./trends_ops", "getTrends"],
   groupInsights: ["./group_ops", "getGroupInsightsReadOnly"],
+  groupPerson: ["./group_ops", "getGroupPersonReadOnly"],
+  personAcross: ["./group_ops", "getPersonAcrossReadOnly"],
   gallery: ["./gallery_ops", "runHeavyGalleryQuery"],
 };
 
