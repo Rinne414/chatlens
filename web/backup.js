@@ -156,12 +156,12 @@ const backupGroupPicker = () => {
       el("button", { class: "btn small", type: "button", onclick: () => setAll(groups.filter((group) => group.watched).map((group) => group.groupId)) }, "只选关注的群"),
       el("button", { class: "btn small", type: "button", onclick: () => setAll(groups.map((group) => group.groupId)) }, "全选"),
       el("button", { class: "btn small", type: "button", onclick: () => setAll([]) }, "全不选")),
-    el("div", { class: "backup-groups" }, groups.map((group) => el("label", { class: "backup-group" },
+    sizedList("backup-groups", el("div", { class: "backup-groups" }, groups.map((group) => el("label", { class: "backup-group" },
       el("input", { type: "checkbox", checked: backupState.selected.has(group.groupId), onchange: (event) => toggle(group.groupId, event.target.checked) }),
       el("span", { class: "backup-group-name" }, group.name, group.watched ? el("span", { class: "backup-star", title: "关注的群" }, "★") : null),
       el("span", { class: "brief-meta" }, group.firstSentAt
         ? `${briefNumber(group.messages)} 条 · ${unixToHkt(group.firstSentAt).slice(5, 10)} 起`
-        : "本地还没有记录")))));
+        : "本地还没有记录"))))));
 };
 
 const backupRangePicker = () => {

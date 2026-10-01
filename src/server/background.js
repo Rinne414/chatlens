@@ -11,6 +11,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const state = require("./toolkit_state");
 const jobs = require("./run_jobs");
+const { describeJobFailure } = require("./job_failure");
 const platform = require("../platform");
 const secrets = require("../secrets");
 const { notify } = require("../notify");
@@ -257,16 +258,26 @@ const tick = ({ force }) => {
   const args = [refreshScript, ...(force ? ["--force"] : [])];
   child = spawn(process.execPath, args, { cwd: state.toolRoot, ...platform.spawnOptionsForTree() });
   lowerPriority(child.pid);
+  // Only this refresh's own output explains its failure: status.log also
+  // holds lines from earlier refreshes.
+  const tickLog = [];
+  const logTickLine = (line) => {
+    logLine(line);
+    tickLog.push(line);
+    if (tickLog.length > MAX_LOG_LINES) {
+      tickLog.shift();
+    }
+  };
   // The result line is on stdout; decoded as UTF-8 across chunk boundaries.
   let stdoutText = "";
-  const readStdout = lineReader(logLine);
+  const readStdout = lineReader(logTickLine);
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   child.stdout.on("data", (textChunk) => {
     stdoutText += textChunk;
     readStdout(textChunk);
   });
-  child.stderr.on("data", lineReader(logLine));
+  child.stderr.on("data", lineReader(logTickLine));
   child.on("error", (error) => {
     status.lastError = error.message;
   });
@@ -282,7 +293,7 @@ const tick = ({ force }) => {
     const result = parseResult(stdoutText);
     status.lastResult = result;
     if (code !== 0 && status.lastError === null) {
-      status.lastError = status.log.at(-1) ?? `刷新进程退出码 ${code}`;
+      status.lastError = describeJobFailure(tickLog, code);
     }
     saveStatus();
     schedule(code === 0 ? followUpDelay(result) : undefined);

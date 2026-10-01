@@ -939,6 +939,7 @@ const renderBriefView = () => {
           // On wide screens the per-group list becomes a right-hand column
           // (brief.css); on narrow ones it simply follows the main column.
           el("div", { class: "brief-main" },
+            shortcutPromptCard(),
             whatsNewCard(),
             briefMasthead(data),
             briefMentions(data),

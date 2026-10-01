@@ -8,4 +8,11 @@ button.whats-new-item { cursor: pointer; }
 button.whats-new-item:hover, button.whats-new-item:focus-visible { background: var(--panel); outline: none; }
 .whats-new-item b { font-size: 13.5px; }
 .whats-new-item span { font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+/* ---- 桌面快捷方式, asked once (web/shortcuts.js) ---- */
+.shortcut-prompt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 18px; padding: 12px 16px; border: 1px solid var(--accent); border-radius: 12px; background: var(--accent-soft); font-size: 13.5px; }
+.shortcut-prompt.error { border-color: var(--risk); }
+.shortcut-prompt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 320px; }
+.shortcut-prompt-text strong { font-size: 15px; color: var(--accent); }
+.shortcut-prompt-text span { font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+.shortcut-prompt-actions { display: flex; gap: 8px; }
 .whats-new-flash { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 10px; transition: outline-color .3s; }

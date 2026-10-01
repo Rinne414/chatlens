@@ -43,7 +43,8 @@ const railGroupRow = (group, cap) =>
 
 const renderRailGroups = () => {
   const node = $("#rail-groups");
-  if (node === null) {
+  // The minute poll must not swap the list out from under a drag.
+  if (node === null || resizeState.active === "rail-groups") {
     return;
   }
   const groups = railState.data?.groups ?? [];
@@ -63,7 +64,7 @@ const renderRailGroups = () => {
       },
     }, el("span", {}, "关注的群"), el("span", { class: "rail-caret" }, railState.groupsOpen ? "▾" : "▸")),
     railState.groupsOpen
-      ? el("div", { class: "rail-group-list" }, groups.map((group) => railGroupRow(group, railState.data.maxCounted)))
+      ? sizedList("rail-groups", el("div", { class: "rail-group-list" }, groups.map((group) => railGroupRow(group, railState.data.maxCounted))))
       : null);
 };
 

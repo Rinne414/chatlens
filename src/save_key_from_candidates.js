@@ -16,8 +16,10 @@
 
 const fs = require("node:fs");
 const os = require("node:os");
+const path = require("node:path");
 const { Worker, isMainThread, parentPort, workerData } = require("node:worker_threads");
 const Database = require("better-sqlite3-multiple-ciphers");
+const { detectPrefixBytes } = require("./db_mirror");
 
 const SAMPLE_BYTES = 4 * 1024 * 1024;
 const MAX_WORKERS = 8;
@@ -85,12 +87,40 @@ const findKeyInSlice = (databasePath, candidates, stopFlag = null) => {
   return { key: null, configName: null, tested: candidates.length };
 };
 
+const KEY_LENGTHS = new Set([16, 32]);
+
+// A key pasted by hand is tried on the user's own database before it is
+// saved: a wrong value (typically an AI service's "sk-..." key in the wrong
+// box) would otherwise show as saved while every refresh fails. With no
+// database to try, only the key's length can be checked.
+const checkManualKey = (key, ntDbDir) => {
+  const trimmed = String(key ?? "").trim();
+  const dir = String(ntDbDir ?? "").trim();
+  const sourceDb = path.join(dir, "nt_msg.db");
+  if (dir === "" || !fs.existsSync(sourceDb)) {
+    if (!KEY_LENGTHS.has(trimmed.length)) {
+      throw new Error(`QQ 数据库密钥是 16 位（少数为 32 位）字符，这个值有 ${trimmed.length} 位，没有保存。AI 服务的 API key 请填到「LLM API key」栏。`);
+    }
+    return;
+  }
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "qq-keycheck-"));
+  try {
+    const samplePath = path.join(workDir, "nt_msg.sample.db");
+    writeDatabaseSample(sourceDb, samplePath, detectPrefixBytes(sourceDb));
+    if (!DATABASE_CONFIGS.some((config) => decrypts(samplePath, trimmed, config))) {
+      throw new Error("这个密钥解不开「QQ 数据库路径」里的 nt_msg.db，没有保存。请确认它是 QQ 数据库密钥而不是 AI 服务的 API key，或直接点「自动获取密钥」。");
+    }
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
+  }
+};
+
 const parseCandidates = (candidatePath) => [
   ...new Set(
     fs.readFileSync(candidatePath, "utf8")
       .split(/\r?\n/u)
       .map((value) => value.trim())
-      .filter((value) => value.length === 16 || value.length === 32),
+      .filter((value) => KEY_LENGTHS.has(value.length)),
   ),
 ];
 
@@ -171,4 +201,4 @@ if (!isMainThread) {
   });
 }
 
-module.exports = { writeDatabaseSample, findKeyParallel, decrypts, DATABASE_CONFIGS };
+module.exports = { writeDatabaseSample, findKeyParallel, decrypts, checkManualKey, DATABASE_CONFIGS };

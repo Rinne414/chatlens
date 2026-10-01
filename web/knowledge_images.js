@@ -239,7 +239,8 @@ const facetBlock = ({ id, title, rows, expanded, onToggle, hint = "" }) => {
   return el("section", { class: "kb-facet", id: `kb-facet-${id}` },
     el("h3", { title: hint }, title),
     filter,
-    list,
+    // Only the expanded long list scrolls, so only it can be made taller.
+    list.classList.contains("long") ? sizedList(`kb-facet-${id}`, list) : list,
     rows.length > KB_FACET_PREVIEW
       ? el("button", { class: "kb-facet-more", type: "button", onclick: onToggle },
         expanded ? "收起" : `显示全部 ${briefNumber(rows.length)} 项`)
@@ -360,10 +361,19 @@ const knowledgeThumbError = (item) => (image) => {
   image.closest(".wall-tile, .kb-card2-media")?.classList.add("broken");
 };
 
+// A placeholder only means the file carried no parameters -- usually a plain
+// screenshot or photo. Its prompt, when there is one, was pasted in a reply.
+const knowledgeSourceBadge = (item) => {
+  if (!item.isPlaceholder) {
+    return { text: generatorLabel(item.generator), tone: GENERATOR_TONES[item.generator] ?? "ai" };
+  }
+  return item.prompt === "" ? { text: "未检测到生成参数", tone: "" } : { text: "咒语来自回复", tone: "asked" };
+};
+
 const knowledgeBadges = (item) => {
   const asks = item.promptRequests?.length ?? 0;
   return [
-    { text: item.isPlaceholder ? "咒语来自回复" : generatorLabel(item.generator), tone: GENERATOR_TONES[item.generator] ?? "ai" },
+    knowledgeSourceBadge(item),
     item.loras.length > 0 ? { text: `LoRA ×${item.loras.length}`, title: item.loras.map((lora) => lora.name).join("\n") } : null,
     asks > 0 ? { text: `${asks} 人求`, tone: "asked", title: "群里有人求过这张图" } : null,
   ].filter((badge) => badge !== null);
@@ -479,7 +489,7 @@ const knowledgeCard = (item) => {
           }, shortModelName(item.checkpoint)),
         item.prompt === "" ? null : el("button", { class: "btn small", type: "button", onclick: () => copyKnowledgePrompt(item) }, "复制咒语")),
       item.prompt === ""
-        ? el("p", { class: "kb-card2-prompt muted" }, item.isPlaceholder ? "咒语来自群里的回复，点图查看。" : "没有咒语")
+        ? el("p", { class: "kb-card2-prompt muted" }, item.isPlaceholder ? "图片里没有生成参数" : "没有咒语")
         : el("p", { class: "kb-card2-prompt", title: "点图看完整咒语" }, item.prompt),
       params === "" ? null : el("p", { class: "kb-card2-params" }, params),
       item.loras.length === 0

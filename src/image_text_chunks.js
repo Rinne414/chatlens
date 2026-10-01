@@ -1,7 +1,8 @@
 "use strict";
 
 // Container-level text extraction for AI image metadata.
-// Reads PNG text chunks and JPEG EXIF text tags WITHOUT loading pixel data:
+// Reads PNG text chunks, JPEG EXIF and comment text, and WebP EXIF WITHOUT
+// loading pixel data (png_stealth.js reads pixels, and only when asked):
 // chunk headers are read one at a time and image payloads are seeked past, so a
 // 7 MB PNG costs a handful of small reads. Everything here is byte-level; no
 // image decoding and no third-party dependency.
@@ -18,6 +19,8 @@ const PNG_TEXT_TYPES = new Set(["tEXt", "zTXt", "iTXt"]);
 const MAX_CHUNK_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_TEXT_BYTES = 6 * 1024 * 1024;
 const MAX_CHUNKS = 512;
+// Real pictures split their pixels into at most a few thousand IDAT chunks.
+const MAX_IDAT_CHUNKS = 100000;
 const MAX_INFLATED_BYTES = 8 * 1024 * 1024;
 
 const LATIN1 = "latin1";
@@ -82,11 +85,13 @@ const readPngChunks = (fd, fileSize) => {
 
   const chunks = {};
   let offset = PNG_SIGNATURE.length;
-  let width = 0;
-  let height = 0;
+  let ihdr = null;
+  const idat = [];
   let textBytes = 0;
   let seen = 0;
 
+  // IDAT does not count toward MAX_CHUNKS: a large picture is split into
+  // well over a thousand of them, and text chunks may follow.
   while (offset + 8 <= fileSize && seen < MAX_CHUNKS) {
     const header = readExact(fd, offset, 8);
     if (header === null) {
@@ -98,15 +103,20 @@ const readPngChunks = (fd, fileSize) => {
     if (length > fileSize - dataOffset) {
       break;
     }
-    seen += 1;
 
-    if (type === "IHDR" && length >= 8) {
-      const ihdr = readExact(fd, dataOffset, 8);
-      if (ihdr !== null) {
-        width = ihdr.readUInt32BE(0);
-        height = ihdr.readUInt32BE(4);
+    if (type === "IDAT") {
+      if (idat.length >= MAX_IDAT_CHUNKS) {
+        break;
+      }
+      idat.push({ offset: dataOffset, length });
+    } else if (type === "IHDR" && length >= 13) {
+      seen += 1;
+      const data = readExact(fd, dataOffset, 13);
+      if (data !== null) {
+        ihdr = { width: data.readUInt32BE(0), height: data.readUInt32BE(4), bitDepth: data[8], colorType: data[9], interlace: data[12] };
       }
     } else if (PNG_TEXT_TYPES.has(type) && length <= MAX_CHUNK_BYTES && textBytes + length <= MAX_TOTAL_TEXT_BYTES) {
+      seen += 1;
       const data = readExact(fd, dataOffset, length);
       const decoded = data === null ? null : decodePngTextChunk(type, data);
       if (decoded !== null && !(decoded.key in chunks)) {
@@ -115,12 +125,16 @@ const readPngChunks = (fd, fileSize) => {
       }
     } else if (type === "IEND") {
       break;
+    } else {
+      seen += 1;
     }
 
     offset = dataOffset + length + 4;
   }
 
-  return { container: "png", chunks, width, height };
+  // Where the pixels are, for png_stealth: read only when no text says anything.
+  const stealth = ihdr === null ? null : { ...ihdr, idat };
+  return { container: "png", chunks, width: ihdr?.width ?? 0, height: ihdr?.height ?? 0, stealth };
 };
 
 // --- JPEG / EXIF -----------------------------------------------------------
@@ -155,20 +169,46 @@ const likelierUtf16 = (preferred, other) => (asciiShare(other) > asciiShare(pref
 const repairUtf16ByteOrder = (text) =>
   likelierUtf16(text, Buffer.from(text, "utf16le").swap16().toString("utf16le"));
 
-// UserComment is prefixed with an 8-byte character code. NovelAI and most
+// The 8-byte character code: "ASCII", "UNICODE" or "JIS" padded with NULs,
+// or eight NULs. Some writers drop the padding, or the code altogether (a
+// bare JSON object), and cutting 8 bytes then destroys the text.
+const CHARSET_CODES = ["ASCII", "UNICODE", "JIS"];
+
+const charsetPrefix = (buffer) => {
+  const head = buffer.subarray(0, 8).toString(LATIN1);
+  const code = CHARSET_CODES.find((name) => head.startsWith(name));
+  if (code !== undefined) {
+    return { code, start: buffer[code.length] === 0 ? 8 : code.length };
+  }
+  const undefinedCode = buffer.length >= 8 && buffer.subarray(0, 8).every((byte) => byte === 0);
+  return { code: null, start: undefinedCode ? 8 : 0 };
+};
+
+// UserComment is prefixed with that character code. NovelAI and most
 // exporters write UTF-16 in the TIFF byte order (not the spec's big-endian),
 // but some (Civitai) always write big-endian, so both orders are tried.
+const BOM_LITTLE = [0xff, 0xfe];
+const BOM_BIG = [0xfe, 0xff];
+
+const hasBom = (payload) =>
+  payload.length >= 2 && [BOM_LITTLE, BOM_BIG].some(([first, second]) => payload[0] === first && payload[1] === second);
+
+const decodeUtf16 = (payload, littleEndian) => {
+  const body = hasBom(payload) ? payload.subarray(2) : payload;
+  const even = Buffer.from(body.subarray(0, body.length - (body.length % 2)));
+  const asLittle = even.toString("utf16le");
+  const asBig = Buffer.from(even).swap16().toString("utf16le");
+  return littleEndian ? likelierUtf16(asLittle, asBig) : likelierUtf16(asBig, asLittle);
+};
+
 const decodeUserComment = (buffer, littleEndian) => {
-  const code = buffer.subarray(0, 8).toString(LATIN1).replace(/\0+$/u, "");
-  const payload = buffer.subarray(8);
-  if (code === "UNICODE") {
-    const even = Buffer.from(payload.subarray(0, payload.length - (payload.length % 2)));
-    const asLittle = even.toString("utf16le");
-    const asBig = Buffer.from(even).swap16().toString("utf16le");
-    const text = littleEndian ? likelierUtf16(asLittle, asBig) : likelierUtf16(asBig, asLittle);
-    return text.replace(/\0+$/u, "");
-  }
-  return payload.toString("utf8").replace(/\0+$/u, "");
+  const { code, start } = charsetPrefix(buffer);
+  const payload = buffer.subarray(start);
+  // A byte-order mark means UTF-16 even when the UNICODE code is missing.
+  const text = code === "UNICODE" || hasBom(payload)
+    ? decodeUtf16(payload, littleEndian)
+    : payload.toString("utf8");
+  return text.replace(/\0+$/u, "");
 };
 
 const readIfd = (tiff, ifdOffset, littleEndian, tags, out) => {
@@ -272,6 +312,12 @@ const readJpegChunks = (fd, fileSize) => {
       if (data !== null && data.subarray(0, 4).toString(LATIN1) === "Exif") {
         Object.assign(chunks, parseExif(data.subarray(6)));
       }
+    } else if (marker === 0xfe && chunks.JpegComment === undefined) {
+      // The comment segment: encoders sign it, a few tools put NovelAI JSON here.
+      const data = readExact(fd, dataOffset, dataLength);
+      if (data !== null) {
+        chunks.JpegComment = data.toString("utf8").replace(/\0+$/u, "");
+      }
     }
 
     offset = dataOffset + dataLength;
@@ -280,8 +326,75 @@ const readJpegChunks = (fd, fileSize) => {
   return { container: "jpeg", chunks, width, height };
 };
 
-// Returns { container, chunks, width, height } or null when the file is neither
-// a readable PNG nor JPEG. Never throws on malformed input.
+// --- WebP ------------------------------------------------------------------
+
+// RIFF chunks: VP8X carries the canvas size, VP8 / VP8L the frame size of a
+// simple file, EXIF a TIFF block (some writers keep the JPEG "Exif\0\0"
+// header in front of it). NovelAI's WebP puts its metadata in EXIF.
+const readWebpChunks = (fd, fileSize) => {
+  const header = readExact(fd, 0, 12);
+  if (header === null || header.toString(LATIN1, 0, 4) !== "RIFF" || header.toString(LATIN1, 8, 12) !== "WEBP") {
+    return null;
+  }
+
+  const chunks = {};
+  let offset = 12;
+  let width = 0;
+  let height = 0;
+  let seen = 0;
+  // Pixels that can hide data: a lossless image, or a (lossless) alpha plane.
+  let losslessPixels = false;
+
+  while (offset + 8 <= fileSize && seen < MAX_CHUNKS) {
+    const head = readExact(fd, offset, 8);
+    if (head === null) {
+      break;
+    }
+    const type = head.toString(LATIN1, 0, 4);
+    const length = head.readUInt32LE(4);
+    const dataOffset = offset + 8;
+    if (length > fileSize - dataOffset) {
+      break;
+    }
+    seen += 1;
+    losslessPixels = losslessPixels || type === "VP8L" || type === "ALPH";
+
+    if (type === "VP8X" && length >= 10) {
+      const data = readExact(fd, dataOffset, 10);
+      if (data !== null) {
+        width = data.readUIntLE(4, 3) + 1;
+        height = data.readUIntLE(7, 3) + 1;
+      }
+    } else if (type === "VP8 " && length >= 10 && width === 0) {
+      const data = readExact(fd, dataOffset, 10);
+      if (data !== null) {
+        width = data.readUInt16LE(6) & 0x3fff;
+        height = data.readUInt16LE(8) & 0x3fff;
+      }
+    } else if (type === "VP8L" && length >= 5 && width === 0) {
+      const data = readExact(fd, dataOffset, 5);
+      if (data !== null && data[0] === 0x2f) {
+        const bits = data.readUInt32LE(1);
+        width = (bits & 0x3fff) + 1;
+        height = ((bits >>> 14) & 0x3fff) + 1;
+      }
+    } else if (type === "EXIF" && length <= MAX_CHUNK_BYTES) {
+      const data = readExact(fd, dataOffset, length);
+      if (data !== null) {
+        const start = data.subarray(0, 6).toString(LATIN1) === "Exif\0\0" ? 6 : 0;
+        Object.assign(chunks, parseExif(data.subarray(start)));
+      }
+    }
+
+    // Chunks are padded to an even length.
+    offset = dataOffset + length + (length % 2);
+  }
+
+  return { container: "webp", chunks, width, height, stealth: losslessPixels ? { kind: "webp" } : null };
+};
+
+// Returns { container, chunks, width, height, stealth } or null when the file
+// is not a readable PNG, JPEG or WebP. Never throws on malformed input.
 const readImageTextChunks = (filePath) => {
   let fd;
   try {
@@ -290,7 +403,7 @@ const readImageTextChunks = (filePath) => {
       return null;
     }
     fd = fs.openSync(filePath, "r");
-    return readPngChunks(fd, stat.size) ?? readJpegChunks(fd, stat.size);
+    return readPngChunks(fd, stat.size) ?? readJpegChunks(fd, stat.size) ?? readWebpChunks(fd, stat.size);
   } catch {
     return null;
   } finally {

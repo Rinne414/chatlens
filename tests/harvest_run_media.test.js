@@ -239,6 +239,28 @@ test("still attributes a group image when the original is gone but a thumb remai
   db.close();
 });
 
+test("with no original, QQ's 720 preview is read: its alpha plane keeps a hidden prompt", () => {
+  const root = makeNtData();
+  const hash = "7".repeat(32);
+  const thumbDir = path.join(root, "Pic", "2026-08", "Thumb");
+  writePlainPng(path.join(thumbDir, `${hash}_0.png`));
+  fs.copyFileSync(path.join(__dirname, "fixtures", "webp", "lossy-alpha-stealth.webp"), path.join(thumbDir, `${hash}_720.webp`));
+
+  const { stats, storePath } = runHarvest(root, [
+    mediaMessage({ mediaRefs: [{ kind: "image", hash }] }),
+  ]);
+
+  assert.equal(stats.originalMissing, 1);
+  assert.equal(stats.parsed, 1);
+  const db = openKnowledgeStore(storePath);
+  const image = db.prepare("SELECT generator, prompt, file_path AS filePath FROM images WHERE hash = ?").get(hash);
+  assert.equal(image.generator, "nai");
+  assert.equal(image.prompt, "1girl, solo, rain");
+  assert.match(image.filePath, /_720\.webp$/u);
+  assert.equal(db.prepare("SELECT speaker FROM sightings WHERE hash = ?").get(hash).speaker, "Alice");
+  db.close();
+});
+
 test("counts refs whose original is absent from the cache", () => {
   const root = makeNtData();
 

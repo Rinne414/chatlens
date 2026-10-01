@@ -269,6 +269,38 @@ test("a 128 KB head recognizes PNG and JPEG metadata", () => {
   assert.equal(pictureFetch.headIsComplete(unfinished, 16), false);
 });
 
+test("a head whose pixels carry a hidden prompt asks for the whole picture", () => {
+  const { makePng } = require("./png_fixture");
+  const metadata = JSON.stringify({ Software: "NovelAI", Comment: JSON.stringify({ prompt: "1girl", uc: "x", steps: 28 }) });
+  const hidden = makePng({ signature: "stealth_pngcomp", payload: require("node:zlib").gzipSync(Buffer.from(metadata)) });
+  const plain = makePng({});
+
+  assert.equal(pictureFetch.headLooksGenerated(hidden), true);
+  assert.equal(pictureFetch.headLooksGenerated(plain), false);
+  // Hidden data needs every pixel: a head cut at the requested size is not enough.
+  assert.equal(pictureFetch.headIsComplete(hidden, hidden.length), false);
+  assert.equal(pictureFetch.headIsComplete(hidden, hidden.length + 1), true);
+  // Too few rows in the head to tell: read further before deciding.
+  assert.equal(pictureFetch.stealthUndecided(hidden.subarray(0, 120)), true);
+  assert.equal(pictureFetch.stealthUndecided(plain), false);
+  assert.equal(pictureFetch.stealthUndecided(hidden), false);
+});
+
+test("a WebP head that announces EXIF is worth reading in full", () => {
+  const webpHead = (flags) => {
+    const head = Buffer.alloc(30);
+    head.write("RIFF", 0, "latin1");
+    head.write("WEBP", 8, "latin1");
+    head.write("VP8X", 12, "latin1");
+    head.writeUInt32LE(10, 16);
+    head[20] = flags;
+    return head;
+  };
+
+  assert.equal(pictureFetch.headLooksGenerated(webpHead(0x08)), true);
+  assert.equal(pictureFetch.headLooksGenerated(webpHead(0x10)), false);
+});
+
 test("generated pictures keep an untruncated workflow and do not replace a real parse", () => {
   const dir = tempDir();
   const dbPath = path.join(dir, "knowledge.db");

@@ -6,3 +6,7 @@
 
 # POSIX launchers and updater scripts must keep LF endings.
 *.sh text eol=lf
+
+# Test fixtures are compared byte for byte; never convert their line endings.
+*.webp binary
+*.rgba binary

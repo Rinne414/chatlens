@@ -9,10 +9,17 @@
 // re-parses any row stored by an older version.
 
 const { readImageTextChunks } = require("./image_text_chunks");
+const { readStealthChunks } = require("./png_stealth");
 
 // 3: EXIF comments count only as A1111 parameters (with a "Steps:" line) or a
 //    ComfyUI graph; phone/app notes like "oplus_2097152" are not prompts.
-const PARSER_VERSION = 3;
+// 4: data hidden in PNG pixels (stealth pnginfo), WebP EXIF, the JPEG comment
+//    segment, NovelAI JSON outside PNG chunks, UserComment without a charset
+//    code, ComfyUI 文本 / positive_prompt inputs (knowledge_repair re-reads
+//    the pictures earlier versions found nothing in).
+// 5: WebP pixels too: lossless WebP and the lossless alpha plane of lossy
+//    WebP (QQ's 720 previews), via webp_lossless.js.
+const PARSER_VERSION = 5;
 
 const MAX_PROMPT_CHARS = 20000;
 const MAX_RAW_CHARS = 60000;
@@ -238,6 +245,8 @@ const isLink = (value) => Array.isArray(value) && value.length === 2 && typeof v
 //   positive        WeiLinPromptUIWithoutLora
 //   text_0          ShowText|pysssss
 //   populated_text  ImpactWildcardProcessor
+//   文本            ZML_TextInput
+//   positive_prompt WebUIPromptBridge (with negative_prompt, see below)
 // `temp_str` is deliberately absent: WeiLin nodes stash their UI token editor
 // state there as a JSON blob, which is not the prompt.
 const TEXT_INPUT_KEYS = [
@@ -251,9 +260,17 @@ const TEXT_INPUT_KEYS = [
   "string",
   "populated_text",
   "wildcard_text",
+  "文本",
+  "positive_prompt",
 ];
 
-const literalTextFrom = (inputs) => {
+// side: which sampler input the walk started from. A node that holds both
+// prompts (positive_prompt + negative_prompt) answers the negative side with
+// its negative one.
+const literalTextFrom = (inputs, side) => {
+  if (side === "negative" && typeof inputs.negative_prompt === "string" && inputs.negative_prompt.trim().length > 0) {
+    return inputs.negative_prompt;
+  }
   for (const key of TEXT_INPUT_KEYS) {
     const value = inputs[key];
     if (typeof value === "string" && value.trim().length > 0) {
@@ -267,7 +284,7 @@ const literalTextFrom = (inputs) => {
 // ComfyUI graphs chain conditioning through many pass-through nodes, so this
 // follows link-valued inputs rather than assuming a fixed shape. Text-bearing
 // input names are tried first at every hop, before descending further.
-const resolveTextUpstream = (nodes, link, seen = new Set(), depth = 0) => {
+const resolveTextUpstream = (nodes, link, side = "positive", seen = new Set(), depth = 0) => {
   if (!isLink(link) || depth > MAX_LINK_DEPTH) {
     return "";
   }
@@ -280,7 +297,7 @@ const resolveTextUpstream = (nodes, link, seen = new Set(), depth = 0) => {
     return "";
   }
 
-  const literal = literalTextFrom(node.inputs);
+  const literal = literalTextFrom(node.inputs, side);
   if (literal.length > 0) {
     return literal;
   }
@@ -293,7 +310,7 @@ const resolveTextUpstream = (nodes, link, seen = new Set(), depth = 0) => {
     ...Object.values(node.inputs),
   ];
   for (const value of ordered) {
-    const found = resolveTextUpstream(nodes, value, nextSeen, depth + 1);
+    const found = resolveTextUpstream(nodes, value, side, nextSeen, depth + 1);
     if (found.length > 0) {
       return found;
     }
@@ -457,7 +474,7 @@ const parseComfyUi = (chunks) => {
     return {
       generator: "comfyui",
       prompt: asText(sampler === null ? "" : resolveTextUpstream(graph, sampler.inputs.positive)),
-      negativePrompt: asText(sampler === null ? "" : resolveTextUpstream(graph, sampler.inputs.negative)),
+      negativePrompt: asText(sampler === null ? "" : resolveTextUpstream(graph, sampler.inputs.negative, "negative")),
       checkpoint: asText(pickCheckpoint(checkpoints), 300),
       modelHash: "",
       loras: dedupeLoras(loras),
@@ -493,9 +510,42 @@ const NAI_PARAM_KEYS = new Map([
   ["strength", "denoisingStrength"],
 ]);
 
+// Fields only NovelAI's comment JSON has. "prompt" alone is not enough: app
+// notes and labels use that word too.
+const NAI_COMMENT_KEYS = ["uc", "n_samples", "noise_schedule", "v4_prompt", "sampler", "scale", "steps"];
+const MIN_NAI_COMMENT_KEYS = 2;
+
+const isNaiComment = (value) =>
+  isPlainObject(value) && typeof value.prompt === "string"
+  && NAI_COMMENT_KEYS.filter((key) => key in value).length >= MIN_NAI_COMMENT_KEYS;
+
+// Outside PNG text chunks NovelAI's metadata travels whole: its metadata
+// object ({"Comment": ..., "Software": ...}) in EXIF UserComment (WebP), or a
+// bare comment JSON in UserComment or the JPEG comment segment. Both are
+// lifted into PNG-style fields; fields the file already has win.
+const CARRIER_FIELDS = ["UserComment", "JpegComment"];
+
+const liftNaiCarrier = (chunks) => {
+  if (chunks.Comment !== undefined) {
+    return chunks;
+  }
+  for (const field of CARRIER_FIELDS) {
+    const text = typeof chunks[field] === "string" ? chunks[field].trim() : "";
+    const value = text.startsWith("{") ? parseJsonOrNull(text) : null;
+    if (isNaiComment(value)) {
+      return { ...chunks, Comment: text };
+    }
+    if (isPlainObject(value) && isNaiComment(parseJsonOrNull(value.Comment))) {
+      const fields = Object.entries(value).filter(([, item]) => typeof item === "string");
+      return { ...Object.fromEntries(fields), ...chunks };
+    }
+  }
+  return chunks;
+};
+
 const parseNovelAi = (chunks) => {
   const comment = parseJsonOrNull(chunks.Comment) ?? {};
-  const prompt = asText(comment.prompt) || asText(chunks.Description);
+  const prompt = asText(comment.prompt) || asText(chunks.Description) || asText(chunks.ImageDescription);
   const negativePrompt = asText(comment.uc);
 
   const params = {};
@@ -560,7 +610,8 @@ const parseExifText = (text) => {
 // `parameters` string and a stale `workflow` graph. The A1111 string is written
 // by whichever tool actually produced the file, so it wins whenever it parses
 // into a real prompt; the ComfyUI graph is only consulted when it does not.
-const detectAndParse = (chunks) => {
+const detectAndParse = (fileChunks) => {
+  const chunks = liftNaiCarrier(fileChunks);
   if (String(chunks.Software ?? "").includes("NovelAI") || chunks.Comment !== undefined) {
     const nai = parseNovelAi(chunks);
     if (nai.prompt.length > 0) {
@@ -576,7 +627,7 @@ const detectAndParse = (chunks) => {
     }
   }
 
-  const fromExif = parseExifText(chunks.UserComment) ?? parseExifText(chunks.ImageDescription);
+  const fromExif = parseExifText(chunks.UserComment) ?? parseExifText(chunks.ImageDescription) ?? parseExifText(chunks.JpegComment);
   if (fromExif !== null) {
     return fromExif;
   }
@@ -605,7 +656,18 @@ const parseAiMetadata = (filePath, fileSize = 0) => {
     return { ...EMPTY_RESULT, container: null, width: 0, height: 0, fileSize, rawChunks: {}, parserVersion: PARSER_VERSION };
   }
 
-  const parsed = detectAndParse(container.chunks) ?? EMPTY_RESULT;
+  // The pixels are decoded only when the text says nothing: a stripped
+  // picture may still carry its prompt there (png_stealth.js).
+  let chunks = container.chunks;
+  let parsed = detectAndParse(chunks);
+  if (parsed === null) {
+    const hidden = readStealthChunks(filePath, container.stealth);
+    if (hidden !== null) {
+      chunks = { ...chunks, ...hidden };
+      parsed = detectAndParse(chunks);
+    }
+  }
+  parsed = parsed ?? EMPTY_RESULT;
   // Several exporters echo the positive prompt into the negative slot when the
   // negative is empty; treating that as a real negative poisons search results.
   const negativePrompt = parsed.negativePrompt === parsed.prompt ? "" : parsed.negativePrompt;
@@ -618,7 +680,7 @@ const parseAiMetadata = (filePath, fileSize = 0) => {
     width: container.width,
     height: container.height,
     fileSize,
-    rawChunks: rawChunksFor(container.chunks),
+    rawChunks: rawChunksFor(chunks),
     parserVersion: PARSER_VERSION,
   };
 };

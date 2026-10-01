@@ -9,6 +9,7 @@ const grokOps = require("./grok_ops");
 const secrets = require("../secrets");
 const platform = require("../platform");
 const { detectPrefixBytes } = require("../db_mirror");
+const { checkManualKey, writeDatabaseSample } = require("../save_key_from_candidates");
 const linuxScan = require("../linux_key_scan");
 const packageInfo = require("../../package.json");
 
@@ -75,6 +76,9 @@ const getSettingsStatus = () => {
 
 // The secret travels via stdin/keyring only — never on a command line or log.
 const saveSecret = async (which, secretValue) => {
+  if (which === "ntqqKey") {
+    checkManualKey(secretValue, state.loadConfig().ntDbDir);
+  }
   await secrets.saveSecret(which, secretValue);
 };
 
@@ -310,7 +314,6 @@ const autoDetectKey = async () => {
   const sampleDb = path.join(workDir, "nt_msg.sample.db");
   const candidatesPath = path.join(workDir, "candidates.txt");
   try {
-    const { writeDatabaseSample } = require("../save_key_from_candidates");
     writeDatabaseSample(sourceDb, sampleDb, detectPrefixBytes(sourceDb));
     await scanForCandidates(candidatesPath);
     if (!fs.existsSync(candidatesPath)) {

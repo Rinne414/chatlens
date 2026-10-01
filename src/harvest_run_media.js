@@ -34,7 +34,7 @@ const {
   isUnchanged,
 } = require("./knowledge_store");
 const { persistOriginalsForHashes, buildOriIndex } = require("./media_object_store");
-const { repairExifPrompts } = require("./knowledge_repair");
+const { repairExifPrompts, reparseStrippedRows, qqPreviewFor } = require("./knowledge_repair");
 
 const parseArgs = (argv) => {
   if (argv.length < 5) {
@@ -66,7 +66,8 @@ const hashesFromThisRun = (refs, requests) => {
 };
 
 // Smallest Thumb sibling per hash. Used only when Ori is gone, so the card can
-// still show a picture; Thumb never has generation parameters.
+// still show a picture. Thumbs carry no text metadata, but the 720 preview
+// beside them can keep a prompt hidden in its alpha (qqPreviewFor).
 // `wanted` limits the (expensive) stat calls to hashes this run references:
 // a busy account's cache holds hundreds of thousands of thumbnails, and
 // stat-ing all of them made every 15-minute background refresh take ~1 min.
@@ -194,6 +195,11 @@ const harvestRunMedia = ({ mediaMessagesJson, ntDataDir, storePath, exportJson =
   if (repaired.checked > 0) {
     process.stdout.write(`exif-repair checked=${repaired.checked} recovered=${repaired.recovered} stripped=${repaired.stripped}\n`);
   }
+  // Time-boxed; whatever is left carries over to the next run.
+  const reparsed = reparseStrippedRows(db);
+  if (reparsed.checked > 0) {
+    process.stdout.write(`stripped-reparse checked=${reparsed.checked} recovered=${reparsed.recovered} remaining=${reparsed.remaining}\n`);
+  }
   const oriIndex = buildOriIndex(ntDataDir);
   const thumbIndex = buildThumbIndex(ntDataDir, hashesFromThisRun(refs, requests));
   const scanState = loadScanState(db, PARSER_VERSION);
@@ -228,15 +234,40 @@ const harvestRunMedia = ({ mediaMessagesJson, ntDataDir, storePath, exportJson =
     knownHashes.add(hash);
   };
 
+  // True when the preview carried generation data and was recorded; a row
+  // that already has real metadata (e.g. from Tencent's original) is kept.
+  const recordFromPreview = ({ hash, thumbPath, sighting, parsedAt }) => {
+    const preview = qqPreviewFor(thumbPath);
+    const existing = db.prepare("SELECT generator FROM images WHERE hash = ?").get(hash);
+    if (preview === null || (existing !== undefined && existing.generator !== "stripped")) {
+      return false;
+    }
+    const stat = fs.statSync(preview);
+    const result = parseAiMetadata(preview, stat.size);
+    if (result.generator === "unknown") {
+      return false;
+    }
+    upsertImage(db, { ...result, hash, filePath: preview, fileMtime: Math.floor(stat.mtimeMs / 1000), parsedAt });
+    knownHashes.add(hash);
+    recordSighting(db, sighting);
+    stats.parsed += 1;
+    stats.attributed += 1;
+    return true;
+  };
+
   const applyAll = db.transaction(() => {
     for (const [hash, sighting] of refs) {
       const filePath = oriIndex.get(hash);
       const scannedAt = Math.floor(Date.now() / 1000);
       if (filePath === undefined) {
         // No original: still keep who posted it. Prefer a Thumb so the card is
-        // not a blank hole; parameters are gone either way.
+        // not a blank hole. QQ's 720 preview may still hold a prompt hidden in
+        // its alpha plane, so it is read first.
         stats.originalMissing += 1;
         const thumbPath = thumbIndex.get(hash) ?? "";
+        if (recordFromPreview({ hash, thumbPath, sighting, parsedAt: scannedAt })) {
+          continue;
+        }
         let fileMtime = sighting.sentAt ?? 0;
         let fileSize = 0;
         if (thumbPath !== "") {

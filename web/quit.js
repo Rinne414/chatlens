@@ -6,6 +6,12 @@
    button in 设置 → 后台与通知, and Ctrl+K. */
 
 const quitReopenHint = (desktop) => {
+  if (desktop?.appShortcut && desktop.desktopShortcut === true) {
+    return "要再打开：桌面或开始菜单里的「QQ 群消息简报」，或按 Ctrl+Alt+U。";
+  }
+  if (desktop?.desktopShortcut === true) {
+    return "要再打开：双击桌面上的「QQ 群消息简报」。";
+  }
   if (!desktop?.appShortcut) {
     return "要再打开：运行安装文件夹里的启动脚本（Windows 是 Start-QQ-Console.cmd）。";
   }

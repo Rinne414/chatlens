@@ -892,7 +892,13 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/desktop/shortcut") {
-      sendJson(response, 200, await desktop.ensureAppShortcut());
+      const body = await readBody(request);
+      sendJson(response, 200, await desktop.setShortcut(body.kind, body.enabled === true));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/desktop/shortcut-asked") {
+      sendJson(response, 200, desktop.markShortcutAsked());
       return;
     }
 
@@ -1086,9 +1092,7 @@ const listen = (port, attempt) => {
       .catch((error) => console.error(`legacy task cleanup failed: ${error.message}`));
     // First start: put the app in the Start menu / app launcher so it can be
     // reopened without finding the install folder.
-    if (!desktop.getDesktopStatus().appShortcut) {
-      desktop.ensureAppShortcut().catch((error) => console.error(`app shortcut failed: ${error.message}`));
-    }
+    desktop.syncShortcutsAtBoot().catch((error) => console.error(`app shortcut failed: ${error.message}`));
     const autostartFlag = process.argv.find((arg) => arg.startsWith("--autostart="));
     const autostart = autostartFlag === undefined ? null : parseAutostart(`run=${autostartFlag.slice("--autostart=".length)}`);
     if (!process.argv.includes("--no-open")) {

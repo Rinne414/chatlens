@@ -10,6 +10,7 @@ const { loadState: loadCoverageRepairState } = require("../coverage_repair");
 const { loadConfig, getStoreOverview, advanceLocalReadMarks, toolRoot } = require("./toolkit_state");
 const { resolveSummaryRange } = require("../unviewed_range");
 const { isLlmConfigured } = require("../llm_route");
+const { describeJobFailure } = require("./job_failure");
 const platform = require("../platform");
 
 const MAX_LOG_LINES = 4000;
@@ -485,7 +486,7 @@ const spawnJob = (type, label, args, stages, cleanupPaths) => {
     }
     job.status = code === 0 && cleanupError === null ? "done" : "failed";
     if (code !== 0 && job.error === null) {
-      job.error = `进程退出码 ${code}`;
+      job.error = describeJobFailure(job.log, code);
     } else if (cleanupError !== null) {
       job.error = jobCleanupFailureMessage(job.type, cleanupError);
     }

@@ -9,6 +9,7 @@
 // and any prompt people pasted in chat.
 
 const fs = require("node:fs");
+const path = require("node:path");
 const { parseAiMetadata, detectAndParse, PARSER_VERSION } = require("./ai_metadata");
 const { repairUtf16ByteOrder } = require("./image_text_chunks");
 const { upsertImage, applyChatPrompt } = require("./knowledge_store");
@@ -90,4 +91,83 @@ const repairExifPrompts = (db, now = Math.floor(Date.now() / 1000)) => {
   return outcome;
 };
 
-module.exports = { repairExifPrompts };
+// Pictures earlier parsers found nothing in ("stripped") are read once more:
+// version 4 also reads data hidden in PNG pixels (NovelAI writes it into
+// every picture), WebP EXIF and the JPEG comment segment. The kept copy
+// (object_path) is preferred, since QQ's own path may be a thumbnail or gone.
+// Rows with no readable file are only marked as checked. Batched commits and
+// a time budget keep one refresh from stalling on a large library.
+// QQ keeps a 720px preview next to each thumbnail (<md5>_720.webp): lossy
+// colour, but a lossless alpha plane, so a prompt hidden in the alpha
+// survives in it even when PC QQ never downloaded the original.
+const QQ_THUMB_NAME = /^([a-f0-9]{32})_[^\\/]+$/iu;
+
+const qqPreviewFor = (thumbPath) => {
+  if (typeof thumbPath !== "string" || path.basename(path.dirname(thumbPath)).toLowerCase() !== "thumb") {
+    return null;
+  }
+  const match = QQ_THUMB_NAME.exec(path.basename(thumbPath));
+  const preview = match === null ? null : path.join(path.dirname(thumbPath), `${match[1].toLowerCase()}_720.webp`);
+  return preview !== null && fs.existsSync(preview) ? preview : null;
+};
+
+const REPARSE_LIMIT = 50000;
+const REPARSE_BUDGET_MS = 20000;
+const REPARSE_COMMIT_EVERY = 500;
+
+const reparseStrippedRows = (db, { now = Math.floor(Date.now() / 1000), limit = REPARSE_LIMIT, budgetMs = REPARSE_BUDGET_MS, clock = Date.now } = {}) => {
+  const pending = db.prepare("SELECT COUNT(*) AS n FROM images WHERE generator = 'stripped' AND parser_version < ?").get(PARSER_VERSION).n;
+  const rows = db.prepare(`
+    SELECT hash, file_path AS filePath, object_path AS objectPath, file_mtime AS fileMtime, file_missing AS fileMissing
+    FROM images WHERE generator = 'stripped' AND parser_version < ? LIMIT ?
+  `).all(PARSER_VERSION, limit);
+  const markChecked = db.prepare("UPDATE images SET parser_version = ? WHERE hash = ?");
+  const keepMissing = db.prepare("UPDATE images SET file_missing = 1 WHERE hash = ?");
+  const chatPrompts = db.prepare("SELECT answer_text AS text FROM prompt_requests WHERE image_hash = ? AND answer_kind = 'text'");
+  const outcome = { checked: 0, recovered: 0, noFile: 0, remaining: 0 };
+
+  const reparseOne = (row) => {
+    outcome.checked += 1;
+    const sources = [row.objectPath, row.filePath, qqPreviewFor(row.filePath)]
+      .filter((candidate) => typeof candidate === "string" && candidate !== "" && fs.existsSync(candidate));
+    if (sources.length === 0) {
+      outcome.noFile += 1;
+      markChecked.run(PARSER_VERSION, row.hash);
+      return;
+    }
+    let source = null;
+    let size = 0;
+    let parsed = null;
+    for (const candidate of new Set(sources)) {
+      size = fs.statSync(candidate).size;
+      parsed = parseAiMetadata(candidate, size);
+      if (parsed.generator !== "unknown") {
+        source = candidate;
+        break;
+      }
+    }
+    if (source === null) {
+      markChecked.run(PARSER_VERSION, row.hash);
+      return;
+    }
+    upsertImage(db, { ...parsed, hash: row.hash, filePath: row.filePath, fileSize: size, fileMtime: row.fileMtime, parsedAt: now });
+    if (row.fileMissing === 1 && source !== row.filePath) {
+      keepMissing.run(row.hash);
+    }
+    // A longer prompt pasted in chat stays the searchable one, as at harvest.
+    for (const answer of chatPrompts.all(row.hash)) {
+      applyChatPrompt(db, { hash: row.hash, prompt: answer.text });
+    }
+    outcome.recovered += 1;
+  };
+  const commitBatch = db.transaction((batch) => batch.forEach(reparseOne));
+
+  const started = clock();
+  for (let index = 0; index < rows.length && clock() - started <= budgetMs; index += REPARSE_COMMIT_EVERY) {
+    commitBatch(rows.slice(index, index + REPARSE_COMMIT_EVERY));
+  }
+  outcome.remaining = Math.max(0, pending - outcome.checked);
+  return outcome;
+};
+
+module.exports = { repairExifPrompts, reparseStrippedRows, qqPreviewFor };

@@ -162,6 +162,36 @@ test("treats a parameters block with no negative section as having none", () => 
 
 // --- ComfyUI ---------------------------------------------------------------
 
+test("reads the 文本 input of Chinese text nodes (ZML_TextInput)", () => {
+  const graph = {
+    3: { class_type: "KSampler", inputs: { positive: ["78", 1], negative: ["7", 0], steps: 30, cfg: 4, seed: 1 } },
+    78: { class_type: "AnimaArtistAdapterMixer", inputs: { model: ["4", 0], artist_pack: ["77", 0], strength: 1.25 } },
+    77: { class_type: "AnimaArtistPack", inputs: { clip: ["4", 1], artist_chain: "(@artist_a:1.2)", base_prompt: ["50", 0] } },
+    50: { class_type: "ZML_TextInput", inputs: { 文本: "1girl, solo, umbrella" } },
+    7: { class_type: "CLIPTextEncode", inputs: { clip: ["4", 1], text: ["51", 0] } },
+    51: { class_type: "ZML_TextInput", inputs: { 文本: "watermark, lowres" } },
+    4: { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "model_a.safetensors" } },
+  };
+
+  const result = parseComfyUi({ prompt: JSON.stringify(graph) });
+
+  assert.equal(result.prompt, "1girl, solo, umbrella");
+  assert.equal(result.negativePrompt, "watermark, lowres");
+});
+
+test("one node holding both prompts gives each side its own (WebUIPromptBridge)", () => {
+  const graph = {
+    19: { class_type: "KSampler", inputs: { positive: ["113", 2], negative: ["113", 3], steps: 28, cfg: 5, seed: 2 } },
+    113: { class_type: "WebUIPromptBridge", inputs: { positive_prompt: "(masterpiece, best quality)", negative_prompt: "lowres, bad hands", model: ["111", 0], clip: ["111", 1] } },
+    111: { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "model_b.safetensors" } },
+  };
+
+  const result = parseComfyUi({ prompt: JSON.stringify(graph) });
+
+  assert.equal(result.prompt, "(masterpiece, best quality)");
+  assert.equal(result.negativePrompt, "lowres, bad hands");
+});
+
 test("resolves prompts through a pass-through chain to the literal text node", () => {
   const graph = {
     3: { class_type: "KSampler", inputs: { positive: ["6", 0], negative: ["7", 0], steps: 25, cfg: 5, sampler_name: "euler_ancestral", scheduler: "normal", seed: 42 } },

@@ -2037,7 +2037,7 @@ const renderJobPanel = () => {
 
   const logBox = el("details", { class: "log-box" },
     el("summary", {}, "运行日志"),
-    el("div", { class: "console", id: "job-log" }, app.logText));
+    sizedList("job-log", el("div", { class: "console", id: "job-log" }, app.logText)));
   logBox.open = logOpen ?? (job.status === "running" || job.status === "failed");
 
   setChildren($("#job-body"), 
@@ -2375,7 +2375,7 @@ const renderWatchlistView = () => {
           }, "刷新群列表")),
         knownGroups.length === 0
           ? el("div", { class: "empty" }, "还没有群列表缓存，点「刷新群列表」读取一次（需要复制数据库，约 1-2 分钟）。")
-          : el("div", {}, searchInput, el("div", { class: "wl-scroll" }, filtered.map(knownRow))))));
+          : el("div", {}, searchInput, sizedList("watchlist-known", el("div", { class: "wl-scroll" }, filtered.map(knownRow)))))));
 };
 
 /* ---------- boot ---------- */

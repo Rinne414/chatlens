@@ -11,6 +11,7 @@
 // originals from 4-6 groups up to 31 days old; older ones answer -5503042.
 
 const crypto = require("node:crypto");
+const { probeStealthBytes } = require("./png_stealth");
 
 const NT_HOST = "https://multimedia.nt.qq.com.cn";
 const LEGACY_HOST = "https://gchat.qpic.cn";
@@ -153,49 +154,75 @@ const fetchPicture = async (picture, size, { rkey, fetchImpl } = {}) => {
 // large pictures: 24/24 prompts found, 1 false alarm (the full parse decides).
 const AI_KEYWORD = /^(parameters|prompt|workflow|comment|description|invokeai_metadata|sd-metadata|dream|generation_data)$/iu;
 const AI_TEXT = /Steps: \d+|Negative prompt|"prompt"|"workflow"|sampler|\bcfg\b|UNICODE/iu;
+// Enough for the first pixel rows of nearly any picture, where a hidden
+// prompt's signature sits (png_stealth.js).
+const STEALTH_PROBE_BYTES = 1024 * 1024;
+// VP8X flags: EXIF (0x08) or XMP (0x04) follows the image data.
+const WEBP_METADATA_FLAGS = 0x0c;
+
+// Up to the first image data: whether an AI text chunk came first, and
+// whether the image data starts inside the head at all.
+const scanPngHead = (bytes) => {
+  let aiText = false;
+  let pos = 8;
+  while (pos + 8 <= bytes.length) {
+    const length = bytes.readUInt32BE(pos);
+    const type = bytes.subarray(pos + 4, pos + 8).toString("latin1");
+    if (type === "IDAT" || type === "IEND") {
+      return { aiText, reachedPixels: true };
+    }
+    if (type === "tEXt" || type === "iTXt" || type === "zTXt") {
+      const keyword = bytes.subarray(pos + 8, Math.min(pos + 88, bytes.length)).toString("latin1").split("\0")[0];
+      aiText = aiText || AI_KEYWORD.test(keyword);
+    }
+    pos += 12 + length;
+  }
+  return { aiText, reachedPixels: false };
+};
+
+const webpAnnouncesMetadata = (bytes) =>
+  bytes.length > 20 && bytes.subarray(12, 16).toString("latin1") === "VP8X" && (bytes[20] & WEBP_METADATA_FLAGS) !== 0;
 
 const headLooksGenerated = (bytes) => {
-  if (sniffExtension(bytes) === "png") {
-    let pos = 8;
-    while (pos + 8 <= bytes.length) {
-      const length = bytes.readUInt32BE(pos);
-      const type = bytes.subarray(pos + 4, pos + 8).toString("latin1");
-      if (type === "IDAT") {
-        return false;
-      }
-      if (type === "tEXt" || type === "iTXt" || type === "zTXt") {
-        const keyword = bytes.subarray(pos + 8, Math.min(pos + 88, bytes.length)).toString("latin1").split("\0")[0];
-        if (AI_KEYWORD.test(keyword)) {
-          return true;
-        }
-      }
-      pos += 12 + length;
+  const ext = sniffExtension(bytes);
+  if (ext === "png") {
+    const scan = scanPngHead(bytes);
+    // AI text, or the head ended before any image data: look at the file.
+    if (scan.aiText || !scan.reachedPixels) {
+      return true;
     }
-    // The head ended before any image data: undecided, so look at the file.
+    // No text: the prompt may still be hidden in the pixels.
+    return probeStealthBytes(bytes) !== "no";
+  }
+  if (ext === "webp" && webpAnnouncesMetadata(bytes)) {
     return true;
   }
   return AI_TEXT.test(bytes.toString("latin1"));
 };
 
+// A PNG head with no AI text whose first pixel rows run past its end: read
+// further before deciding (STEALTH_PROBE_BYTES).
+const stealthUndecided = (bytes) => {
+  if (sniffExtension(bytes) !== "png") {
+    return false;
+  }
+  const scan = scanPngHead(bytes);
+  return scan.reachedPixels && !scan.aiText && probeStealthBytes(bytes) === "short";
+};
+
 // True when the head holds every metadata block, so it can be parsed without
-// the rest of the file: a PNG whose image data (IDAT) starts inside the head,
-// a JPEG whose scan data (SOS marker) does. WebP keeps EXIF after the image
-// data, so it never qualifies; a head shorter than asked is the whole file.
+// the rest of the file: a PNG whose text precedes the image data inside the
+// head (data hidden in the pixels needs all of them), a JPEG whose scan data
+// (SOS marker) starts inside it. WebP keeps EXIF after the image data, so it
+// never qualifies; a head shorter than asked is the whole file.
 const headIsComplete = (bytes, requested = PROBE_BYTES) => {
   if (bytes.length < requested) {
     return true;
   }
   const ext = sniffExtension(bytes);
   if (ext === "png") {
-    let pos = 8;
-    while (pos + 8 <= bytes.length) {
-      const type = bytes.subarray(pos + 4, pos + 8).toString("latin1");
-      if (type === "IDAT" || type === "IEND") {
-        return true;
-      }
-      pos += 12 + bytes.readUInt32BE(pos);
-    }
-    return false;
+    const scan = scanPngHead(bytes);
+    return scan.reachedPixels && (scan.aiText || probeStealthBytes(bytes) === "no");
   }
   if (ext === "jpg") {
     let pos = 2;
@@ -232,12 +259,14 @@ const fetchHead = async (picture, { rkey, fetchImpl, length = PROBE_BYTES } = {}
 module.exports = {
   SPECS,
   PROBE_BYTES,
+  STEALTH_PROBE_BYTES,
   urlsFor,
   sniffExtension,
   classify,
   download,
   fetchPicture,
   headLooksGenerated,
+  stealthUndecided,
   headIsComplete,
   fetchHead,
   md5Of,

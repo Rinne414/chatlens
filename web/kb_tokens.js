@@ -44,7 +44,7 @@ const KB_GENERATOR_LABELS = {
   reforge: "reForge",
   comfyui: "ComfyUI",
   nai: "NovelAI",
-  stripped: "群里回的咒语",
+  stripped: "未检测到生成参数",
 };
 
 const KB_ASPECT_LABELS = { square: "方图", landscape: "横图", portrait: "竖图" };

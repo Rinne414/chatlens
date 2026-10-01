@@ -2,7 +2,7 @@
 
 /* ---------- settings view: QQ paths, keys, LLM config ---------- */
 
-const settingsState = { status: null, models: [], background: null, backgroundError: null, backgroundNotice: null, llmDraft: null, llmNotice: null, qqCandidates: [], pathNotice: null };
+const settingsState = { status: null, models: [], background: null, backgroundError: null, backgroundNotice: null, shortcutNotice: null, llmDraft: null, llmNotice: null, qqCandidates: [], pathNotice: null };
 // One-click NTQQ key recovery lives across re-renders (renderSettingsView rebuilds
 // the whole view), so its busy flag and last notice are kept module-level.
 const autoKeyState = { busy: false, notice: null };
@@ -383,7 +383,7 @@ const renderSettingsView = () => {
       el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。"),
       el("li", {}, "外部流量：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图按 md5 校验，图片钥匙只留在内存里）；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本信息。")));
 
-  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderMoreLinks(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, aboutCard);
+  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderShortcutCard(), renderMoreLinks(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, aboutCard);
 };
 
 /* --- pages that moved off the rail --- */
@@ -484,12 +484,6 @@ const renderBackgroundCard = () => {
           await desktopAction("/api/background/run-now", { force: true }, "已开始刷新，并会把攒着的新消息一起总结。");
         },
       }, "立即刷新"),
-      el("button", {
-        class: "btn small",
-        onclick: () => desktopAction("/api/desktop/shortcut", {}, isWindowsHost()
-          ? "已在开始菜单创建「QQ 群消息简报」（快捷键 Ctrl+Alt+U）。"
-          : "已在应用菜单创建「QQ 群消息简报」。"),
-      }, desktop.appShortcut ? "重建开始菜单快捷方式" : "创建开始菜单快捷方式"),
       el("button", {
         class: "btn small danger",
         onclick: async () => {

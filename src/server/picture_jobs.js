@@ -156,11 +156,22 @@ const keepOriginals = async (md5s) => {
 /* ---------- AI check ---------- */
 
 const headFor = async (picture) => {
-  const head = await service.withRkey(picture, (key) => pictureFetch.fetchHead(picture, { rkey: key }));
+  const headOf = (length) => service.withRkey(picture, (key) => pictureFetch.fetchHead(picture, { rkey: key, length }));
+  let requested = pictureFetch.PROBE_BYTES;
+  let head = await headOf(requested);
+  // A PNG with no text whose first pixel rows (where a hidden prompt would
+  // start) run past the head: read further before calling it plain.
+  if (head.outcome === "ok" && pictureFetch.stealthUndecided(head.bytes)) {
+    const longer = await headOf(pictureFetch.STEALTH_PROBE_BYTES);
+    if (longer.outcome === "ok") {
+      head = longer;
+      requested = pictureFetch.STEALTH_PROBE_BYTES;
+    }
+  }
   if (head.outcome !== "ok" || !pictureFetch.headLooksGenerated(head.bytes)) {
     return head;
   }
-  if (pictureFetch.headIsComplete(head.bytes)) {
+  if (pictureFetch.headIsComplete(head.bytes, requested)) {
     return { ...head, complete: true };
   }
   const wide = await service.withRkey(picture, (key) => pictureFetch.fetchHead(picture, { rkey: key, length: service.WIDE_HEAD_BYTES }));
