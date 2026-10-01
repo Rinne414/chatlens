@@ -8,7 +8,7 @@
    until the next one (per browser: localStorage). */
 
 // v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
-const WHATS_NEW_RELEASE = "v0.0.23";
+const WHATS_NEW_RELEASE = "v0.0.24";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -17,8 +17,9 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
-  { title: "改名为 ChatLens", detail: "左上角、浏览器标签、快捷方式和桌面通知都改叫 ChatLens。已有的开始菜单、桌面和开机后台运行的快捷方式会自动换成新名字和图标，不用重新设置。", view: null, selector: ".brand" },
-  { title: "启动脚本改名", detail: "安装文件夹里的启动脚本改叫 Start-ChatLens.cmd，改名前的旧脚本会自动删除。用开始菜单或桌面快捷方式打开的不受影响。", view: null, selector: null },
+  { title: "关系网不再闪", detail: "人多的群，鼠标划过关系网的连线时整张图不再闪。选中一个圈子再点「展开」，只把这一圈的人拉开，其他人变淡。", view: "group", selector: ".gp-rel" },
+  { title: "自动获取密钥能保存了", detail: "装了 PowerShell 7 的电脑上，「自动获取密钥」读到了密钥却存不进去，现在能正常保存。获取失败时会写出真正的原因，不再只说「0 个候选」。", view: "settings", selector: "#settings-keys" },
+  { title: "启动和打开页面的问题", detail: "少数 Windows 电脑上控制台一启动就退出，现在修好了。电脑忙的时候打开页面偶尔显示「无法连接控制台服务」，也修好了。", view: null, selector: null },
 ];
 
 const whatsNewState = { hidden: false };

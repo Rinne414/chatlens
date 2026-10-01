@@ -272,7 +272,7 @@ const renderSettingsView = () => {
       el("a", { href: "https://github.com/QQBackup/qq-win-db-key", target: "_blank", rel: "noopener" }, "QQBackup/qq-win-db-key"),
       " 拿到 16 位 key 后，粘贴到下面并保存。"));
 
-  const keysCard = el("div", { class: "card" },
+  const keysCard = el("div", { class: "card", id: "settings-keys" },
     el("h2", {}, "密钥"),
     el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}，不进项目目录，不进 Git。`),
     keyRow("NTQQ_DB_KEY（QQ 数据库解密密钥）", "ntqqKey", status.ntqqKeySaved, ntqqKeyHint),
