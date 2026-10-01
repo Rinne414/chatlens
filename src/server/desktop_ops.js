@@ -32,7 +32,7 @@ const runPowershell = (script, env = {}) =>
     const encoded = Buffer.from(script, "utf16le").toString("base64");
     const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], {
       windowsHide: true,
-      env: { ...process.env, ...env },
+      env: platform.windowsPowershellEnv(env),
     });
     let stdout = "";
     let stderr = "";
@@ -52,7 +52,7 @@ const windowsDesktopDir = () => {
     const result = spawnSync("powershell.exe", [
       "-NoProfile", "-NonInteractive", "-Command",
       "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Environment]::GetFolderPath('Desktop')",
-    ], { windowsHide: true, encoding: "utf8", timeout: DESKTOP_DIR_TIMEOUT_MS });
+    ], { windowsHide: true, encoding: "utf8", timeout: DESKTOP_DIR_TIMEOUT_MS, env: platform.windowsPowershellEnv() });
     const dir = String(result.stdout ?? "").trim();
     desktopDirCache = dir !== "" && path.isAbsolute(dir) ? dir : path.join(os.homedir(), "Desktop");
   }

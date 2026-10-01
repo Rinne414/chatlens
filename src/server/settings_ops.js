@@ -26,7 +26,10 @@ const getSecretDirectory = () => path.resolve(secrets.secretDir());
 // code and captured output instead of rejecting on non-zero exits.
 const runProcess = (command, args, timeoutMs, { input } = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true });
+    const child = spawn(command, args, {
+      windowsHide: true,
+      env: command === "powershell.exe" ? platform.windowsPowershellEnv() : process.env,
+    });
     let stdout = "";
     let stderr = "";
     let timer = null;
@@ -53,6 +56,30 @@ const runProcess = (command, args, timeoutMs, { input } = {}) =>
   });
 
 const lastLine = (text) => String(text ?? "").trim().split(/\r?\n/u).filter((line) => line.trim().length > 0).at(-1) ?? "";
+
+// The verifier prints JSON only after it finishes. A crash (for example the
+// key was found but DPAPI save failed) leaves stdout empty; that is not
+// "zero candidates".
+const autoDetectFailure = ({ stdout, stderr, code }) => {
+  let result = null;
+  try {
+    result = JSON.parse(stdout);
+  } catch {
+    result = null;
+  }
+  if (result?.saved === true) {
+    return null;
+  }
+  if (result === null) {
+    const detail = lastLine(stderr).slice(0, 300);
+    return new Error(detail || `核对密钥失败（退出码 ${code ?? "?"}）。`);
+  }
+  const scanned = result.candidateCount ?? 0;
+  if (scanned === 0) {
+    return new Error("没有从正在运行的 QQ 里读到密钥候选。请确认 QQ 已打开并登录，且登录的是数据库路径对应的账号，然后重试。");
+  }
+  return new Error(`扫描到 ${scanned} 个候选，但没有一个能解开数据库。请确认 QQ 已登录数据库路径对应的账号后重试。`);
+};
 
 const getSettingsStatus = () => {
   const config = state.loadConfig();
@@ -324,17 +351,12 @@ const autoDetectKey = async () => {
       [path.join(state.toolRoot, "src", "save_key_from_candidates.js"), sampleDb, candidatesPath],
       KEY_VERIFY_TIMEOUT_MS,
     );
-    let result = null;
-    try {
-      result = JSON.parse(verify.stdout);
-    } catch {
-      result = null;
-    }
-    if (result?.saved === true) {
+    const failure = autoDetectFailure(verify);
+    if (failure === null) {
+      const result = JSON.parse(verify.stdout);
       return { saved: true, candidateCount: result.candidateCount ?? 0, tested: result.tested ?? 0 };
     }
-    const scanned = result?.candidateCount ?? 0;
-    throw new Error(`扫描到 ${scanned} 个候选，但没有一个能解开数据库。请确认 QQ 已登录数据库路径对应的账号后重试。`);
+    throw failure;
   } finally {
     // The candidate file holds the real key among the noise — always shred it.
     try {
@@ -354,4 +376,5 @@ module.exports = {
   saveLlmConfig,
   saveQqPaths,
   detectQqPaths,
+  autoDetectFailure,
 };

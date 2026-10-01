@@ -331,6 +331,7 @@ const startWindowsUpdater = (scriptPath, archivePath) =>
     stdio: "ignore",
     windowsHide: true,
     windowsVerbatimArguments: true,
+    env: platform.windowsPowershellEnv(),
   });
 
 const WINDOWS_UNSAFE_PATH = /[%"]/u;

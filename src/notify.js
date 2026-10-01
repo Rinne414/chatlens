@@ -37,7 +37,11 @@ const clip = (value, limit) => {
 
 const runQuiet = (command, args, env) =>
   new Promise((resolve) => {
-    const child = spawn(command, args, { windowsHide: true, stdio: "ignore", env: { ...process.env, ...env } });
+    const child = spawn(command, args, {
+      windowsHide: true,
+      stdio: "ignore",
+      env: command === "powershell.exe" ? platform.windowsPowershellEnv(env) : { ...process.env, ...env },
+    });
     child.on("error", () => resolve(false));
     child.on("close", (code) => resolve(code === 0));
   });
