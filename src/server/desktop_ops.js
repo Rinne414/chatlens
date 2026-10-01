@@ -243,11 +243,15 @@ const syncShortcutsAtBoot = async () => {
   for (const kind of bootShortcutPlan({ status: withRenamedShortcuts(getDesktopStatus(), oldExists), prefs })) {
     await writeShortcut(kind);
   }
+  // Avoid passing absent legacy paths to rmSync: the bundled Node v25.2.1
+  // was observed to terminate the Windows process during this cleanup.
   for (const file of Object.values(oldPaths)) {
-    fs.rmSync(file, { force: true });
+    if (fs.existsSync(file)) {
+      fs.rmSync(file, { force: true });
+    }
   }
   const { legacy } = shortcutPaths();
-  if (legacy !== null) {
+  if (legacy !== null && fs.existsSync(legacy)) {
     fs.rmSync(legacy, { force: true });
   }
   if (prefs.version !== SHORTCUT_VERSION) {
