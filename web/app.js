@@ -2496,6 +2496,16 @@ const refreshCurrentView = () => {
   openView(app.view);
 };
 
+// boot() starts while the scripts after app.js (rail.js, brief.js, ...) are
+// still downloading. A fast /api/state must not let boot call into them early.
+const pageScriptsLoaded = () => new Promise((resolve) => {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", resolve, { once: true });
+  } else {
+    resolve();
+  }
+});
+
 const boot = async () => {
   for (const button of document.querySelectorAll("#nav button")) {
     button.addEventListener("click", () => openView(button.dataset.view));
@@ -2521,6 +2531,7 @@ const boot = async () => {
 
   try {
     await loadState();
+    await pageScriptsLoaded();
     startRail();
   } catch (error) {
     setChildren($("#view-brief"),
