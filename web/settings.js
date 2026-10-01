@@ -256,10 +256,8 @@ const renderSettingsView = () => {
             settingsState.status = await api("/api/settings");
             if (settingsState.status?.ntqqKeySaved === true) {
               autoKeyState.notice = { text: `✓ 已自动获取并保存密钥（从 ${result.candidateCount} 个候选中命中）。输入框留空是正常的，密钥不会回显。`, isError: false };
-              alert(`QQ 数据库密钥已加密保存（从 ${result.candidateCount} 个候选里命中）。\n\n下面的输入框留空是正常的，密钥不会再显示。标题旁的「已保存」就是保存成功。`);
             } else {
               autoKeyState.notice = { text: "密钥验证通过，但没有写入本机保存位置。请再点一次「自动获取密钥」。", isError: true };
-              alert(autoKeyState.notice.text);
             }
           } catch (error) {
             autoKeyState.notice = { text: `自动获取失败：${error.message}`, isError: true };
