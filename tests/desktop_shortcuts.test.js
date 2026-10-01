@@ -3,7 +3,7 @@
 // Shortcuts: a Start-menu entry by default (unless the user removed it in
 // 设置), an optional desktop one, and a one-time rewrite of shortcuts made by
 // older versions, which showed node.exe's icon instead of the app's.
-// Only the pure decisions are tested: nothing here touches a real Start menu.
+// Decisions and boot cleanup are tested without touching a real Start menu.
 
 const assert = require("node:assert/strict");
 const path = require("node:path");
@@ -11,6 +11,7 @@ const test = require("node:test");
 
 const fs = require("node:fs");
 const os = require("node:os");
+const vm = require("node:vm");
 
 const {
   bootShortcutPlan,
@@ -20,6 +21,73 @@ const {
   desktopEntry,
   SHORTCUT_VERSION,
 } = require("../src/server/desktop_ops");
+
+// Exercise Windows boot cleanup on every platform without invoking PowerShell
+// or deleting real shortcuts. Unexpected removals model the native failure seen
+// for an absent legacy shortcut with the bundled Node v25.2.1 on Windows.
+const bootCleanupFixture = (legacyIndexes) => {
+  const appData = path.resolve("shortcut-fixture", "AppData");
+  const desktop = path.resolve("shortcut-fixture", "Desktop");
+  const programs = path.join(appData, "Microsoft", "Windows", "Start Menu", "Programs");
+  const dirs = [programs, desktop, path.join(programs, "Startup")];
+  const legacyPaths = [
+    ...dirs.map((dir) => path.join(dir, "QQ 群消息简报.lnk")),
+    path.join(programs, "QQ摘要-未查看.lnk"),
+  ];
+  const existing = new Set([
+    ...dirs.map((dir) => path.join(dir, "ChatLens.lnk")),
+    ...legacyIndexes.map((index) => legacyPaths[index]),
+  ]);
+  const removed = [];
+  const module = { exports: {} };
+  const dependencies = {
+    "node:fs": {
+      existsSync: (file) => existing.has(file),
+      rmSync: (file, options) => {
+        assert.ok(existing.has(file), `must not remove a missing shortcut: ${file}`);
+        assert.equal(options.force, true);
+        existing.delete(file);
+        removed.push(file);
+      },
+    },
+    "node:os": os,
+    "node:path": path,
+    "node:child_process": {
+      spawnSync: () => ({ stdout: desktop }),
+      spawn: () => assert.fail("up-to-date shortcuts must not be rewritten"),
+    },
+    "./toolkit_state": {
+      toolRoot: path.resolve("shortcut-fixture", "chatlens"),
+      loadRawConfig: () => ({ desktop: { version: SHORTCUT_VERSION } }),
+      writeConfig: () => assert.fail("up-to-date preferences must not be rewritten"),
+    },
+    "../platform": { isWindows: true },
+  };
+  vm.runInNewContext(fs.readFileSync(require.resolve("../src/server/desktop_ops"), "utf8"), {
+    module,
+    process: { platform: "win32", env: { APPDATA: appData } },
+    require: (id) => {
+      assert.ok(Object.hasOwn(dependencies, id), `unexpected dependency: ${id}`);
+      return dependencies[id];
+    },
+  });
+  return { sync: module.exports.syncShortcutsAtBoot, removed, legacyPaths, existing, dirs };
+};
+
+for (const [name, indexes] of [
+  ["all legacy shortcuts are missing", []],
+  ["only some legacy shortcuts exist", [1, 3]],
+  ["renamed shortcuts exist but the legacy launcher is missing", [0, 1, 2]],
+  ["all legacy shortcuts exist", [0, 1, 2, 3]],
+]) {
+  test(`boot cleanup succeeds when ${name}`, async () => {
+    const fixture = bootCleanupFixture(indexes);
+    await fixture.sync();
+    assert.deepEqual(fixture.removed, indexes.map((index) => fixture.legacyPaths[index]));
+    assert.ok(fixture.legacyPaths.every((file) => !fixture.existing.has(file)));
+    assert.ok(fixture.dirs.every((dir) => fixture.existing.has(path.join(dir, "ChatLens.lnk"))));
+  });
+}
 
 const status = (fields) => ({ appShortcut: false, desktopShortcut: false, autostart: false, ...fields });
 const current = { startMenu: true, version: SHORTCUT_VERSION };
