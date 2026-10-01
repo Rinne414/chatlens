@@ -61,7 +61,7 @@ const bootCleanupFixture = (legacyIndexes) => {
       loadRawConfig: () => ({ desktop: { version: SHORTCUT_VERSION } }),
       writeConfig: () => assert.fail("up-to-date preferences must not be rewritten"),
     },
-    "../platform": { isWindows: true },
+    "../platform": { isWindows: true, windowsPowershellEnv: (extra = {}) => ({ ...extra }) },
   };
   vm.runInNewContext(fs.readFileSync(require.resolve("../src/server/desktop_ops"), "utf8"), {
     module,
