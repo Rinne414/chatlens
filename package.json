@@ -1,6 +1,6 @@
 {
   "name": "chatlens",
-  "version": "0.0.22",
+  "version": "0.0.23",
   "description": "Read-only QQNT group chat briefing: background refresh, AI summaries, local web console (Windows and Linux).",
   "license": "GPL-3.0-or-later",
   "private": true,
