@@ -1,6 +1,6 @@
 {
-  "name": "QQ 群消息简报",
-  "short_name": "群简报",
+  "name": "ChatLens",
+  "short_name": "ChatLens",
   "description": "不开 QQ 也能看完群消息：后台自动整理的群聊简报（本地只读）。",
   "lang": "zh-Hans",
   "start_url": "/",

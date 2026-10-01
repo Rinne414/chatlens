@@ -20,7 +20,7 @@ AI 总结是可选的，可以用任意 OpenAI 兼容的 API（包括本机运�
 
 从 [Releases](https://github.com/Rinne414/chatlens/releases) 下载：
 
-- Windows：`chatlens-vX.Y.Z-win-x64.zip`，解压后双击里面的 `.cmd` 启动脚本。
+- Windows：`chatlens-vX.Y.Z-win-x64.zip`，解压后双击 `Start-ChatLens.cmd`。
 - Linux：`chatlens-vX.Y.Z-linux-x64.tar.gz`，解压后运行 `./start.sh`。
 
 发行包自带运行环境。第一次启动后，开始菜单 / 应用菜单里会有快捷方式，也可以在「设置 → 快捷方式」放一个到桌面。有新版本时，左侧栏会出现「有新版本」，点一下就能一键更新。

@@ -14,19 +14,19 @@ const shortcutOptions = (desktop) => {
   const windows = desktop.platform === "win32";
   return [
     typeof desktop.desktopShortcut === "boolean"
-      ? { kind: "desktop", label: "桌面", hint: "双击桌面上的「QQ 群消息简报」打开", on: desktop.desktopShortcut }
+      ? { kind: "desktop", label: "桌面", hint: "双击桌面上的「ChatLens」打开", on: desktop.desktopShortcut }
       : null,
     {
       kind: "startMenu",
       label: windows ? "开始菜单" : "应用菜单",
-      hint: windows ? "也可以随时按 Ctrl+Alt+U 打开" : "在应用菜单里找「QQ 群消息简报」",
+      hint: windows ? "也可以随时按 Ctrl+Alt+U 打开" : "在应用菜单里找「ChatLens」",
       on: desktop.appShortcut === true,
     },
   ].filter((option) => option !== null);
 };
 
 const SHORTCUT_DONE_TEXT = {
-  desktop: ["已在桌面放好「QQ 群消息简报」。", "已从桌面移除。"],
+  desktop: ["已在桌面放好「ChatLens」。", "已从桌面移除。"],
   startMenu: ["已加入开始菜单 / 应用菜单。", "已移除；之后启动也不会再自动加回来。"],
 };
 
@@ -129,7 +129,7 @@ const shortcutPromptCard = () => {
     el("div", { class: "shortcut-prompt-text" },
       el("strong", {}, "要在桌面放一个快捷方式吗？"),
       el("span", {}, desktop.appShortcut
-        ? "开始菜单里已经有「QQ 群消息简报」（也可以按 Ctrl+Alt+U）。桌面上再放一个，双击就能打开。以后可在「设置 → 快捷方式」里改。"
+        ? "开始菜单里已经有「ChatLens」（也可以按 Ctrl+Alt+U）。桌面上再放一个，双击就能打开。以后可在「设置 → 快捷方式」里改。"
         : "双击就能打开，不用再去安装文件夹里找。以后可在「设置 → 快捷方式」里改。")),
     el("div", { class: "shortcut-prompt-actions" },
       el("button", { class: "btn small primary", type: "button", disabled: shortcutState.busy, onclick: () => answerShortcutPrompt(true) }, "放到桌面"),

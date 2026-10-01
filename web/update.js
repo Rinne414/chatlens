@@ -83,7 +83,7 @@ const applyUpdateNow = async (info) => {
           "控制台正在退出并替换程序文件，完成后会自动重新启动并打开新页面。",
           el("br"),
           isWindowsHost()
-            ? "如果 30 秒后没有自动打开，请手动双击 Start-QQ-Console.cmd。"
+            ? "如果 30 秒后没有自动打开，请手动双击 Start-ChatLens.cmd。"
             : "如果 30 秒后没有自动打开，请运行安装目录里的 ./start.sh。")));
     return;
   } catch (error) {

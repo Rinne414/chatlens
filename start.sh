@@ -1,5 +1,5 @@
 #!/bin/sh
-# Opens the QQ group briefing (Linux / macOS). The console runs in the
+# Opens ChatLens (Linux / macOS). The console runs in the
 # background; this script returns as soon as the browser opens.
 #   ./start.sh               open the briefing
 #   ./start.sh --background  just make sure it is running (login autostart)

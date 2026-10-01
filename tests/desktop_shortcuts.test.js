@@ -9,7 +9,17 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const test = require("node:test");
 
-const { bootShortcutPlan, windowsShortcutEnv, SHORTCUT_VERSION } = require("../src/server/desktop_ops");
+const fs = require("node:fs");
+const os = require("node:os");
+
+const {
+  bootShortcutPlan,
+  windowsShortcutEnv,
+  withRenamedShortcuts,
+  removeObsoleteLaunchers,
+  desktopEntry,
+  SHORTCUT_VERSION,
+} = require("../src/server/desktop_ops");
 
 const status = (fields) => ({ appShortcut: false, desktopShortcut: false, autostart: false, ...fields });
 const current = { startMenu: true, version: SHORTCUT_VERSION };
@@ -57,4 +67,43 @@ test("the background (login) shortcut asks the launcher to stay hidden", () => {
   const env = windowsShortcutEnv("C:\\x.lnk", { background: true, hotkey: "" });
 
   assert.match(env.CL_ARGS, /launcher\.js" --background$/u);
+});
+
+test("shortcuts under the old name are made again under the new one", () => {
+  const renamed = withRenamedShortcuts(status({ appShortcut: false, desktopShortcut: false, autostart: false }), { desktop: true, autostart: true });
+
+  assert.equal(renamed.desktopShortcut, true);
+  assert.equal(renamed.autostart, true);
+  // The Start-menu entry is made whenever it is missing (unless removed in 设置).
+  assert.deepEqual(bootShortcutPlan({ status: renamed, prefs: { startMenu: true, version: SHORTCUT_VERSION - 1 } }), ["startMenu", "desktop", "autostart"]);
+});
+
+test("a shortcut that never existed under the old name is not created", () => {
+  const renamed = withRenamedShortcuts(status({}), { desktop: false, autostart: false });
+
+  assert.deepEqual(bootShortcutPlan({ status: renamed, prefs: { startMenu: true, version: SHORTCUT_VERSION - 1 } }), ["startMenu"]);
+});
+
+test("shortcuts and the Linux menu entry carry the app's name, not the chat client's", () => {
+  const env = windowsShortcutEnv("C:\\x.lnk", { background: false, hotkey: "" });
+
+  assert.match(env.CL_DESC, /^ChatLens/u);
+  // Only the texts: the install path is whatever folder the user chose.
+  const texts = desktopEntry({ background: false }).split("\n").filter((line) => /^(Name|Comment)=/u.test(line));
+  assert.doesNotMatch([env.CL_DESC, ...texts].join("\n"), /QQ/u);
+  assert.match(desktopEntry({ background: false }), /^Name=ChatLens$/mu);
+});
+
+test("the renamed start script replaces the old one, which is removed only once the new one exists", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "launchers-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "Start-QQ-Console.cmd"), "@echo off\n");
+
+  assert.deepEqual(removeObsoleteLaunchers(root), []);
+  assert.ok(fs.existsSync(path.join(root, "Start-QQ-Console.cmd")));
+
+  fs.writeFileSync(path.join(root, "Start-ChatLens.cmd"), "@echo off\n");
+  assert.deepEqual(removeObsoleteLaunchers(root), ["Start-QQ-Console.cmd"]);
+  assert.ok(!fs.existsSync(path.join(root, "Start-QQ-Console.cmd")));
+  assert.ok(fs.existsSync(path.join(root, "Start-ChatLens.cmd")));
 });

@@ -496,7 +496,7 @@ const renderBackgroundCard = () => {
             // The server is going away; a dropped connection is expected.
           }
           setChildren($("#view-settings"), el("div", { class: "card" }, el("h2", {}, "后台服务已停止"),
-            el("p", { class: "card-sub" }, "需要时从开始菜单 / 应用菜单的「QQ 群消息简报」重新打开。")));
+            el("p", { class: "card-sub" }, "需要时从开始菜单 / 应用菜单或桌面上的「ChatLens」重新打开。")));
         },
       }, "停止后台服务"),
       msg),

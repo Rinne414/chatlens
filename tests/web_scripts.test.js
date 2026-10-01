@@ -610,7 +610,7 @@ test("closing the console says what stops, whether it comes back at login, and h
   const windows = question({ running: true, desktop: { platform: "win32", appShortcut: true, autostart: true } });
   assert.match(windows, /这一轮刷新会中断/u);
   assert.match(windows, /下次登录它会自己启动/u);
-  assert.match(windows, /开始菜单里的「QQ 群消息简报」，或按 Ctrl\+Alt\+U/u);
+  assert.match(windows, /开始菜单里的「ChatLens」，或按 Ctrl\+Alt\+U/u);
   const quiet = question({ running: false, desktop: { platform: "linux", appShortcut: true, autostart: false } });
   assert.doesNotMatch(quiet, /中断|自己启动/u);
   assert.match(quiet, /应用菜单/u);

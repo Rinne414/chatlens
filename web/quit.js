@@ -7,17 +7,17 @@
 
 const quitReopenHint = (desktop) => {
   if (desktop?.appShortcut && desktop.desktopShortcut === true) {
-    return "要再打开：桌面或开始菜单里的「QQ 群消息简报」，或按 Ctrl+Alt+U。";
+    return "要再打开：桌面或开始菜单里的「ChatLens」，或按 Ctrl+Alt+U。";
   }
   if (desktop?.desktopShortcut === true) {
-    return "要再打开：双击桌面上的「QQ 群消息简报」。";
+    return "要再打开：双击桌面上的「ChatLens」。";
   }
   if (!desktop?.appShortcut) {
-    return "要再打开：运行安装文件夹里的启动脚本（Windows 是 Start-QQ-Console.cmd）。";
+    return "要再打开：运行安装文件夹里的启动脚本（Windows 是 Start-ChatLens.cmd）。";
   }
   return desktop.platform === "win32"
-    ? "要再打开：开始菜单里的「QQ 群消息简报」，或按 Ctrl+Alt+U。"
-    : "要再打开：应用菜单里的「QQ 群消息简报」。";
+    ? "要再打开：开始菜单里的「ChatLens」，或按 Ctrl+Alt+U。"
+    : "要再打开：应用菜单里的「ChatLens」。";
 };
 
 // What closing means, for the confirmation. status: GET /api/background.

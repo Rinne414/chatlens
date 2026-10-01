@@ -412,7 +412,7 @@ const notifyAfterTick = async ({ db, briefing, getState, setState, lateBefore = 
   if (current.notifyDaily && saved.dailyDay !== today && hour >= DAILY_NOTIFY_HOUR && totalMessages > 0) {
     const topNames = briefing.groups.filter((group) => group.textMessages > 0).slice(0, 3).map((group) => group.name);
     await send({
-      title: `群消息简报：${briefing.totals.groups} 个群有 ${totalMessages} 条新消息`,
+      title: `ChatLens：${briefing.totals.groups} 个群有 ${totalMessages} 条新消息`,
       body: [
         briefing.highlights.newThings.length > 0 ? `${briefing.highlights.newThings.length} 个新东西` : "",
         briefing.highlights.qa.length > 0 ? `${briefing.highlights.qa.length} 个问答` : "",

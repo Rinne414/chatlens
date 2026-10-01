@@ -12,13 +12,18 @@ const { spawn, spawnSync } = require("node:child_process");
 const state = require("./toolkit_state");
 const platform = require("../platform");
 
-const APP_NAME = "QQ 群消息简报";
+const APP_NAME = "ChatLens";
+// Shortcuts made before the rename (v0.0.22 and earlier) carry this name.
+const OLD_APP_NAME = "QQ 群消息简报";
 const LEGACY_TASK_NAME = "QQSummaryToolkit-Digest";
 const LEGACY_SHORTCUT = "QQ摘要-未查看.lnk";
+const START_SCRIPT = "Start-ChatLens.cmd";
+const OLD_START_SCRIPTS = ["Start-QQ-Console.cmd"];
 const START_MENU_HOTKEY = "Ctrl+Alt+U";
 const DESKTOP_DIR_TIMEOUT_MS = 10000;
 // 2: shortcuts carry the app icon (version 1 showed node.exe's).
-const SHORTCUT_VERSION = 2;
+// 3: shortcuts renamed to the app's own name.
+const SHORTCUT_VERSION = 3;
 const launcherScript = path.join(state.toolRoot, "src", "launcher.js");
 const appIcon = path.join(state.toolRoot, "web", "icons", "app.ico");
 
@@ -86,7 +91,7 @@ const windowsShortcutEnv = (lnkPath, { background, hotkey }) => ({
   CL_CWD: state.toolRoot,
   CL_HOTKEY: hotkey ?? "",
   CL_ICON: `${appIcon},0`,
-  CL_DESC: background ? `${APP_NAME}（开机后台运行）` : `${APP_NAME}：不开 QQ 也能看完群消息`,
+  CL_DESC: background ? `${APP_NAME}（开机后台运行）` : `${APP_NAME}：本地群聊简报`,
 });
 
 const createWindowsShortcut = async (lnkPath, options) => {
@@ -128,7 +133,7 @@ const desktopEntry = ({ background }) => [
   "[Desktop Entry]",
   "Type=Application",
   `Name=${APP_NAME}`,
-  "Comment=不开 QQ 也能看完群消息（本地只读）",
+  "Comment=本地只读的群聊简报",
   `Exec=${desktopQuote(process.execPath)} ${desktopQuote(launcherScript)}${background ? " --background" : ""}`,
   `Path=${state.toolRoot}`,
   `Icon=${path.join(state.toolRoot, "web", "icons", "icon-192.png")}`,
@@ -213,10 +218,33 @@ const bootShortcutPlan = ({ status, prefs }) => {
   ].filter((kind) => kind !== null);
 };
 
+// A shortcut that exists under the old name counts as existing, so it is made
+// again under the new name (the old file is removed afterwards).
+const withRenamedShortcuts = (status, oldExists) => ({
+  ...status,
+  desktopShortcut: oldExists.desktop === true ? true : status.desktopShortcut,
+  autostart: status.autostart || oldExists.autostart === true,
+});
+
+// Windows only: Linux entries were always named chatlens.desktop.
+const oldNamedShortcuts = () => {
+  if (!platform.isWindows) {
+    return {};
+  }
+  const paths = shortcutPaths();
+  return Object.fromEntries(["startMenu", "desktop", "autostart"]
+    .map((kind) => [kind, path.join(path.dirname(paths[kind]), `${OLD_APP_NAME}.lnk`)]));
+};
+
 const syncShortcutsAtBoot = async () => {
   const prefs = loadPrefs();
-  for (const kind of bootShortcutPlan({ status: getDesktopStatus(), prefs })) {
+  const oldPaths = oldNamedShortcuts();
+  const oldExists = Object.fromEntries(Object.entries(oldPaths).map(([kind, file]) => [kind, fs.existsSync(file)]));
+  for (const kind of bootShortcutPlan({ status: withRenamedShortcuts(getDesktopStatus(), oldExists), prefs })) {
     await writeShortcut(kind);
+  }
+  for (const file of Object.values(oldPaths)) {
+    fs.rmSync(file, { force: true });
   }
   const { legacy } = shortcutPaths();
   if (legacy !== null) {
@@ -225,6 +253,20 @@ const syncShortcutsAtBoot = async () => {
   if (prefs.version !== SHORTCUT_VERSION) {
     savePrefs({ version: SHORTCUT_VERSION });
   }
+};
+
+// The start script was renamed. An update copies the new files over the old
+// install without deleting any, and the previous version's updater restarts
+// through the OLD script, so it is only removed once the new one is there.
+const removeObsoleteLaunchers = (root = state.toolRoot) => {
+  if (!fs.existsSync(path.join(root, START_SCRIPT))) {
+    return [];
+  }
+  const removed = OLD_START_SCRIPTS.filter((name) => fs.existsSync(path.join(root, name)));
+  for (const name of removed) {
+    fs.rmSync(path.join(root, name), { force: true });
+  }
+  return removed;
 };
 
 const SHORTCUT_KINDS = new Set(["startMenu", "desktop"]);
@@ -272,6 +314,9 @@ module.exports = {
   removeLegacyScheduledTask,
   desktopEntry,
   bootShortcutPlan,
+  withRenamedShortcuts,
+  removeObsoleteLaunchers,
   windowsShortcutEnv,
   SHORTCUT_VERSION,
+  START_SCRIPT,
 };

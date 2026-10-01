@@ -21,7 +21,7 @@ const BEIJING_OFFSET_SECONDS = 8 * 3600;
 const SIDECAR_CATEGORIES = new Set(["aiImages", "askedImages"]);
 
 const README = [
-  "这个文件夹由「QQ 群消息简报」的备份功能生成。",
+  "这个文件夹由 ChatLens 的备份功能生成。",
   "",
   "<群名_群号>/<年-月>/   图片、视频、文件。文件名 = 时间_发送者_md5 前 8 位。",
   "  同名的 .txt          AI 图的咒语、参数、LoRA，以及群里的求图和回复记录。",

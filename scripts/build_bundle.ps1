@@ -1,6 +1,6 @@
 # Builds the zero-setup Windows x64 release bundle: clean source + a bundled
 # Node runtime + a trimmed node_modules, zipped so a user can unzip and run
-# Start-QQ-Console.cmd with nothing else installed.
+# Start-ChatLens.cmd with nothing else installed.
 #
 # The bundled node.exe and the prebuilt better_sqlite3.node MUST share an ABI,
 # so this copies BOTH from a working install: the node.exe you point at and the
@@ -26,7 +26,7 @@ Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $toolRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$prefix = 'qqnt-readonly-summary-toolkit'
+$prefix = 'chatlens'
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ("bundle-" + [System.Guid]::NewGuid().ToString('N'))
 $stage = Join-Path $work $prefix
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
@@ -65,7 +65,7 @@ try {
         if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force }
     }
 
-    # 4) No launcher rewrite needed: the tracked Start-QQ-Console.cmd prefers
+    # 4) No launcher rewrite needed: the tracked Start-ChatLens.cmd prefers
     #    node\node.exe when present and starts the console hidden via src\launcher.js.
 
     # 5) Zip with forward-slash entry names (spec-compliant across extractors).

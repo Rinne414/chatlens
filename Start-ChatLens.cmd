@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-rem Opens the QQ group briefing. The console itself runs hidden in the background;
+rem Opens ChatLens. The console itself runs hidden in the background;
 rem this window closes as soon as the browser opens.
 set "NODE_EXE=node"
 if exist "%~dp0node\node.exe" set "NODE_EXE=%~dp0node\node.exe"

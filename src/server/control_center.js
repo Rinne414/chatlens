@@ -1074,7 +1074,7 @@ const listen = (port, attempt) => {
   server.listen(port, "127.0.0.1", () => {
     httpServer = server;
     const url = `http://127.0.0.1:${port}/`;
-    console.log(`QQ 摘要控制台已启动: ${url}`);
+    console.log(`ChatLens 控制台已启动: ${url}`);
     background.start({
       url,
       afterTick: async (tick) => {
@@ -1093,6 +1093,13 @@ const listen = (port, attempt) => {
     // First start: put the app in the Start menu / app launcher so it can be
     // reopened without finding the install folder.
     desktop.syncShortcutsAtBoot().catch((error) => console.error(`app shortcut failed: ${error.message}`));
+    try {
+      for (const name of desktop.removeObsoleteLaunchers()) {
+        console.log(`已删除改名前的启动脚本 ${name}。`);
+      }
+    } catch (error) {
+      console.error(`old start script cleanup failed: ${error.message}`);
+    }
     const autostartFlag = process.argv.find((arg) => arg.startsWith("--autostart="));
     const autostart = autostartFlag === undefined ? null : parseAutostart(`run=${autostartFlag.slice("--autostart=".length)}`);
     if (!process.argv.includes("--no-open")) {

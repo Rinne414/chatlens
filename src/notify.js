@@ -58,7 +58,7 @@ const notify = async ({ title, body, url }) => {
     });
   }
   if (platform.commandExists("notify-send")) {
-    return runQuiet("notify-send", ["--app-name=QQ 群简报", safeTitle, safeBody], {});
+    return runQuiet("notify-send", ["--app-name=ChatLens", safeTitle, safeBody], {});
   }
   return false;
 };

@@ -8,7 +8,7 @@
    until the next one (per browser: localStorage). */
 
 // v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
-const WHATS_NEW_RELEASE = "v0.0.22";
+const WHATS_NEW_RELEASE = "v0.0.23";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -17,13 +17,8 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
-  { title: "图片参数少漏了", detail: "以前有些 AI 图明明带着参数，却被当成「未检测到生成参数」：NovelAI 藏在像素里的咒语（文字被删掉后还在）、WebP 图、写在 JPEG 注释里的，以及几种 ComfyUI 节点。现在都读得出来，连电脑上只有 QQ 预览图、没有原图的 NovelAI 图也行。升级后会在后台把以前判成没参数的图重读一遍（只做一次，几分钟）。", view: "knowledge", selector: ".kb-stats" },
-  { title: "「咒语来自回复」不再乱标", detail: "没有参数的普通截图和照片以前都被标成「咒语来自回复」。现在只有群里真有人贴过咒语的图才这样标，其余显示「未检测到生成参数」。", view: "knowledge", selector: ".kb-facets" },
-  { title: "桌面和开始菜单快捷方式", detail: "不用再去安装文件夹找启动脚本：「设置 → 快捷方式」可以在桌面放一个，开始菜单里也有（Ctrl+Alt+U）。快捷方式换成了本工具自己的图标。", view: "settings", selector: "#settings-shortcuts" },
-  { title: "列表可以拉长", detail: "左栏「关注的群」下面有一条拖动条：往下拖显示更多（拉到底全部显示），双击恢复。关注群列表、备份选群、咒语库的长筛选列表和运行日志也一样。", view: null, selector: "#rail-groups .resize-grip" },
-  { title: "出错时说清楚原因", detail: "后台任务（包括备份）失败时，以前只显示「进程退出码 1」，现在会写出真正的原因。数据库密钥不对时会直接告诉你：到「设置 → 数据库密钥」点「自动获取密钥」。", view: null, selector: null },
-  { title: "手动填密钥会先验证", detail: "手动粘贴数据库密钥时，会先用你电脑上的数据库试一下，解不开就不保存。常见原因是把 AI 服务的 API key 填进了这一栏。", view: null, selector: null },
-  { title: "Start-QQ-Unviewed.cmd 已移除", detail: "它一打开就自动做一次 AI 总结；现在后台本来就会整理好，用不到了。请用 Start-QQ-Console.cmd 或快捷方式打开。", view: null, selector: null },
+  { title: "改名为 ChatLens", detail: "左上角、浏览器标签、快捷方式和桌面通知都改叫 ChatLens。已有的开始菜单、桌面和开机后台运行的快捷方式会自动换成新名字和图标，不用重新设置。", view: null, selector: ".brand" },
+  { title: "启动脚本改名", detail: "安装文件夹里的启动脚本改叫 Start-ChatLens.cmd，改名前的旧脚本会自动删除。用开始菜单或桌面快捷方式打开的不受影响。", view: null, selector: null },
 ];
 
 const whatsNewState = { hidden: false };

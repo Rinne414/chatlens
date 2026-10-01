@@ -16,7 +16,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 case "$OUT" in /*) ;; *) OUT="$ROOT/$OUT" ;; esac
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-PREFIX=qqnt-readonly-summary-toolkit
+PREFIX=chatlens
 STAGE="$WORK/$PREFIX"
 mkdir -p "$STAGE" "$(dirname "$OUT")"
 

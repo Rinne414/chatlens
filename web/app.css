@@ -56,18 +56,8 @@ body {
   height: calc(100vh / var(--zoom));
 }
 .brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 18px; }
-.brand-mark {
-  display: inline-grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  font-weight: 800;
-  font-size: 14px;
-  letter-spacing: .5px;
-}
+/* The app icon itself (web/icons), already a rounded square. */
+.brand-mark { flex: none; width: 34px; height: 34px; border-radius: 9px; }
 .brand-text { font-weight: 700; font-size: 15px; }
 #nav { display: flex; flex-direction: column; gap: 2px; }
 #nav button {
@@ -796,7 +786,6 @@ html[data-theme="dark"] {
 html[data-theme="dark"] .msg-row.unread { background: #1c2836; }
 html[data-theme="dark"] .msg-row.unread:hover { background: #223142; }
 html[data-theme="dark"] .sel-bar { box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
-html[data-theme="dark"] .brand-mark { color: #fff; }
 
 /* multi-image bubbles: stack every image of one message */
 .bubble.has-img .bubble-img + .bubble-img { margin-top: 4px; }

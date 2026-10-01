@@ -61,6 +61,6 @@ test("closing the console names the desktop shortcut when there is one", () => {
   const hint = (desktop) => run(`quitReopenHint(${JSON.stringify(desktop)})`);
 
   assert.match(hint({ ...WINDOWS, desktopShortcut: true }), /桌面.*开始菜单.*Ctrl\+Alt\+U/u);
-  assert.match(hint({ ...WINDOWS, appShortcut: false, desktopShortcut: true }), /桌面上的「QQ 群消息简报」/u);
-  assert.match(hint({ ...WINDOWS, appShortcut: false }), /Start-QQ-Console\.cmd/u);
+  assert.match(hint({ ...WINDOWS, appShortcut: false, desktopShortcut: true }), /桌面上的「ChatLens」/u);
+  assert.match(hint({ ...WINDOWS, appShortcut: false }), /Start-ChatLens\.cmd/u);
 });
