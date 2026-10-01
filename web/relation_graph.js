@@ -163,21 +163,30 @@ const circleCentres = (nodes, circles) => {
   return new Map([...sums].map(([circle, sum]) => [circle, { x: sum.x / sum.n, y: sum.y / sum.n }]));
 };
 
-// Stretches the free layout to fill the box, then pushes apart dots that
-// ended up too close (their pictures and names would overlap): their radii
-// plus REL_LABEL_ROOM when `radii` (uin -> radius) is given, else REL_MIN_GAP.
+// Fits the free layout into the box without squashing it (the same scale on
+// both axes — a wide short box used to crush a round cloud into one pile),
+// then pushes apart dots that still overlap: their radii plus REL_LABEL_ROOM
+// when `radii` (uin -> radius) is given, else REL_MIN_GAP.
 const fitToBox = (nodes, { width, height, pad }, radii) => {
   const gapOf = (a, b) => (radii === null ? REL_MIN_GAP : (radii.get(a.uin) ?? 0) + (radii.get(b.uin) ?? 0) + REL_LABEL_ROOM);
   const xs = nodes.map((node) => node.x);
   const ys = nodes.map((node) => node.y);
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const scaleX = maxX - minX < 1 ? 0 : (width - 2 * pad) / (maxX - minX);
-  const scaleY = maxY - minY < 1 ? 0 : (height - 2 * pad) / (maxY - minY);
+  const spanX = Math.max(0, maxX - minX);
+  const spanY = Math.max(0, maxY - minY);
+  const scaleX = spanX < 1 ? 0 : (width - 2 * pad) / spanX;
+  const scaleY = spanY < 1 ? 0 : (height - 2 * pad) / spanY;
+  const scale = scaleX === 0 && scaleY === 0 ? 0 : Math.min(scaleX === 0 ? scaleY : scaleX, scaleY === 0 ? scaleX : scaleY);
+  const usedW = spanX * scale;
+  const usedH = spanY * scale;
+  const originX = pad + ((width - 2 * pad) - usedW) / 2;
+  const originY = pad + ((height - 2 * pad) - usedH) / 2;
   for (const node of nodes) {
-    node.x = scaleX === 0 ? width / 2 : pad + (node.x - minX) * scaleX;
-    node.y = scaleY === 0 ? height / 2 : pad + (node.y - minY) * scaleY;
+    node.x = scale === 0 ? width / 2 : originX + (node.x - minX) * scale;
+    node.y = scale === 0 ? height / 2 : originY + (node.y - minY) * scale;
   }
-  for (let pass = 0; pass < REL_SPREAD_PASSES; pass += 1) {
+  const passes = Math.min(180, Math.round(REL_SPREAD_PASSES * Math.max(1, Math.sqrt(nodes.length / 30))));
+  for (let pass = 0; pass < passes; pass += 1) {
     for (let i = 0; i < nodes.length; i += 1) {
       for (let j = i + 1; j < nodes.length; j += 1) {
         const dx = nodes[j].x - nodes[i].x;
@@ -211,7 +220,13 @@ const layoutGraph = (people, links, circles, box, radii = null) => {
   if (count === 0) {
     return positions;
   }
-  const ideal = REL_IDEAL_DISTANCE;
+  // A hundred people at the small-graph spacing collapse into one ball. Spread
+  // the ideal gap with the count, and ease the pull toward the middle so
+  // circles can sit apart instead of stacking.
+  const spread = Math.max(1, Math.sqrt(count / 36));
+  const ideal = REL_IDEAL_DISTANCE * spread;
+  const gravity = REL_GRAVITY / spread;
+  const circlePull = REL_CIRCLE_PULL / Math.sqrt(spread);
   const order = [...people].sort((left, right) => circles.get(left.uin) - circles.get(right.uin));
   const nodes = order.map((person, position) => {
     const angle = (2 * Math.PI * position) / count;
@@ -244,10 +259,15 @@ const layoutGraph = (people, links, circles, box, radii = null) => {
           distance = Math.hypot(dx, dy);
         }
         const force = (ideal * ideal) / distance;
-        a.dx += (dx / distance) * force;
-        a.dy += (dy / distance) * force;
-        b.dx -= (dx / distance) * force;
-        b.dy -= (dy / distance) * force;
+        const minDistance = radii === null
+          ? REL_MIN_GAP
+          : (radii.get(a.uin) ?? 0) + (radii.get(b.uin) ?? 0) + REL_LABEL_ROOM;
+        const overlap = distance < minDistance ? (minDistance - distance) * 0.35 : 0;
+        const push = force + overlap;
+        a.dx += (dx / distance) * push;
+        a.dy += (dy / distance) * push;
+        b.dx -= (dx / distance) * push;
+        b.dy -= (dy / distance) * push;
       }
     }
     for (const spring of springs) {
@@ -263,8 +283,8 @@ const layoutGraph = (people, links, circles, box, radii = null) => {
     const centres = circleCentres(nodes, circles);
     for (const node of nodes) {
       const centre = centres.get(circles.get(node.uin));
-      node.dx += (centre.x - node.x) * REL_CIRCLE_PULL - node.x * REL_GRAVITY;
-      node.dy += (centre.y - node.y) * REL_CIRCLE_PULL - node.y * REL_GRAVITY;
+      node.dx += (centre.x - node.x) * circlePull - node.x * gravity;
+      node.dy += (centre.y - node.y) * circlePull - node.y * gravity;
       const length = Math.max(0.01, Math.hypot(node.dx, node.dy));
       const moveBy = Math.min(length, temperature);
       node.x += (node.dx / length) * moveBy;

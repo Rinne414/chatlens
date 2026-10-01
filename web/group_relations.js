@@ -15,8 +15,26 @@
 const REL_SHOW_CHOICES = [15, 30, 60];
 const REL_DEFAULT_SHOW = 30;
 const REL_BOX = { width: 1000, height: 620, pad: 60 };
+
+// A small map stays in REL_BOX. A full one needs a cell per person (avatar
+// plus the name under it), or fit-to-box crushes everyone into the middle.
+const relationBox = (people, radii) => {
+  const count = Math.max(people.length, 1);
+  const average = people.reduce((sum, person) => sum + (radii.get(person.uin) ?? 14), 0) / count;
+  const cell = average * 2 + 44;
+  const columns = Math.max(1, Math.ceil(Math.sqrt(count * 1.4)));
+  const rows = Math.max(1, Math.ceil(count / columns));
+  return {
+    width: Math.max(REL_BOX.width, Math.ceil(columns * cell + REL_BOX.pad * 2)),
+    height: Math.max(REL_BOX.height, Math.ceil(rows * cell + REL_BOX.pad * 2)),
+    pad: REL_BOX.pad,
+  };
+};
 const REL_COLORED_CIRCLES = 3;
 const REL_LABEL_ALL_UP_TO = 60;
+// Above this, the entrance pop and opacity fades restyle enough nodes to flicker.
+const REL_DENSE_PEOPLE = 60;
+const REL_DENSE_LINKS = 300;
 const REL_LABEL_CHARS = 8;
 const REL_PAIRS_PREVIEW = 6;
 const REL_CARD_PARTNERS = 5;
@@ -103,8 +121,9 @@ const relationPicture = (data, options) => {
   const circles = graph.findCircles(people, links);
   const maxMessages = Math.max(1, ...people.map((person) => person.messages));
   const radii = new Map(people.map((person) => [person.uin, person.messages === 0 ? 11 : 13 + 13 * Math.sqrt(person.messages / maxMessages)]));
-  const positions = graph.layoutGraph(people, links, circles, REL_BOX, radii);
-  relationCache = { key, groupId: data.groupId, people, links, circles, radii, positions, allLinks: relations.links, allPeople: relations.people, options };
+  const box = relationBox(people, radii);
+  const positions = graph.layoutGraph(people, links, circles, box, radii);
+  relationCache = { key, groupId: data.groupId, people, links, circles, radii, positions, box, allLinks: relations.links, allPeople: relations.people, options };
   relationCache.view = buildStage(relationCache);
   return relationCache;
 };
@@ -174,9 +193,10 @@ const buildStage = (picture) => {
   const viewport = svgEl("g", { class: "rel-viewport" },
     svgEl("g", { class: "rel-edges" }, edges.map((edge) => edge.path)),
     svgEl("g", { class: "rel-nodes" }, [...nodes.values()]));
+  const box = picture.box ?? REL_BOX;
   const svg = svgEl("svg", {
     class: "rel-svg",
-    viewBox: `0 0 ${REL_BOX.width} ${REL_BOX.height}`,
+    viewBox: `0 0 ${box.width} ${box.height}`,
     role: "img",
     "aria-label": `关系网：${picture.people.length} 人，${picture.links.length} 对有来往`,
   },
@@ -187,14 +207,40 @@ const buildStage = (picture) => {
     tip: el("div", { class: "rel-tip", hidden: true, role: "status" }),
     card: el("div", { class: "rel-card", hidden: true }),
     transform: { k: 1, x: 0, y: 0 },
+    homePositions: new Map([...picture.positions].map(([uin, point]) => [uin, { x: point.x, y: point.y }])),
+    homeBox: { ...(picture.box ?? REL_BOX) },
     hover: null,
     pointer: null,
     lastClick: null,
   };
   view.stage = el("div", { class: "rel-stage" }, svg, view.tip, view.card, zoomControls(view));
   wireStage(view);
-  setTimeout(() => view.stage.classList.add("rel-entered"), REL_ENTER_DONE_MS);
+  // A full map's staggered pop, replayed whenever the page redraws, is the flicker.
+  if (picture.people.length > REL_DENSE_PEOPLE || picture.links.length > REL_DENSE_LINKS) {
+    svg.classList.add("rel-dense");
+    view.stage.classList.add("rel-entered");
+  } else {
+    setTimeout(() => view.stage.classList.add("rel-entered"), REL_ENTER_DONE_MS);
+  }
   return view;
+};
+
+// Swaps the section's text around the stage. The stage itself stays put:
+// taking an SVG of many avatars out of the document makes every image flash.
+const placeAroundStage = (section, stage, before, after) => {
+  for (const child of [...section.childNodes]) {
+    if (child !== stage) {
+      child.remove();
+    }
+  }
+  for (const node of [...before].reverse()) {
+    stage.before(node);
+  }
+  let anchor = stage;
+  for (const node of after) {
+    anchor.after(node);
+    anchor = node;
+  }
 };
 
 /* ---------- highlight, hover card, picked card ---------- */
@@ -216,6 +262,7 @@ const applyHighlight = (view) => {
   const lit = litSet(view);
   const focus = relationFocus();
   view.svg.classList.toggle("has-focus", lit !== null);
+  view.svg.classList.toggle("circle-focus", focus?.kind === "circle" && view.hover === null);
   for (const [uin, node] of view.nodes) {
     node.classList.toggle("lit", lit !== null && lit.set.has(uin));
     node.classList.toggle("picked", focus?.kind === "person" && focus.uin === uin);
@@ -300,20 +347,130 @@ const applyTransform = (view) => {
 // Client pixels -> viewBox units.
 const svgScale = (view) => view.svg.getScreenCTM()?.a || 1;
 
-const zoomBy = (view, factor, centre = { x: REL_BOX.width / 2, y: REL_BOX.height / 2 }) => {
+const zoomBy = (view, factor, centre) => {
+  const box = view.picture.box ?? REL_BOX;
+  const point = centre ?? { x: box.width / 2, y: box.height / 2 };
   const { k, x, y } = view.transform;
   const next = Math.min(REL_ZOOM_MAX, Math.max(REL_ZOOM_MIN, k * factor));
-  view.transform = { k: next, x: centre.x - ((centre.x - x) * next) / k, y: centre.y - ((centre.y - y) * next) / k };
+  view.transform = { k: next, x: point.x - ((point.x - x) * next) / k, y: point.y - ((point.y - y) * next) / k };
   applyTransform(view);
 };
 
-const zoomControls = (view) => el("div", { class: "rel-zoom", role: "group", "aria-label": "缩放" },
-  el("button", { type: "button", title: "放大", onclick: () => zoomBy(view, REL_ZOOM_STEP) }, "+"),
-  el("button", { type: "button", title: "缩小", onclick: () => zoomBy(view, 1 / REL_ZOOM_STEP) }, "−"),
-  el("button", { type: "button", title: "回到原来的大小和位置", onclick: () => {
-    view.transform = { k: 1, x: 0, y: 0 };
-    applyTransform(view);
-  } }, "重置"));
+const restoreHome = (view) => {
+  for (const [uin, point] of view.homePositions) {
+    moveNode(view, uin, point);
+  }
+};
+
+// Room enough that the opened network is obviously looser than the overview,
+// not a few pixels of the old bounding box.
+const expandedBox = (count, homeBox) => {
+  const cell = 150;
+  const columns = Math.max(1, Math.ceil(Math.sqrt(count * 1.35)));
+  const rows = Math.ceil(count / columns);
+  const pad = homeBox.pad;
+  return {
+    width: Math.max(homeBox.width, columns * cell + pad * 2),
+    height: Math.max(homeBox.height, rows * cell + pad * 2),
+    pad,
+  };
+};
+
+const applyViewBox = (view, box) => {
+  view.picture.box = box;
+  view.svg.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
+};
+
+const raiseNodes = (view, uins) => {
+  const parent = view.nodes.get(uins[0])?.parentNode;
+  if (parent === undefined || parent === null) {
+    return;
+  }
+  for (const uin of uins) {
+    const node = view.nodes.get(uin);
+    if (node !== undefined) {
+      parent.append(node);
+    }
+  }
+};
+
+// Re-lays the selected circle (or the whole map) from its own links, into a
+// canvas with a wide cell per person. Scaling the old bounding box did almost
+// nothing once that circle already spanned the overview.
+const applySpread = (view) => {
+  if (view.expanded !== true) {
+    return;
+  }
+  const focus = relationFocus();
+  const circle = focus?.kind === "circle" ? focus.index : null;
+  const key = circle === null ? "all" : `c${circle}`;
+  if (view.spreadKey === key) {
+    return;
+  }
+  restoreHome(view);
+  applyViewBox(view, view.homeBox);
+  const members = circle === null
+    ? view.picture.people
+    : view.picture.people.filter((person) => view.picture.circles.get(person.uin) === circle);
+  if (members.length === 0) {
+    view.spreadKey = key;
+    return;
+  }
+  const uins = new Set(members.map((person) => person.uin));
+  const links = view.picture.links.filter((link) => uins.has(link.a) && uins.has(link.b));
+  const graph = window.RelationGraph;
+  const box = expandedBox(members.length, view.homeBox);
+  const positions = graph.layoutGraph(members, links, graph.findCircles(members, links), box, view.picture.radii);
+  applyViewBox(view, box);
+  for (const person of members) {
+    moveNode(view, person.uin, positions.get(person.uin));
+  }
+  raiseNodes(view, members.map((person) => person.uin));
+  view.spreadKey = key;
+};
+
+const syncExpandButton = (view) => {
+  const button = view.expandButton;
+  if (button === undefined) {
+    return;
+  }
+  const expanded = view.expanded === true;
+  button.textContent = expanded ? "收起" : "展开";
+  button.title = expanded ? "收回原来的关系网" : "按这一圈自己的关系把人拉开；没选圈子就拉开整张网";
+  button.setAttribute("aria-pressed", String(expanded));
+};
+
+const setExpanded = (view, expanded) => {
+  view.expanded = expanded;
+  view.spreadKey = undefined;
+  syncExpandButton(view);
+  if (!expanded) {
+    restoreHome(view);
+    applyViewBox(view, view.homeBox);
+    return;
+  }
+  applySpread(view);
+};
+
+const zoomControls = (view) => {
+  const expandButton = el("button", {
+    class: "rel-expand",
+    type: "button",
+    title: "按这一圈自己的关系把人拉开；没选圈子就拉开整张网",
+    "aria-pressed": "false",
+    onclick: () => setExpanded(view, view.expanded !== true),
+  }, "展开");
+  view.expandButton = expandButton;
+  return el("div", { class: "rel-zoom", role: "group", "aria-label": "缩放" },
+    el("button", { type: "button", title: "放大", onclick: () => zoomBy(view, REL_ZOOM_STEP) }, "+"),
+    el("button", { type: "button", title: "缩小", onclick: () => zoomBy(view, 1 / REL_ZOOM_STEP) }, "−"),
+    el("button", { type: "button", title: "回到原来的大小和位置", onclick: () => {
+      view.transform = { k: 1, x: 0, y: 0 };
+      applyTransform(view);
+      setExpanded(view, false);
+    } }, "重置"),
+    expandButton);
+};
 
 const moveNode = (view, uin, point) => {
   const position = { x: Math.round(point.x * 10) / 10, y: Math.round(point.y * 10) / 10 };
@@ -417,12 +574,18 @@ const wireStage = (view) => {
     }
   });
   svg.addEventListener("pointerout", (event) => {
-    const uin = nodeUinOf(event.target);
-    if (uin !== null && nodeUinOf(event.relatedTarget) !== uin) {
-      view.hover = null;
-      view.tip.hidden = true;
-      applyHighlight(view);
+    if (view.pointer !== null || view.hover === null) {
+      return;
     }
+    // Crossing a line or a neighbouring avatar stays inside the svg. Clearing
+    // hover there fades every node and brings it back a moment later.
+    const next = event.relatedTarget;
+    if (next instanceof Node && svg.contains(next)) {
+      return;
+    }
+    view.hover = null;
+    view.tip.hidden = true;
+    applyHighlight(view);
   });
   svg.addEventListener("keydown", (event) => {
     const uin = nodeUinOf(event.target);
@@ -512,16 +675,23 @@ const groupRelations = (data, overrides = {}) => {
   }
   const picture = relationPicture(data, options);
   const interactions = relations.links.reduce((sum, link) => sum + link.total, 0);
+  const blurb = el("p", { class: "kb-meta" },
+    `${briefNumber(related)} 人互相回复或 @ 过，共 ${briefNumber(interactions)} 次。头像越大说话越多，线越粗来往越多，外圈同色是一个小圈子。`,
+    "点一个人看 TA 和谁最常来往，双击打开个人页；人可以拖动，空白处拖动平移，Ctrl + 滚轮缩放。");
+  const under = el("div", { class: "rel-under" }, circleChips(picture), topPairs(picture));
+  const stage = picture.view.stage;
+  const live = stage.parentElement;
+  const section = live?.classList.contains("gp-rel") && live.isConnected ? live : el("section", { class: "card gp-section gp-rel" });
+  if (section.contains(stage)) {
+    placeAroundStage(section, stage, [head, blurb], [under]);
+  } else {
+    section.append(head, blurb, stage, under);
+  }
   // After the page has attached the (kept) stage again.
   queueMicrotask(() => {
     applyHighlight(picture.view);
     renderPickedCard(picture.view);
+    applySpread(picture.view);
   });
-  return el("section", { class: "card gp-section gp-rel" },
-    head,
-    el("p", { class: "kb-meta" },
-      `${briefNumber(related)} 人互相回复或 @ 过，共 ${briefNumber(interactions)} 次。头像越大说话越多，线越粗来往越多，外圈同色是一个小圈子。`,
-      "点一个人看 TA 和谁最常来往，双击打开个人页；人可以拖动，空白处拖动平移，Ctrl + 滚轮缩放。"),
-    picture.view.stage,
-    el("div", { class: "rel-under" }, circleChips(picture), topPairs(picture)));
+  return section;
 };

@@ -630,11 +630,27 @@ const renderGroupView = () => {
     return;
   }
   const data = page.data;
-  setChildren(root, el("div", { class: `gp-page ${page.loading ? "is-loading" : ""}` },
-    groupHeader(data),
-    groupBrief(data.brief),
-    groupRelations(data),
-    el("div", { class: "gp-grid" },
-      el("div", { class: "gp-col" }, groupTimeline(data.timeline), groupQa(data.qa), groupNewThings(data.newThings), groupLinks(data.links)),
-      el("div", { class: "gp-col" }, groupActivity(data), groupPeople(data), groupAigc(data)))));
+  const section = groupRelations(data);
+  const pageClass = `gp-page ${page.loading ? "is-loading" : ""}`;
+  const before = [groupHeader(data), groupBrief(data.brief)].filter(Boolean);
+  const grid = el("div", { class: "gp-grid" },
+    el("div", { class: "gp-col" }, groupTimeline(data.timeline), groupQa(data.qa), groupNewThings(data.newThings), groupLinks(data.links)),
+    el("div", { class: "gp-col" }, groupActivity(data), groupPeople(data), groupAigc(data)));
+  // The map is already on screen: rebuild the text around it, don't pull the
+  // SVG out. Re-inserting a crowded graph flashes every avatar.
+  if (section !== null && section.isConnected && root.contains(section)) {
+    const livePage = section.closest(".gp-page");
+    livePage.className = pageClass;
+    for (const child of [...livePage.children]) {
+      if (child !== section) {
+        child.remove();
+      }
+    }
+    for (const node of [...before].reverse()) {
+      section.before(node);
+    }
+    section.after(grid);
+    return;
+  }
+  setChildren(root, el("div", { class: pageClass }, ...before, section, grid));
 };
