@@ -39,15 +39,21 @@ html[data-theme="dark"] .gp-rel, html[data-theme="dark"] .pp-page {
 .rel-svg:active { cursor: grabbing; }
 
 .rel-edge { fill: none; stroke: var(--rel-edge); stroke-linecap: round; transition: opacity var(--dur); }
+/* A crowded map fades thousands of lines on every hover change; that reads as flicker. */
+.rel-svg.rel-dense .rel-edge,
+.rel-svg.rel-dense .rel-node,
+.rel-svg.rel-dense .rel-ring { transition: none; }
 .rel-edge.c0 { stroke: var(--rel-c0); }
 .rel-edge.c1 { stroke: var(--rel-c1); }
 .rel-edge.c2 { stroke: var(--rel-c2); }
 .has-focus .rel-edge { opacity: .07; }
 .has-focus .rel-edge.lit { opacity: 1; stroke-opacity: .9; }
+.rel-svg.circle-focus .rel-edge:not(.lit) { opacity: .04; }
 
 .rel-node { cursor: pointer; outline: none; transition: opacity var(--dur); }
 .has-focus .rel-node { opacity: .25; }
 .has-focus .rel-node.lit { opacity: 1; }
+.rel-svg.circle-focus .rel-node:not(.lit) { opacity: .12; filter: blur(1.4px); }
 .rel-node-body { transform-box: fill-box; transform-origin: center; animation: rel-pop .55s cubic-bezier(.2, .8, .3, 1.25) both; }
 @keyframes rel-pop {
   from { opacity: 0; transform: scale(.35); }
@@ -58,6 +64,9 @@ html[data-theme="dark"] .gp-rel, html[data-theme="dark"] .pp-page {
   .rel-node-body { animation: none; }
 }
 .rel-hit { fill: transparent; }
+/* Only the hit circle takes the pointer. Avatar squares overlap in a dense map
+   and were stealing hover from each other, which flashed the whole graph. */
+.rel-ring, .rel-face, .rel-avatar { pointer-events: none; }
 .rel-ring { fill: var(--panel); stroke: var(--rel-other); stroke-width: 3; transition: stroke-width var(--dur); }
 .rel-node.c0 .rel-ring { stroke: var(--rel-c0); }
 .rel-node.c1 .rel-ring { stroke: var(--rel-c1); }

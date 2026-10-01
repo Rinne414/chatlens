@@ -32,7 +32,7 @@ const runScript = (scriptPath) =>
   new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", [
       "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath,
-    ], { windowsHide: true });
+    ], { windowsHide: true, env: platform.windowsPowershellEnv() });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => child.kill(), SCAN_TIMEOUT_MS);

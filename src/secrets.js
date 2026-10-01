@@ -83,7 +83,7 @@ const DPAPI_WRITE_SCRIPT = [
 
 const runAsync = (command, args, { input, env } = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true, env: { ...process.env, ...env } });
+    const child = spawn(command, args, { windowsHide: true, env: env ?? { ...process.env } });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
@@ -126,7 +126,7 @@ const readSecretSync = (name) => {
     const result = spawnSync("powershell.exe", psArgs(DPAPI_READ_SCRIPT), {
       encoding: "utf8",
       windowsHide: true,
-      env: { ...process.env, CHATLENS_SECRET_FILE: filePath },
+      env: platform.windowsPowershellEnv({ CHATLENS_SECRET_FILE: filePath }),
       timeout: 60000,
     });
     if (result.status !== 0 || String(result.stdout ?? "").length === 0) {
@@ -152,7 +152,9 @@ const readSecret = async (name) => {
     if (!platform.fileExists(filePath)) {
       throw missingSecretError(name);
     }
-    const result = await runAsync("powershell.exe", psArgs(DPAPI_READ_SCRIPT), { env: { CHATLENS_SECRET_FILE: filePath } });
+    const result = await runAsync("powershell.exe", psArgs(DPAPI_READ_SCRIPT), {
+      env: platform.windowsPowershellEnv({ CHATLENS_SECRET_FILE: filePath }),
+    });
     if (result.code !== 0 || result.stdout.length === 0) {
       throw new Error(`${specFor(name).label}解密失败（DPAPI）。${lastLine(result.stderr).slice(0, 200)}`);
     }
@@ -175,7 +177,7 @@ const saveSecret = async (name, value) => {
   if (platform.isWindows) {
     const result = await runAsync("powershell.exe", psArgs(DPAPI_WRITE_SCRIPT), {
       input: secret,
-      env: { CHATLENS_SECRET_FILE: filePath },
+      env: platform.windowsPowershellEnv({ CHATLENS_SECRET_FILE: filePath }),
     });
     if (result.code !== 0) {
       throw new Error(`保存密钥失败：${lastLine(result.stderr).slice(0, 200) || `PowerShell 退出码 ${result.code}`}`);

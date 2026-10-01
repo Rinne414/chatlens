@@ -114,6 +114,16 @@ const isSafeAbsoluteDir = (value) => {
   return path.isAbsolute(text) && !/["`$\\]/u.test(text);
 };
 
+// Windows PowerShell 5.1 fills in PSModulePath itself. Inheriting PowerShell
+// 7's value (a pwsh session, Cursor's terminal, or the user environment)
+// makes 5.1 try to load 7's Microsoft.PowerShell.Security, and
+// ConvertTo-SecureString then fails to autoload.
+const windowsPowershellEnv = (extra = {}) => {
+  const env = { ...process.env, ...extra };
+  delete env.PSModulePath;
+  return env;
+};
+
 const fileExists = (filePath) => {
   try {
     return fs.statSync(filePath).isFile();
@@ -135,5 +145,6 @@ module.exports = {
   lowerOwnPriority,
   isPathInside,
   isSafeAbsoluteDir,
+  windowsPowershellEnv,
   fileExists,
 };
