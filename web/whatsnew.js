@@ -8,7 +8,7 @@
    until the next one (per browser: localStorage). */
 
 // v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
-const WHATS_NEW_RELEASE = "v0.0.24";
+const WHATS_NEW_RELEASE = "v0.0.25";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -17,9 +17,8 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
-  { title: "关系网不再闪", detail: "人多的群，鼠标划过关系网的连线时整张图不再闪。选中一个圈子再点「展开」，只把这一圈的人拉开，其他人变淡。", view: "group", selector: ".gp-rel" },
-  { title: "自动获取密钥能保存了", detail: "装了 PowerShell 7 的电脑上，「自动获取密钥」读到了密钥却存不进去，现在能正常保存。获取失败时会写出真正的原因，不再只说「0 个候选」。", view: "settings", selector: "#settings-keys" },
-  { title: "启动和打开页面的问题", detail: "少数 Windows 电脑上控制台一启动就退出，现在修好了。电脑忙的时候打开页面偶尔显示「无法连接控制台服务」，也修好了。", view: null, selector: null },
+  { title: "用手机看", detail: "设置 → 手机连线：电脑和手机都装上 Tailscale 并登录同一个账号，扫一次二维码，躺在床上或出门在外都能看简报、聊天、回顾和问群聊。只有你配对过的手机进得来；手机只能阅读，设置、密钥、备份和存储只能在电脑上改。", view: "settings", selector: "#remote-card" },
+  { title: "手机版界面", detail: "在手机上打开时自动换成手机排版：底部是简报、消息、问群聊、回顾和更多；聊天占满屏幕，选项收在「选项」里，长按消息可以选一段让 AI 总结。电脑上的界面不变。", view: null, selector: null },
 ];
 
 const whatsNewState = { hidden: false };
