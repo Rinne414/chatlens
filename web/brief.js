@@ -348,7 +348,7 @@ const briefStatusLine = (data) => {
     pieces.push(
       pause.until === null ? " · AI 整理已暂停" : ` · AI 整理暂停到 ${unixToHkt(pause.until).slice(11, 16)}`,
       " ",
-      el("button", { class: "linklike", disabled: briefState.busy, onclick: briefResumeAi }, "恢复"));
+      el("button", { class: "linklike desktop-action", disabled: briefState.busy, onclick: briefResumeAi }, "恢复"));
     tone = tone === "ok" ? "warn" : tone;
   }
   return el("p", { class: `brief-status ${tone}` }, pieces);
@@ -416,7 +416,7 @@ const briefMasthead = (data) => {
           }, "⚡ 现在就总结")
         : null,
       total > 0 ? el("button", { class: "btn", disabled: briefState.busy, onclick: briefMarkSeen }, "✓ 看完了") : null,
-      el("button", { class: "btn ghost", onclick: () => openView("run") }, "自定义时间范围…"),
+      el("button", { class: "btn ghost desktop-action", onclick: () => openView("run") }, "自定义时间范围…"),
       briefSearchForm()),
     briefState.notice ? el("p", { class: "brief-notice" }, briefState.notice) : null);
 };

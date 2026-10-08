@@ -67,3 +67,8 @@
   .chat-body.with-panel { grid-template-columns: 1fr; }
   .chat-panel { height: auto; max-height: calc(50vh / var(--zoom)); }
 }
+
+/* Wrappers in the chat header that change nothing on the computer; the phone
+   layout folds them behind 「选项」 (phone.css). */
+.chat-tools-actions, .chat-tools { display: contents; }
+.btn.chat-tools-toggle { display: none; }

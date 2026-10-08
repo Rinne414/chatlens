@@ -1,0 +1,238 @@
+/* ---------- phone layout (手机版) ----------
+   Every rule here starts with html.phone (or styles an element only the phone
+   shell creates), so nothing in this file can reach the computer's page:
+   phone.js sets that class only on a narrow touch screen. */
+
+html.phone {
+  --zoom: 1;
+  --phone-tabs-h: 56px;
+  --phone-bottom: calc(var(--phone-tabs-h) + env(safe-area-inset-bottom, 0px));
+  --phone-gutter: 12px;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.phone body { font-size: 14.5px; }
+
+/* ---- shell: no rail, bottom tabs ---- */
+html.phone .shell { display: block; min-height: calc(100vh / var(--zoom)); }
+html.phone .rail { display: none; }
+html.phone main { padding: 0 var(--phone-gutter) calc(var(--phone-bottom) + 24px); }
+
+html.phone .topbar {
+  gap: 8px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 0 10px;
+}
+html.phone .topbar h1 { font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.phone .topbar-title { gap: 8px; }
+html.phone .topbar-actions { display: flex; gap: 6px; flex: none; }
+html.phone .view-back { padding: 0 10px; }
+
+.phone-tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  height: var(--phone-bottom);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: saturate(1.4) blur(14px);
+}
+.phone-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .2px;
+  cursor: pointer;
+}
+.phone-tab-icon { font-size: 21px; line-height: 1; filter: grayscale(1); opacity: .62; transition: transform var(--dur), opacity var(--dur); }
+.phone-tab.active { color: var(--accent); }
+.phone-tab.active .phone-tab-icon { filter: none; opacity: 1; transform: translateY(-1px) scale(1.06); }
+.phone-tab.active::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 28%;
+  right: 28%;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: var(--accent);
+}
+.phone-tab:active .phone-tab-icon { transform: scale(.92); }
+.phone-tab.has-mention::after {
+  content: "@";
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 7px);
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border: 2px solid var(--panel);
+  border-radius: 9px;
+  background: var(--risk);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* ---- 更多: a sheet over the page, above the tabs ---- */
+.phone-sheet { position: fixed; inset: 0 0 var(--phone-bottom); z-index: 44; }
+.phone-sheet[hidden] { display: none; }
+html.phone-sheet-open body { overflow: hidden; }
+.phone-sheet-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(8, 11, 16, .42); cursor: default; }
+.phone-sheet-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: calc(100% - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 14px 16px;
+  border-radius: 18px 18px 0 0;
+  background: var(--panel);
+  box-shadow: 0 -10px 34px rgba(0, 0, 0, .2);
+  animation: phone-sheet-in 180ms ease-out;
+}
+@keyframes phone-sheet-in { from { transform: translateY(24px); opacity: .4; } to { transform: none; opacity: 1; } }
+.phone-sheet-grip { width: 38px; height: 4px; margin: 4px auto 12px; border-radius: 2px; background: var(--line-strong); }
+.phone-sheet-pages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.phone-sheet-page {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 10px 2px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.phone-sheet-page:active { background: var(--accent-soft); color: var(--accent); }
+.phone-sheet-icon { font-size: 22px; line-height: 1.1; }
+.phone-sheet-groups:not(:empty), .phone-sheet-status:not(:empty), .phone-sheet-prefs:not(:empty) { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* app.css hides these below 900 px (the rail is a top bar there). */
+.phone-sheet .rail-groups { display: flex; min-height: 0; margin: 0; padding-top: 0; border-top: 0; }
+.phone-sheet .rail-status { display: grid; padding: 0; border-top: 0; }
+.phone-sheet .rail-groups:empty, .phone-sheet .rail-status:empty { display: none; }
+.phone-sheet .rail-section-head { min-height: 36px; }
+.phone-sheet .rail-group { min-height: 44px; font-size: 14px; }
+.phone-sheet .rail-group .av { width: 26px; height: 26px; }
+.phone-sheet .rail-group-list { height: auto !important; max-height: none; overflow: visible; }
+.phone-sheet .resize-grip { display: none; }
+.phone-sheet .rail-status-line { font-size: 13.5px; min-height: 32px; }
+.phone-sheet .rail-today { font-size: 12.5px; }
+.phone-sheet .settings-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.phone-sheet .settings-row .btn { height: 36px; }
+.phone-sheet-foot { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+.phone-sheet-foot p { margin: 0 0 10px; }
+
+/* ---- touch sizes ---- */
+html.phone .btn { min-height: 40px; height: auto; }
+html.phone .btn.small { min-height: 34px; height: auto; padding-top: 4px; padding-bottom: 4px; }
+html.phone .btn.primary { min-height: 44px; }
+html.phone .chip { padding: 7px 13px; }
+html.phone input[type="text"], html.phone input[type="number"], html.phone input[type="password"],
+html.phone input[type="search"], html.phone input[type="date"], html.phone select, html.phone textarea {
+  font-size: 16px;
+}
+html.phone input[type="text"], html.phone input[type="number"], html.phone input[type="password"], html.phone input[type="search"] { height: 40px; }
+
+/* ---- cards: a little tighter, so text gets the width ---- */
+html.phone .card { padding: 14px; border-radius: 12px; margin-bottom: 12px; }
+html.phone .card > h2 { font-size: 16px; margin-bottom: 10px; }
+html.phone .grid-2 { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+
+/* ---- floating bars sit above the tabs ---- */
+html.phone .sel-bar { bottom: calc(var(--phone-bottom) + 12px); max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; }
+html.phone .gallery-selection { bottom: calc(var(--phone-bottom) + 8px); }
+html.phone .brief-keys-help { display: none; }
+
+/* ---- full-screen layers: no outer padding to waste ---- */
+html.phone .modal-mask { padding: 10px; }
+html.phone .modal { width: 100%; max-height: calc(100vh / var(--zoom) - 20px); }
+html.phone .kb-overlay { padding: 0; }
+html.phone .picture-viewer { padding: 10px; gap: 10px; }
+
+/* ---- 消息: the chat fills the screen; its options fold away ---- */
+html.phone main:has(> #view-messages:not([hidden]) > .chat-head) > .topbar { display: none; }
+html.phone .chat-head { margin: calc(8px + env(safe-area-inset-top, 0px)) 0 8px; padding: 8px 10px; }
+html.phone .chat-title-row { flex-wrap: nowrap; gap: 8px; margin-bottom: 0 !important; }
+html.phone .chat-title-row h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px !important; }
+html.phone .chat-title-row .chat-count { flex: none; font-size: 11px; white-space: nowrap; }
+html.phone .chat-title-row .chat-spacer { display: none; }
+html.phone .chat-title-row .btn.small { flex: none; }
+html.phone .btn.chat-tools-toggle { display: inline-flex; margin-left: auto; }
+html.phone .chat-head:not(.tools-open) .chat-tools-actions,
+html.phone .chat-head:not(.tools-open) .chat-tools { display: none; }
+html.phone .chat-head.tools-open .chat-title-row { flex-wrap: wrap; }
+html.phone .chat-tools-actions {
+  display: flex;
+  flex: 1 0 100%;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+html.phone .chat-tools { display: block; margin-top: 10px; }
+html.phone .chat-tools .row { gap: 6px; }
+html.phone .chat-tools input[type="text"] { width: auto !important; flex: 1 1 150px; margin-left: 0 !important; }
+html.phone .chat-list,
+html.phone .msg-list {
+  /* 字号 in 更多 zooms the page; like app.css, viewport units are divided by it. */
+  height: calc(100dvh / var(--zoom) - var(--phone-bottom) - 76px - env(safe-area-inset-top, 0px));
+  min-height: 300px;
+  padding: 8px 8px;
+  /* Scrolling up for older messages must not turn into Chrome's pull-to-refresh. */
+  overscroll-behavior-y: contain;
+}
+html.phone .bubble-group { gap: 8px; margin: 8px 0; }
+html.phone .bg-col { max-width: calc(100% - 40px); }
+html.phone .bubble { font-size: 14.5px; padding-right: 48px; }
+html.phone .bubble-img { max-width: min(260px, 68vw); max-height: 300px; }
+html.phone .to-bottom { right: 12px; bottom: 12px; }
+html.phone .chat-body.with-panel { grid-template-columns: minmax(0, 1fr); }
+
+/* ---- 画廊 / 咒语库 / 回顾: segmented choices scroll sideways instead of squeezing ---- */
+html.phone .wall-modes { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+html.phone .wall-mode { flex: none; height: 32px; white-space: nowrap; }
+html.phone .ask-key-hint { display: none; }
+
+/* ---- 群: the head's avatar sits in the title row, not in a column of its own ---- */
+html.phone .gp-head { grid-template-columns: 40px minmax(0, 1fr); gap: 10px 12px; align-items: start; }
+html.phone .gp-head > .av { width: 40px; height: 40px; font-size: 17px; border-radius: 11px; }
+html.phone .gp-head-title h2 { font-size: 19px; }
+html.phone .gp-head-title .kb-select { max-width: 100%; }
+html.phone .gp-head-actions { grid-column: 1 / -1; justify-content: flex-start; }
+
+/* ---- computer-only pages, opened on a phone ---- */
+.phone-desktop-only h2 { margin-top: 0; }
+
+/* ---- 手机连线 hides what only the computer can do ---- */
+html.remote #nav button[data-view="qqcollect"],
+html.remote #nav button[data-view="backup"],
+html.remote #nav button[data-view="storage"],
+html.remote #nav button[data-view="settings"],
+html.remote .rail-quit,
+html.remote .rail-version,
+html.remote .rail-expiring,
+html.remote .desktop-action { display: none !important; }

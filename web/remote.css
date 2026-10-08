@@ -1,0 +1,58 @@
+/* 设置 → 手机连线 (remote_settings.js) */
+
+.remote-steps { margin: 4px 0 0; padding-left: 22px; display: grid; gap: 8px; font-size: 13px; }
+.remote-steps li { padding-left: 4px; }
+.remote-steps li span { margin-right: 10px; }
+.remote-steps li.done { color: var(--muted); }
+.remote-steps li.done span::after { content: " ✓"; color: var(--ok); font-weight: 700; }
+.remote-steps .btn { vertical-align: middle; }
+#remote-card a.btn { text-decoration: none; color: var(--ink); }
+
+.remote-on { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.remote-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--risk); flex: none; }
+.remote-dot.ok { background: var(--ok); }
+.remote-url {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.remote-pairing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.remote-qr { display: block; width: 220px; height: auto; border-radius: 8px; image-rendering: pixelated; }
+.remote-pairing-text { display: grid; gap: 8px; justify-items: start; min-width: 220px; flex: 1; }
+.remote-pairing-lead { margin: 0; font-size: 13px; }
+.remote-code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 30px;
+  letter-spacing: 3px;
+  line-height: 1.2;
+  color: var(--accent);
+}
+
+.remote-subhead { margin: 18px 0 4px; font-size: 13.5px; }
+.remote-devices { display: grid; gap: 6px; margin-top: 6px; justify-items: start; }
+.remote-device {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.remote-device-name { font-weight: 600; font-size: 13px; }
+.remote-device-meta { color: var(--muted); font-size: 12px; }

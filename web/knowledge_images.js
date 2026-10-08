@@ -38,7 +38,7 @@ const kbWallMode = () => {
 };
 
 const kbWallSize = () => {
-  const size = Number(wallReadPref(KB_WALL_SIZE_KEY, KB_TILE_DEFAULT));
+  const size = Number(wallReadPref(KB_WALL_SIZE_KEY, phoneWallSize(KB_TILE_DEFAULT)));
   return Number.isFinite(size) ? Math.min(KB_TILE_MAX, Math.max(KB_TILE_MIN, size)) : KB_TILE_DEFAULT;
 };
 
@@ -172,7 +172,7 @@ const knowledgeSearchBar = () => {
       },
     }, "语法"),
     el("button", {
-      class: app.knowledgeTab.showExport ? "btn small active" : "btn small",
+      class: app.knowledgeTab.showExport ? "btn small active desktop-action" : "btn small desktop-action",
       type: "button",
       title: "导出当前筛选结果",
       onclick: () => {

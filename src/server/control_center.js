@@ -28,12 +28,18 @@ const railOps = require("./rail_ops");
 const groupOps = require("./group_ops");
 const picturePass = require("./picture_pass");
 const knowledgeExport = require("../knowledge_export");
+const { createRemoteDevices } = require("./remote_devices");
+const { createRemoteGateway } = require("./remote_gateway");
+const { createRemoteAdmin } = require("./remote_admin");
 const platform = require("../platform");
 const { parseAutostart, withAutostart } = require("../autostart");
 const { ensureInstanceId, acquireServerLock, releaseServerLock } = require("../instance");
 const packageInfo = require("../../package.json");
 
 const BASE_PORT = 8321;
+// The phone's way in (手机连线), forwarded by `tailscale serve`. Fixed, since
+// the Tailscale side is configured with it.
+const REMOTE_PORT = 8341;
 const MAX_PORT_ATTEMPTS = 10;
 const MAX_BODY_BYTES = 64 * 1024;
 // An API error in server.log: provider errors can carry a 2,000-character body.
@@ -41,6 +47,10 @@ const MAX_LOGGED_ERROR = 300;
 
 const token = crypto.randomBytes(16).toString("hex");
 const tokenBuffer = Buffer.from(token);
+// The phone's pages (手机连线) get a token of their own, so a paired phone
+// never holds the computer's.
+const remoteToken = crypto.randomBytes(16).toString("hex");
+const remoteTokenBuffer = Buffer.from(remoteToken);
 const instance = ensureInstanceId(state.toolRoot);
 
 // Everything the console loads is same-origin, except QQ avatars (https CDN).
@@ -140,14 +150,16 @@ const isCrossSite = (request) => {
   return site === "cross-site" || site === "same-site";
 };
 
-// Constant-time comparison: the token is the only gate on /api/*.
-const isAuthorized = (request) => {
+// Constant-time comparison: the token is the only gate on /api/* (on the
+// phone's entrance, besides the paired device's cookie).
+const isAuthorized = (request, { remote = false } = {}) => {
   const header = request.headers["x-cc-token"];
   if (typeof header !== "string") {
     return false;
   }
+  const expected = remote ? remoteTokenBuffer : tokenBuffer;
   const candidate = Buffer.from(header);
-  return candidate.length === tokenBuffer.length && crypto.timingSafeEqual(candidate, tokenBuffer);
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
 };
 
 const serveStaticFile = (response, filePath, fallbackType) => {
@@ -219,9 +231,11 @@ const serveKnowledgeImage = (response, hash, { thumb = false } = {}) => {
   serveStaticFile(response, resolved, "application/octet-stream");
 };
 
-const serveIndex = (response) => {
+const serveIndex = (response, { remote = false } = {}) => {
   const indexPath = path.join(webDir, "index.html");
-  const html = fs.readFileSync(indexPath, "utf8").replace("__CC_TOKEN__", token);
+  const html = fs.readFileSync(indexPath, "utf8")
+    .replace("__CC_TOKEN__", remote ? remoteToken : token)
+    .replace("__CC_REMOTE__", remote ? "1" : "0");
   response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
   response.end(html);
 };
@@ -257,13 +271,17 @@ const storageContext = () => {
   };
 };
 
-const handleApi = async (request, response, url) => {
-  if (!isAuthorized(request)) {
+const handleApi = async (request, response, url, { remote = false } = {}) => {
+  if (!isAuthorized(request, { remote })) {
     sendError(response, 401, "Missing or invalid token");
     return;
   }
 
   try {
+    if (await remoteAdmin.handle(request, response, url, { sendJson, readBody, remote })) {
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/state") {
       sendJson(response, 200, state.getState());
       return;
@@ -950,94 +968,105 @@ const handleApi = async (request, response, url) => {
   }
 };
 
+const applySecurityHeaders = (response) => {
+  response.setHeader("x-frame-options", "DENY");
+  response.setHeader("x-content-type-options", "nosniff");
+  response.setHeader("content-security-policy", CONTENT_SECURITY_POLICY);
+  response.setHeader("referrer-policy", "no-referrer");
+};
+
+// Everything after the door check. The computer's console (handleRequest)
+// and the phone's remote entrance (remote_gateway.js) each do their own check
+// first; `remote` says which one let the request in.
+const routeRequest = (request, response, { remote = false } = {}) => {
+  const url = new URL(request.url, "http://127.0.0.1");
+
+  // Unauthenticated liveness probe for the launcher: no data, no paths.
+  if (url.pathname === "/healthz" && !remote) {
+    sendJson(response, 200, { app: "chatlens", version: packageInfo.version, instance });
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/")) {
+    handleApi(request, response, url, { remote }).catch(() => {
+      if (!response.writableEnded) {
+        sendError(response, 500, "Internal error");
+      }
+    });
+    return;
+  }
+
+  if (request.method !== "GET") {
+    sendError(response, 405, "Method not allowed");
+    return;
+  }
+
+  if (url.pathname === "/" || url.pathname === "/index.html") {
+    serveIndex(response, { remote });
+    return;
+  }
+
+  if (url.pathname === "/favicon.ico") {
+    response.writeHead(200, { "content-type": "image/svg+xml", "cache-control": "max-age=86400" });
+    response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#1565c0"/><text x="16" y="22" font-size="13" font-weight="bold" text-anchor="middle" fill="#fff" font-family="Arial">QQ</text></svg>');
+    return;
+  }
+
+  if (/^\/[\w-]+\.(?:css|js|webmanifest)$/u.test(url.pathname)) {
+    serveStaticFile(response, path.join(webDir, url.pathname.slice(1)));
+    return;
+  }
+
+  if (/^\/icons\/[\w-]+\.png$/u.test(url.pathname)) {
+    serveStaticFile(response, path.join(webDir, url.pathname.slice(1)));
+    return;
+  }
+
+  if ((url.pathname.startsWith("/runs/") || url.pathname === "/knowledge-file" || url.pathname === "/picture") && isCrossSite(request)) {
+    sendError(response, 403, "Forbidden");
+    return;
+  }
+
+  if (url.pathname.startsWith("/runs/")) {
+    serveRunsFile(response, url.pathname);
+    return;
+  }
+
+  // Alongside /runs/ rather than behind the API token, because <img src> and
+  // <video src> cannot send the x-cc-token header. Same protection as /runs/:
+  // local Host only, cross-site requests refused (above), and the path is
+  // resolved from a store-held md5 that must live under nt_data.
+  if (url.pathname === "/knowledge-file") {
+    serveKnowledgeImage(response, url.searchParams.get("hash"), {
+      thumb: url.searchParams.get("thumb") === "1",
+    });
+    return;
+  }
+
+  if (url.pathname === "/picture") {
+    pictureRoutes.servePicture(response, url).catch((error) => {
+      console.error(`picture failed: ${error.message}`);
+      if (!response.writableEnded) {
+        sendError(response, 500, "Internal error");
+      }
+    });
+    return;
+  }
+
+  sendError(response, 404, "Not found");
+};
+
 const handleRequest = (request, response) => {
   // A single synchronous throw here would take down the whole server process.
   try {
-    response.setHeader("x-frame-options", "DENY");
-    response.setHeader("x-content-type-options", "nosniff");
-    response.setHeader("content-security-policy", CONTENT_SECURITY_POLICY);
-    response.setHeader("referrer-policy", "no-referrer");
+    applySecurityHeaders(response);
 
     if (!isLocalHost(request)) {
       sendError(response, 403, "Forbidden host");
       return;
     }
 
-    const url = new URL(request.url, "http://127.0.0.1");
-
-    // Unauthenticated liveness probe for the launcher: no data, no paths.
-    if (url.pathname === "/healthz") {
-      sendJson(response, 200, { app: "chatlens", version: packageInfo.version, instance });
-      return;
-    }
-
-    if (url.pathname.startsWith("/api/")) {
-      handleApi(request, response, url).catch(() => {
-        if (!response.writableEnded) {
-          sendError(response, 500, "Internal error");
-        }
-      });
-      return;
-    }
-
-    if (request.method !== "GET") {
-      sendError(response, 405, "Method not allowed");
-      return;
-    }
-
-    if (url.pathname === "/" || url.pathname === "/index.html") {
-      serveIndex(response);
-      return;
-    }
-
-    if (url.pathname === "/favicon.ico") {
-      response.writeHead(200, { "content-type": "image/svg+xml", "cache-control": "max-age=86400" });
-      response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#1565c0"/><text x="16" y="22" font-size="13" font-weight="bold" text-anchor="middle" fill="#fff" font-family="Arial">QQ</text></svg>');
-      return;
-    }
-
-    if (/^\/[\w-]+\.(?:css|js|webmanifest)$/u.test(url.pathname)) {
-      serveStaticFile(response, path.join(webDir, url.pathname.slice(1)));
-      return;
-    }
-
-    if (/^\/icons\/[\w-]+\.png$/u.test(url.pathname)) {
-      serveStaticFile(response, path.join(webDir, url.pathname.slice(1)));
-      return;
-    }
-
-    if ((url.pathname.startsWith("/runs/") || url.pathname === "/knowledge-file" || url.pathname === "/picture") && isCrossSite(request)) {
-      sendError(response, 403, "Forbidden");
-      return;
-    }
-
-    if (url.pathname.startsWith("/runs/")) {
-      serveRunsFile(response, url.pathname);
-      return;
-    }
-
-    // Alongside /runs/ rather than behind the API token, because <img src> and
-    // <video src> cannot send the x-cc-token header. Same protection as /runs/:
-    // local Host only, cross-site requests refused (above), and the path is
-    // resolved from a store-held md5 that must live under nt_data.
-    if (url.pathname === "/knowledge-file") {
-      serveKnowledgeImage(response, url.searchParams.get("hash"), {
-        thumb: url.searchParams.get("thumb") === "1",
-      });
-      return;
-    }
-
-    if (url.pathname === "/picture") {
-      pictureRoutes.servePicture(response, url).catch((error) => {
-        console.error(`picture failed: ${error.message}`);
-        if (!response.writableEnded) {
-          sendError(response, 500, "Internal error");
-        }
-      });
-      return;
-    }
-
-    sendError(response, 404, "Not found");
+    routeRequest(request, response);
   } catch (error) {
     if (!response.writableEnded) {
       try {
@@ -1050,11 +1079,24 @@ const handleRequest = (request, response) => {
   }
 };
 
+const remoteDevices = createRemoteDevices({ filePath: path.join(state.toolRoot, "store", "remote-access.json") });
+const remoteGateway = createRemoteGateway({
+  devices: remoteDevices,
+  routeRequest,
+  applySecurityHeaders,
+  sendJson,
+  sendError,
+  webDir,
+  port: REMOTE_PORT,
+});
+const remoteAdmin = createRemoteAdmin({ devices: remoteDevices, gateway: remoteGateway, port: REMOTE_PORT });
+
 let httpServer = null;
 
 function shutdown() {
   background.stop();
   picturePass.stop();
+  remoteGateway.stop();
   releaseServerLock(state.toolRoot);
   // Let the HTTP response flush before exiting.
   setTimeout(() => process.exit(0), 300).unref();
@@ -1075,6 +1117,9 @@ const listen = (port, attempt) => {
     httpServer = server;
     const url = `http://127.0.0.1:${port}/`;
     console.log(`ChatLens 控制台已启动: ${url}`);
+    if (remoteDevices.getSettings().enabled) {
+      remoteGateway.start();
+    }
     background.start({
       url,
       afterTick: async (tick) => {

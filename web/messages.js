@@ -1017,8 +1017,11 @@ const renderChat = () => {
     el("div", { class: "load-sentinel empty" }, "下滑加载更多…"));
   refreshChatChrome(list);
 
-  const header = el("div", { class: "card chat-head" },
-    el("div", { class: "row", style: "margin-bottom:10px" },
+  // chat-tools-actions and chat-tools are layout-neutral wrappers on the
+  // computer (display: contents); the phone folds them behind 「选项」.
+  const pressWord = selectGestureWord();
+  const header = el("div", { class: `card chat-head${msg.toolsOpen ? " tools-open" : ""}` },
+    el("div", { class: "row chat-title-row", style: "margin-bottom:10px" },
       el("button", {
         class: "btn small",
         onclick: () => msg.origin === null ? backToInbox() : returnToMessageOrigin(),
@@ -1026,65 +1029,76 @@ const renderChat = () => {
       avatarEl(msg.groupName, msg.groupId, "sm", groupAvatarUrl(msg.groupId)),
       el("h2", { style: "margin:0;font-size:16px" }, msg.groupName),
       el("span", { class: "card-sub chat-count", style: "margin:0" }, chatCountText()),
-      el("span", { style: "flex:1" }),
+      el("span", { class: "chat-spacer", style: "flex:1" }),
       el("button", {
-        class: "btn small",
+        class: "btn small chat-tools-toggle",
+        type: "button",
+        "aria-expanded": String(msg.toolsOpen === true),
         onclick: () => {
-          msg.style = msg.style === "compact" ? "bubble" : "compact";
-          localStorage.setItem("cc-msgstyle", msg.style);
+          msg.toolsOpen = !msg.toolsOpen;
           renderMessagesView();
         },
-      }, msg.style === "compact" ? "🗨️ 气泡模式" : "☰ 紧凑模式"),
-      el("button", {
-        class: msg.mediaOnly ? "btn small active" : "btn small",
-        type: "button",
-        "aria-pressed": String(msg.mediaOnly),
-        onclick: toggleMediaOnly,
-      }, "只看图片"),
-      el("button", {
-        class: msg.panel ? "btn small active" : "btn small",
-        type: "button",
-        "aria-pressed": String(msg.panel),
-        onclick: toggleChatPanel,
-      }, "本群摘要"),
-      el("button", { class: "btn small", onclick: markReadToLatest }, "全部标为本工具已查看")),
-    rangeStatus,
-    el("div", { class: "row" },
-      chatRangeChips(),
-      el("input", {
-        type: "text",
-        placeholder: "跳到时间 例如 2026-07-04 14:30",
-        style: "width:220px",
-        onchange: (event) => jumpToTime(event.target.value.trim()),
-      }),
-      el("input", {
-        type: "text",
-        placeholder: "搜索关键词或发言人…",
-        value: msg.q,
-        style: "width:180px;margin-left:auto",
-        onchange: async (event) => {
-          msg.q = event.target.value;
-          msg.items = [];
-          msg.selA = null;
-          msg.selB = null;
-          renderMessagesView();
-          try {
-            await loadMessages(true);
-          } catch (error) {
-            alert(error.message);
-          }
-          renderMessagesView();
-        },
-      })),
-    el("p", { class: "card-sub", style: "margin:8px 0 0" },
-      "提示：右键点一条消息选起点，再右键另一条选终点，可对选中段落做 AI 总结。",
-      msg.q.trim().length > 0 ? " 搜索只匹配文本与发言人，媒体消息可能不出现在结果里。" : null));
+      }, msg.toolsOpen ? "收起" : "选项"),
+      el("div", { class: "chat-tools-actions" },
+        el("button", {
+          class: "btn small",
+          onclick: () => {
+            msg.style = msg.style === "compact" ? "bubble" : "compact";
+            localStorage.setItem("cc-msgstyle", msg.style);
+            renderMessagesView();
+          },
+        }, msg.style === "compact" ? "🗨️ 气泡模式" : "☰ 紧凑模式"),
+        el("button", {
+          class: msg.mediaOnly ? "btn small active" : "btn small",
+          type: "button",
+          "aria-pressed": String(msg.mediaOnly),
+          onclick: toggleMediaOnly,
+        }, "只看图片"),
+        el("button", {
+          class: msg.panel ? "btn small active" : "btn small",
+          type: "button",
+          "aria-pressed": String(msg.panel),
+          onclick: toggleChatPanel,
+        }, "本群摘要"),
+        el("button", { class: "btn small", onclick: markReadToLatest }, "全部标为本工具已查看"))),
+    el("div", { class: "chat-tools" },
+      rangeStatus,
+      el("div", { class: "row" },
+        chatRangeChips(),
+        el("input", {
+          type: "text",
+          placeholder: "跳到时间 例如 2026-07-04 14:30",
+          style: "width:220px",
+          onchange: (event) => jumpToTime(event.target.value.trim()),
+        }),
+        el("input", {
+          type: "text",
+          placeholder: "搜索关键词或发言人…",
+          value: msg.q,
+          style: "width:180px;margin-left:auto",
+          onchange: async (event) => {
+            msg.q = event.target.value;
+            msg.items = [];
+            msg.selA = null;
+            msg.selB = null;
+            renderMessagesView();
+            try {
+              await loadMessages(true);
+            } catch (error) {
+              alert(error.message);
+            }
+            renderMessagesView();
+          },
+        })),
+      el("p", { class: "card-sub", style: "margin:8px 0 0" },
+        `提示：${pressWord === "右键" ? "右键点" : pressWord}一条消息选起点，再${pressWord}另一条选终点，可对选中段落做 AI 总结。`,
+        msg.q.trim().length > 0 ? " 搜索只匹配文本与发言人，媒体消息可能不出现在结果里。" : null)));
 
   const range = selectionRange();
   const selectionBar = range === null ? null
     : el("div", { class: "sel-bar" },
         el("span", {}, app.msg.selB === null
-          ? "已选起点，右键另一条消息选终点"
+          ? `已选起点，${pressWord}另一条消息选终点`
           : selectionCount(range) === null ? "已选一段（部分不在当前载入的消息里）" : `已选 ${selectionCount(range)} 条`),
         el("button", { class: "btn small primary", onclick: summarizeSelection, disabled: app.msg.selB === null && app.msg.selA === null }, "🧠 总结所选"),
         el("button", { class: "btn small", onclick: clearSelection }, "取消"));

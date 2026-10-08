@@ -4,6 +4,8 @@
 // autostart at login). A page left open across that would fail every request
 // with "Missing or invalid token", so api() re-reads it and retries once.
 const ccAuth = { token: document.querySelector('meta[name="cc-token"]').content, refreshing: null };
+// Opened from a phone through the remote entrance (手机连线), not on the computer.
+const ccRemote = document.querySelector('meta[name="cc-remote"]')?.content === "1";
 const $ = (selector) => document.querySelector(selector);
 const {
   createTimelineSelection,
@@ -126,11 +128,24 @@ const apiFetch = (path, options) => fetch(path, {
   },
 });
 
+// A phone whose pairing was cancelled on the computer: back to the pairing page.
+const leaveIfUnpaired = async (response) => {
+  if (!ccRemote) {
+    return;
+  }
+  const payload = await response.clone().json().catch(() => null);
+  if (payload?.code === "device-unpaired") {
+    location.replace("/pair");
+    throw new Error(payload.error);
+  }
+};
+
 const api = async (path, options = {}) => {
   let response;
   try {
     response = await apiFetch(path, options);
     if (response.status === 401) {
+      await leaveIfUnpaired(response);
       await refreshToken();
       response = await apiFetch(path, options);
       if (response.status !== 401) {
@@ -230,6 +245,8 @@ const app = {
     panel: localStorage.getItem("cc-msg-panel") === "1",
     panelItems: null,
     selfUins: [],
+    // Phone only: the chat header's options are folded away until asked for.
+    toolsOpen: false,
   },
   mediaTab: {
     data: null,
@@ -2031,8 +2048,8 @@ const renderJobPanel = () => {
             }
           },
         }, "阅读报告"),
-        job.result.htmlPath ? el("button", { class: "btn", onclick: openPath(job.result.htmlPath) }, "打开 HTML 报告") : null,
-        job.result.runDir ? el("button", { class: "btn", onclick: openPath(job.result.runDir) }, "打开 run 文件夹") : null)
+        job.result.htmlPath ? el("button", { class: "btn desktop-action", onclick: openPath(job.result.htmlPath) }, "打开 HTML 报告") : null,
+        job.result.runDir ? el("button", { class: "btn desktop-action", onclick: openPath(job.result.runDir) }, "打开 run 文件夹") : null)
     : null;
 
   const logBox = el("details", { class: "log-box" },
@@ -2273,8 +2290,8 @@ const renderHistoryView = () => {
             `文本 ${run.textMessages} · 媒体 ${run.copiedMedia}/${run.mediaRefs} · ${run.llmStatus === "done" ? run.llmModel || "LLM" : run.llmStatus === "failed" ? "LLM 失败" : run.llmStatus === "not-used" ? "仅本地分组" : "无法判断 LLM"}`)),
         el("div", { class: "actions" },
           el("button", { class: "btn small", onclick: () => openReader(run.runId, { view: "history" }) }, "阅读"),
-          run.hasReportHtml ? el("button", { class: "btn small", onclick: openPath(run.reportHtml) }, "HTML") : null,
-          el("button", { class: "btn small", onclick: openPath(run.runDir) }, "文件夹")))));
+          run.hasReportHtml ? el("button", { class: "btn small desktop-action", onclick: openPath(run.reportHtml) }, "HTML") : null,
+          el("button", { class: "btn small desktop-action", onclick: openPath(run.runDir) }, "文件夹")))));
 };
 
 /* ---------- watchlist view ---------- */
@@ -2430,6 +2447,12 @@ const renderCurrentView = () => {
 };
 
 const openView = (name) => {
+  // On a phone (手机连线) these pages change the computer itself; the server
+  // refuses their actions too (remote_policy.js).
+  if (ccRemote && REMOTE_DESKTOP_ONLY_VIEWS.has(name)) {
+    showDesktopOnlyView(name);
+    return;
+  }
   if (name === "brief") {
     openBriefView();
     return;

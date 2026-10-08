@@ -62,7 +62,7 @@ const galleryWallMode = () => {
 };
 
 const galleryWallSize = () => {
-  const size = Number(wallReadPref(GALLERY_SIZE_KEY, GALLERY_SIZE_DEFAULT));
+  const size = Number(wallReadPref(GALLERY_SIZE_KEY, phoneWallSize(GALLERY_SIZE_DEFAULT)));
   return Number.isFinite(size) ? Math.min(GALLERY_SIZE_MAX, Math.max(GALLERY_SIZE_MIN, size)) : GALLERY_SIZE_DEFAULT;
 };
 
@@ -588,7 +588,7 @@ const renderMediaView = () => {
           el("strong", { id: "gallery-count", class: "kb-count" }, galleryCountText()),
           el("span", { class: "kb-results-spacer" }),
           el("button", {
-            class: tab.selecting ? "btn small active" : "btn small primary",
+            class: tab.selecting ? "btn small active desktop-action" : "btn small primary desktop-action",
             type: "button",
             "aria-pressed": String(tab.selecting),
             title: "选几张图，一起把原图保存到文件夹",

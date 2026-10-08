@@ -223,7 +223,7 @@ const openReader = async (runId, origin) => {
     el("h2", {}, `${detail.firstHkt ?? ""} — ${detail.lastHkt ?? ""}`),
     el("span", { class: "tag plain" }, `文本 ${detail.textMessages}`),
     el("span", { class: "tag plain" }, `媒体 ${detail.mediaMessages}`),
-    detail.reportHtml !== null ? el("button", { class: "btn small", onclick: openPath(detail.reportHtml) }, "打开原始 HTML") : null);
+    detail.reportHtml !== null ? el("button", { class: "btn small desktop-action", onclick: openPath(detail.reportHtml) }, "打开原始 HTML") : null);
   const scan = detail.scanCoverage;
   const ai = detail.aiCoverage;
   const trustCard = el("div", { class: `report-trust ${scan.status === "complete" && ai.status === "complete" ? "complete" : "attention"}`, "data-testid": "report-trust" },

@@ -22,7 +22,7 @@ const openSettingsView = async () => {
     return;
   }
   renderSettingsView();
-  await Promise.all([refreshBackgroundStatus(), loadAiUsage(), loadPictureStatus(), autoCheckForUpdate()]);
+  await Promise.all([refreshBackgroundStatus(), loadAiUsage(), loadPictureStatus(), autoCheckForUpdate(), loadRemoteStatus()]);
   renderSettingsView();
 };
 
@@ -384,10 +384,10 @@ const renderSettingsView = () => {
     el("h2", {}, "安全说明"),
     el("ul", { style: "margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9" },
       el("li", {}, "只读：工具复制数据库文件后离线解析，从不写 QQ 的任何文件，也不使用 QQ 登录协议。"),
-      el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。"),
+      el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。开启「手机连线」后，只有经 Tailscale 进来、并在这里配对过的手机能访问，而且只能阅读，不能改设置。"),
       el("li", {}, "外部流量：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图按 md5 校验，图片钥匙只留在内存里）；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本信息。")));
 
-  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderShortcutCard(), renderMoreLinks(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, aboutCard);
+  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderShortcutCard(), renderMoreLinks(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, renderRemoteCard(), aboutCard);
 };
 
 /* --- pages that moved off the rail --- */

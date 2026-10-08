@@ -150,7 +150,7 @@ const askForm = () => {
         },
       }, label)),
       el("button", { class: "btn primary", disabled: askRunning(), onclick: () => submitAsk(input.value) }, askRunning() ? "正在找…" : "问"),
-      el("span", { class: "brief-meta" }, "Ctrl + Enter 发送")),
+      el("span", { class: "brief-meta ask-key-hint" }, "Ctrl + Enter 发送")),
     askRunning()
       ? el("p", { class: "brief-meta ask-progress" }, `正在查「${askState.job.meta?.question ?? ""}」：先在聊天记录里找相关消息，再让 AI 整理回答…`)
       : null);

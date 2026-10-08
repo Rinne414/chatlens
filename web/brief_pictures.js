@@ -186,7 +186,7 @@ const briefImages = (data) => {
       el("span", { class: "brief-sub" }, briefPictures.tab === "good" ? "被求 tag、反复转发的排在前面" : "这段时间群里发的所有图，新的在前"),
       el("span", { class: "brief-picture-actions" },
         el("button", {
-          class: briefPictures.selecting ? "btn small active" : "btn small primary",
+          class: briefPictures.selecting ? "btn small active desktop-action" : "btn small primary desktop-action",
           type: "button",
           onclick: () => {
             briefPictures.selecting = !briefPictures.selecting;

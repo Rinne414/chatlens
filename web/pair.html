@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1565c0">
+  <title>ChatLens · 配对手机</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/pair.css">
+</head>
+<body>
+  <main class="pair">
+    <img class="pair-mark" src="/icons/icon-192.png" alt="" width="56" height="56">
+    <h1>连接电脑上的 ChatLens</h1>
+    <p class="pair-lead">在电脑上打开 <b>设置 → 手机连线</b>，点「配对新手机」，用手机扫二维码，或在下面输入配对码。</p>
+    <form id="pair-form" class="pair-form" autocomplete="off">
+      <label for="pair-code">配对码</label>
+      <input id="pair-code" name="code" inputmode="text" autocapitalize="characters" spellcheck="false" maxlength="16" placeholder="XXXXX-XXXXX" required>
+      <button id="pair-submit" type="submit">配对</button>
+    </form>
+    <p id="pair-status" class="pair-status" role="status" aria-live="polite"></p>
+    <p class="pair-foot">配对后这台手机会被记住。随时可以在电脑上取消它的配对。</p>
+  </main>
+  <script src="/pair.js"></script>
+</body>
+</html>
