@@ -8,7 +8,7 @@
    until the next one (per browser: localStorage). */
 
 // v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
-const WHATS_NEW_RELEASE = "v0.0.25";
+const WHATS_NEW_RELEASE = "v0.0.26";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -17,8 +17,9 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
-  { title: "用手机看", detail: "设置 → 手机连线：电脑和手机都装上 Tailscale 并登录同一个账号，扫一次二维码，躺在床上或出门在外都能看简报、聊天、回顾和问群聊。只有你配对过的手机进得来；手机只能阅读，设置、密钥、备份和存储只能在电脑上改。", view: "settings", selector: "#remote-card" },
-  { title: "手机版界面", detail: "在手机上打开时自动换成手机排版：底部是简报、消息、问群聊、回顾和更多；聊天占满屏幕，选项收在「选项」里，长按消息可以选一段让 AI 总结。电脑上的界面不变。", view: null, selector: null },
+  { title: "关注群好找了", detail: "左边「关注的群」旁边多了「管理」，群页右上角也能直接添加或移除关注群。", view: null, selector: "#rail-groups" },
+  { title: "新加入的群自动出现", detail: "以前新加入的群要手动「刷新群列表」才找得到；现在后台每次收消息时会顺带检查，新群和改了名的群会自动出现在关注群页。手动刷新也改成留在原页面，进度和失败原因直接写出来。", view: "watchlist", selector: "#view-watchlist .wl-scroll" },
+  { title: "新用户引导", detail: "第一次打开时，简报页一步一步带你找到 QQ 数据库、读取密钥、勾选要看的群，全部在一页里点完。", view: null, selector: null },
 ];
 
 const whatsNewState = { hidden: false };
