@@ -48,21 +48,29 @@ const renderRailGroups = () => {
     return;
   }
   const groups = railState.data?.groups ?? [];
+  const manageButton = (label) => el("button", {
+    class: "rail-section-action desktop-action",
+    type: "button",
+    title: "添加或移除关注的群",
+    onclick: () => openView("watchlist"),
+  }, label);
   if (groups.length === 0) {
-    setChildren(node);
+    setChildren(node, railState.data === null ? null : manageButton("+ 添加关注群"));
     return;
   }
   setChildren(node,
-    el("button", {
-      class: "rail-section-head",
-      type: "button",
-      "aria-expanded": String(railState.groupsOpen),
-      onclick: () => {
-        railState.groupsOpen = !railState.groupsOpen;
-        wallWritePref(RAIL_GROUP_KEY, railState.groupsOpen ? "1" : "0");
-        renderRailGroups();
-      },
-    }, el("span", {}, "关注的群"), el("span", { class: "rail-caret" }, railState.groupsOpen ? "▾" : "▸")),
+    el("div", { class: "rail-section-bar" },
+      el("button", {
+        class: "rail-section-head",
+        type: "button",
+        "aria-expanded": String(railState.groupsOpen),
+        onclick: () => {
+          railState.groupsOpen = !railState.groupsOpen;
+          wallWritePref(RAIL_GROUP_KEY, railState.groupsOpen ? "1" : "0");
+          renderRailGroups();
+        },
+      }, el("span", {}, "关注的群"), el("span", { class: "rail-caret" }, railState.groupsOpen ? "▾" : "▸")),
+      manageButton("管理")),
     railState.groupsOpen
       ? sizedList("rail-groups", el("div", { class: "rail-group-list" }, groups.map((group) => railGroupRow(group, railState.data.maxCounted))))
       : null);
@@ -80,7 +88,8 @@ const railBackgroundLine = (data) => {
     return { tone: "running", text: "正在更新…" };
   }
   if (background.lastError) {
-    return { tone: "error", text: `上次更新出错（${railAgo(background.lastFinishedAt)}）` };
+    const when = railAgo(background.lastFinishedAt);
+    return { tone: "error", text: when ? `上次更新出错（${when}）` : "上次更新出错" };
   }
   return { tone: "ok", text: background.lastFinishedAt ? `${railAgo(background.lastFinishedAt)}更新` : "还没更新过" };
 };

@@ -170,6 +170,9 @@ const buildBriefing = ({ db, knowledgeDbPath, watchlist, watchWords = [], nowUni
       failedChunks: chunkStats.reduce((total, row) => total + row.failed, 0),
       // Why they failed, most common first ({ kind, text, chunks, messages }).
       failedReasons: failedChunkReasons(db, windowStart),
+      // Any message ever stored: the page shows the setup guide only before
+      // the first one, never because the current window happens to be empty.
+      everStored: db.prepare("SELECT EXISTS (SELECT 1 FROM messages) AS found").get().found === 1,
     },
     mentions,
     // 关注词: where each followed word was said in the window.

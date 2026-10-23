@@ -610,6 +610,8 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
         add: Array.isArray(body.add) ? body.add : [],
         remove: Array.isArray(body.remove) ? body.remove : [],
       });
+      // The rail lists the followed groups; show the change now, not after its cache expires.
+      railOps.invalidateRail();
       sendJson(response, 200, { watchlist: entries });
       return;
     }

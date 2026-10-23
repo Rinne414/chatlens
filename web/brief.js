@@ -163,7 +163,7 @@ const scheduleBriefPoll = () => {
   }, delay);
 };
 
-const BRIEF_INPUTS = ["brief-search-input", "brief-watch-input"];
+const BRIEF_INPUTS = ["brief-search-input", "brief-watch-input", "setup-search-input"];
 const briefIsTyping = () => BRIEF_INPUTS.some((name) => document.activeElement?.classList?.contains(name) === true);
 
 // News from a poll waits while someone types in the page: a redraw would end
@@ -293,17 +293,6 @@ const briefMarkSeen = async () => {
 };
 
 /* ---------- sections ---------- */
-
-const briefSetupCard = (problem) =>
-  el("section", { class: "brief-setup" },
-    el("h2", {}, "差一步就能开始"),
-    el("p", {}, `${problem}。设置好之后，工具会在后台自动收消息、自动总结，你打开这里就能直接看。`),
-    el("ol", {},
-      el("li", {}, "设置页：点「自动探测并保存」找到 QQ 数据库"),
-      el("li", {}, "打开并登录 QQ，点「自动获取密钥」"),
-      el("li", {}, "填一个 AI 服务（可选，没有也能看统计）"),
-      el("li", {}, "在「关注群」勾选你常看的群")),
-    el("button", { class: "btn primary", onclick: () => openView("settings") }, "去设置"));
 
 const briefStatusLine = (data) => {
   const background = data.status?.background ?? {};
@@ -927,14 +916,15 @@ const renderBriefView = () => {
         : el("p", { class: "brief-empty-line" }, "正在读取简报…")));
     return;
   }
-  const problem = data.status?.background?.readinessProblem ?? null;
   briefState.renderPending = false;
   // A redraw must not steal the cursor from someone typing (search, 关注词).
   const typing = BRIEF_INPUTS.find((name) => document.activeElement?.classList?.contains(name) === true);
   setChildren(root, el("div", { class: "brief-page" },
     briefState.error ? el("div", { class: "notice risk" }, `刷新失败：${briefState.error}`) : null,
-    problem !== null && data.totals.textMessages === 0
-      ? briefSetupCard(problem)
+    // The setup guide (setup_guide.js) while setup is unfinished or before the
+    // first message is stored; a quiet day or 看完了 keeps the briefing.
+    needsSetupGuide(data)
+      ? setupGuideCard()
       : [
           // On wide screens the per-group list becomes a right-hand column
           // (brief.css); on narrow ones it simply follows the main column.

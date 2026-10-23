@@ -12,7 +12,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { parseArgs } = require("node:util");
-const { loadConfig } = require("../server/toolkit_state");
+const { loadConfig, latestGroupListPath } = require("../server/toolkit_state");
 const messageStore = require("../message_store");
 const { ensureBriefingSchema, getState, setState, redoStats, requeueDeclined } = require("../briefing_store");
 const { REMOTE_LIFETIME_SECONDS, ingestPictures } = require("../picture_store");
@@ -139,6 +139,30 @@ const replyBackfillFailed = (groupIds) => {
     recordFailedExport(db, groupIds);
   } finally {
     db.close();
+  }
+};
+
+// Keeps 关注群's group directory current without the user pressing
+// 刷新群列表: the mirror is fresh anyway, and reading group_info is one query.
+// A new group-list-<stamp>.txt is written only when the list changed.
+// An empty list (a mirror taken mid-login) never replaces a real one, and a
+// failure here only warns: the messages of this tick are already exported.
+const refreshGroupList = async (config, mirror, freshPath, env) => {
+  const listed = await common.runNodeScript("list_groups.js", [mirror.groupDb, freshPath], { env, quiet: true });
+  if (listed.code !== 0 || !fs.existsSync(freshPath)) {
+    common.warn(`读取群列表失败，下次刷新再试（退出码 ${listed.code}）`);
+    return;
+  }
+  try {
+    const fresh = fs.readFileSync(freshPath, "utf8");
+    const latestPath = latestGroupListPath(config.reportsDir);
+    if (fresh.trim().length === 0 || (latestPath !== null && fs.readFileSync(latestPath, "utf8") === fresh)) {
+      return;
+    }
+    fs.mkdirSync(config.reportsDir, { recursive: true });
+    fs.writeFileSync(path.join(config.reportsDir, `group-list-${common.localStamp()}.txt`), fresh, "utf8");
+  } catch (error) {
+    common.warn(`保存群列表失败，下次刷新再试：${error.message}`);
   }
 };
 
@@ -372,6 +396,7 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
           mirror.messageDb, backfillGroups.join(","), now - REMOTE_LIFETIME_SECONDS, now, picturesPath,
         ], { env }));
       }
+      await timed("groupList", () => refreshGroupList(config, mirror, path.join(workDir, "group-list.txt"), env));
       await timed("unreadHint", () => common.runNodeScript("probe_qq_unread.js", [
         mirror.messageDb,
         path.join(common.storeDir, "qq-unread-hint.json"),

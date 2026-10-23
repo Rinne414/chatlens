@@ -96,23 +96,33 @@ const saveWatchlist = (entries) => {
   writeConfig(config);
 };
 
-const getKnownGroups = (config) => {
-  const reportsDir = config.reportsDir;
+// Newest group-list-<stamp>.txt, written by 刷新群列表 and by each background
+// tick whose mirror shows a changed group list (groups joined or renamed).
+const latestGroupListPath = (reportsDir) => {
   if (!pathExists(reportsDir)) {
-    return [];
+    return null;
   }
-
   const latestList = fs
     .readdirSync(reportsDir)
     .filter((name) => /^group-list-\d{8}-\d{6}\.txt$/u.test(name))
     .sort()
     .at(-1);
-  if (latestList === undefined) {
+  return latestList === undefined ? null : path.join(reportsDir, latestList);
+};
+
+const knownGroupsUpdatedAt = (config) => {
+  const listPath = latestGroupListPath(config.reportsDir);
+  return listPath === null ? null : Math.floor(fs.statSync(listPath).mtimeMs / 1000);
+};
+
+const getKnownGroups = (config) => {
+  const listPath = latestGroupListPath(config.reportsDir);
+  if (listPath === null) {
     return [];
   }
 
   return fs
-    .readFileSync(path.join(reportsDir, latestList), "utf8")
+    .readFileSync(listPath, "utf8")
     .split(/\r?\n/u)
     .map((line) => {
       const [groupId, name = ""] = line.split("\t", 2);
@@ -229,6 +239,7 @@ const getState = () => {
     groupActivity: getGroupActivity(),
     runDefaults: config.runDefaults ?? {},
     knownGroups: getKnownGroups(config),
+    knownGroupsUpdatedAt: knownGroupsUpdatedAt(config),
     runs: collectRuns(config.runsDir, config.reportsDir, { includeDisk: false }).map((run) => ({
       ...run,
       // Absolute paths stay for /api/open; webPath is what the UI links to.
@@ -836,6 +847,7 @@ module.exports = {
   cleanupGeneratedData,
   getState,
   updateWatchlist,
+  latestGroupListPath,
   updateGroupSets,
   getAutomationCoverage,
   currentCoverageWindow,

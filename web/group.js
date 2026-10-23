@@ -595,10 +595,12 @@ const groupAigc = (data) => {
 const groupChooser = () => {
   const choices = groupChoices();
   return el("section", { class: "card" },
-    el("h2", {}, "选一个群"),
+    el("div", { class: "row", style: "justify-content:space-between" },
+      el("h2", {}, "选一个群"),
+      el("button", { class: "btn small desktop-action", type: "button", onclick: () => openView("watchlist") }, "添加 / 移除关注群")),
     el("p", { class: "card-sub" }, "看它在聊什么、谁最活跃、分享了哪些 AI 图和模型，时间可以随意选。"),
     choices.length === 0
-      ? el("p", { class: "kb-meta" }, "还没有关注的群。到「设置 → 关注的群」添加。")
+      ? el("p", { class: "kb-meta" }, "还没有关注的群。点右上角「添加 / 移除关注群」选几个。")
       : el("div", { class: "gp-choices" }, choices.map((group) => el("button", {
         class: "gp-choice",
         type: "button",

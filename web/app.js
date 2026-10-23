@@ -211,6 +211,7 @@ const app = {
   logText: "",
   pollTimer: null,
   watchSearch: "",
+  watchRefreshError: "",
   historyFilters: {
     query: "",
     groupId: "all",
@@ -2301,6 +2302,7 @@ const updateWatchlist = async (payload) => {
   app.state.watchlist = result.watchlist;
   await loadState();
   renderWatchlistView();
+  loadRail();
 };
 
 const renderWatchlistView = () => {
@@ -2311,6 +2313,19 @@ const renderWatchlistView = () => {
   const healthById = new Map((app.state?.watchHealth ?? []).map((entry) => [entry.groupId, entry]));
   const filtered = knownGroups.filter(
     (group) => query.length === 0 || group.groupId.includes(query) || group.name.toLowerCase().includes(query));
+  const listJob = app.job?.type === "group-list" ? app.job : null;
+  const listRefreshing = listJob?.status === "running";
+  const listStatusText = () => {
+    if (listRefreshing) {
+      return "正在从 QQ 数据库副本读取群列表，通常不到一分钟（后台刷新正在用副本时会等它做完）。";
+    }
+    if (listJob !== null && listJob.status !== "done") {
+      return `上次刷新没有成功：${listJob.error ?? "原因未知"}`;
+    }
+    const updatedAt = app.state?.knownGroupsUpdatedAt;
+    const when = Number.isFinite(updatedAt) ? `群列表最近一次变化：${unixToHkt(updatedAt).slice(0, 16)}。` : "";
+    return `${when}后台每次更新消息时会顺带检查，新加入的群会自动出现；想马上看到就点「刷新群列表」。`;
+  };
 
   const watchRow = (entry) => {
     const health = healthById.get(entry.groupId);
@@ -2373,23 +2388,27 @@ const renderWatchlistView = () => {
               (healthById.get(right.groupId)?.missingSeconds ?? 0) - (healthById.get(left.groupId)?.missingSeconds ?? 0))
             .map(watchRow)),
       el("div", { class: "card" },
-        el("div", { class: "row", style: "justify-content:space-between;margin-bottom:12px" },
+        el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" },
           el("h2", { style: "margin:0" }, `全部群 (${knownGroups.length})`),
           el("button", {
             class: "btn small",
+            disabled: listRefreshing,
             onclick: async () => {
+              app.watchRefreshError = "";
               try {
                 await api("/api/grouplist/refresh", { method: "POST", body: "{}" });
                 app.logCursor = 0;
                 app.logText = "";
-                showView("run");
-                renderRunView();
+                await pollJobOnce();
                 startPolling();
               } catch (error) {
-                alert(error.message);
+                app.watchRefreshError = error.message;
               }
+              renderWatchlistView();
             },
-          }, "刷新群列表")),
+          }, listRefreshing ? "正在读取…" : "刷新群列表")),
+        el("p", { class: "card-sub", style: "margin:0 0 10px" }, listStatusText()),
+        app.watchRefreshError ? el("div", { class: "notice risk" }, app.watchRefreshError) : null,
         knownGroups.length === 0
           ? el("div", { class: "empty" }, "还没有群列表缓存，点「刷新群列表」读取一次（需要复制数据库，约 1-2 分钟）。")
           : el("div", {}, searchInput, sizedList("watchlist-known", el("div", { class: "wl-scroll" }, filtered.map(knownRow)))))));
