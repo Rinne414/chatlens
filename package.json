@@ -1,6 +1,6 @@
 {
   "name": "chatlens",
-  "version": "0.0.26",
+  "version": "0.0.27",
   "description": "Read-only QQNT group chat briefing: background refresh, AI summaries, local web console (Windows and Linux).",
   "license": "GPL-3.0-or-later",
   "private": true,
@@ -19,6 +19,7 @@
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
-    "better-sqlite3-multiple-ciphers": "^12.11.1"
+    "better-sqlite3-multiple-ciphers": "^12.11.1",
+    "opencc-js": "^1.4.2"
   }
 }
