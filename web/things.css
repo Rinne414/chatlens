@@ -1,0 +1,36 @@
+/* 值得知道的事: bubble map and ranked rows, shared by 简报 (brief_things.js)
+   and 群 → 重要的事 (group_things.js). Kind colours are data: every bubble
+   and row also says its kind in words. */
+.thing-section { display: grid; gap: 12px; }
+.thing-new { --thing-fill: var(--accent-soft); --thing-line: var(--accent); }
+.thing-qa { --thing-fill: var(--thing-qa-soft); --thing-line: var(--thing-qa); }
+.thing-resource { --thing-fill: var(--ok-soft); --thing-line: var(--ok); }
+.thing-group { --thing-fill: var(--risk-soft); --thing-line: var(--risk); }
+.thing-chat { --thing-fill: var(--bg); --thing-line: var(--line-strong); }
+.thing-map { display: grid; gap: 6px; }
+/* As tall as the packed bubbles need (the viewBox gives the shape), within reason. */
+.thing-map svg { width: 100%; height: auto; max-height: min(calc(420px / var(--zoom, 1)), 60vh); }
+.thing-bubble { cursor: pointer; outline: none; }
+.thing-bubble circle { fill: var(--thing-fill); stroke: var(--thing-line); stroke-width: 2; transition: stroke-width var(--dur); }
+.thing-bubble:hover circle, .thing-bubble.hover circle, .thing-bubble:focus-visible circle { stroke-width: 5; }
+.thing-bubble-label { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; text-align: center; color: var(--ink); line-height: 1.25; overflow: hidden; pointer-events: none; }
+.thing-bubble-label strong { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.thing-bubble-label span { margin-top: 4px; font-size: .72em; color: var(--muted); }
+.thing-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; }
+.thing-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.thing-legend-item i { width: 12px; height: 12px; border-radius: 50%; background: var(--thing-fill); border: 2px solid var(--thing-line); }
+.thing-list { display: grid; gap: 6px; }
+.thing-row { display: grid; gap: 3px; width: 100%; padding: 10px 12px 10px 14px; border: 1px solid var(--line); border-left: 4px solid var(--thing-line); border-radius: 10px; background: var(--panel); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.thing-row:hover, .thing-row.hover { background: var(--bg); }
+.thing-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.thing-row-head strong { font-size: 15px; }
+.thing-row .gp-topic-facts { grid-column: auto; white-space: normal; }
+.thing-kind { padding: 1px 7px; border-radius: 6px; background: var(--thing-fill); border: 1px solid var(--thing-line); font-size: 12px; font-weight: 700; }
+.thing-takeaway { line-height: 1.65; }
+.thing-status { font-size: 12.5px; font-weight: 700; }
+.thing-status.resolved { color: var(--ok); }
+.thing-status.open { color: var(--thing-qa); }
+.thing-watched { color: var(--accent); }
+.thing-empty p { margin: 0 0 10px; }
+.thing-foot { margin: 4px 0 0; }
+.thing-lead { margin: 0; font-size: 15px; line-height: 1.7; }

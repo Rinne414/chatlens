@@ -7,6 +7,7 @@
 
 const { hktToUnix } = require("./review_store");
 const { relationMap } = require("./group_relations");
+const { withTopicStats } = require("./topic_stats");
 
 const DAY_SECONDS = 86400;
 const BEIJING_OFFSET_SECONDS = 8 * 3600;
@@ -235,7 +236,7 @@ const groupInsights = (db, kb, { groupId, nowUnix, fromUnix = null, toUnix = nul
     people: { active: activePeople(db, id, range), posters: picturePosters(db, id, range), helpers: answerers(partials) },
     relations: relationMap(db, id, range),
     brief: currentBrief(db, id),
-    timeline: topicTimeline(partials),
+    timeline: withTopicStats(db, id, topicTimeline(partials)),
     ...collectLists(partials),
     aigc: aigcSetups(kb, id, range),
   };
@@ -256,4 +257,4 @@ const timelineBetween = (db, { groupId, fromUnix, toUnix }) => {
   return { items: dedupeBy(items, (item) => `${item.startAt}|${normalizeKey(item.title)}`) };
 };
 
-module.exports = { groupInsights, timelineBetween, dailyActivity, weeklyHeatmap, topicTimeline, answerers };
+module.exports = { groupInsights, timelineBetween, dailyActivity, weeklyHeatmap, topicTimeline, answerers, rangePartials, groupName };

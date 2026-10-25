@@ -97,6 +97,14 @@ test("only an unavailable provider falls back, never a bad request or an unusabl
   assert.equal(shouldFallBack(new Error("LLM response was truncated. Body=...")), false);
 });
 
+test("xAI declining one chat with 403 permission-denied is not the provider being down", () => {
+  const declined = Object.assign(new Error("LLM request failed. StatusCode=403 Body={\"code\":\"permission-denied\",\"error\":\"I'm sorry, I can't help with that request.\"}"), { status: 403 });
+  const forbidden = Object.assign(new Error("LLM request failed. StatusCode=403 Body={\"error\":\"Forbidden: invalid credentials\"}"), { status: 403 });
+
+  assert.equal(shouldFallBack(declined), false);
+  assert.equal(shouldFallBack(forbidden), true);
+});
+
 test("one malformed JSON answer is that answer's problem, not the provider being down", () => {
   // Seen live 2026-09-30 03:28: Grok's answer cut mid-string switched the whole
   // run (and the next 15 minutes) to DeepSeek.

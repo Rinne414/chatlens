@@ -300,6 +300,10 @@ const briefStatusLine = (data) => {
   let tone = "ok";
   if (background.running) {
     pieces.push(el("span", { class: "brief-pulse" }), "正在整理新消息…");
+    // A long AI round no longer holds up new messages (background.js).
+    if (background.lastSync?.ok && Date.parse(background.lastSync.at) > Date.parse(background.lastStartedAt ?? "")) {
+      pieces.push(` · 新消息${briefAgo(background.lastSync.at)}收过`);
+    }
     tone = "busy";
   } else if (background.lastError) {
     pieces.push(`上次刷新出错：${background.lastError}`);
@@ -934,8 +938,9 @@ const renderBriefView = () => {
             briefMasthead(data),
             briefMentions(data),
             briefWatch(data),
+            briefThingsSection(),
             digestHomeSection(),
-            briefHighlights(data),
+            briefDetailsFolded(data),
             briefImages(data)),
           el("aside", { class: "brief-side" }, briefGroups(data)),
           briefFooter(data),

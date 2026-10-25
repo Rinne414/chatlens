@@ -1,0 +1,35 @@
+/* 设置 → Obsidian 笔记库 (web/notes_settings.js) */
+
+.notes-line { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
+.notes-line code { font-size: 12px; word-break: break-all; }
+.notes-line .btn { margin-left: 8px; vertical-align: middle; }
+.notes-actions a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+
+.notes-vaults { display: grid; gap: 8px; margin: 4px 0 12px; }
+.notes-vault {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color var(--dur);
+}
+.notes-vault:hover { border-color: var(--accent); }
+.notes-vault input { margin-top: 3px; accent-color: var(--accent); }
+.notes-vault span { display: grid; gap: 1px; min-width: 0; }
+.notes-vault small { color: var(--muted); font-size: 12px; word-break: break-all; }
+
+.notes-form { display: grid; gap: 8px; }
+.notes-field { display: grid; grid-template-columns: 9em minmax(0, 1fr); gap: 10px; align-items: center; font-size: 13px; }
+.notes-field > span { color: var(--muted); }
+.notes-field input, .notes-field select { width: 100%; }
+
+.notes-more { margin: 14px 0 8px; }
+.notes-more > summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.notes-more > summary:hover { color: var(--text); }
+
+@media (max-width: 640px) {
+  .notes-field { grid-template-columns: 1fr; gap: 4px; }
+}

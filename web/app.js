@@ -1638,6 +1638,20 @@ const startUnviewedRun = async () => {
   await startRun();
 };
 
+// A link from the Obsidian notes (?chat=<group>&at=<unix>): open that moment
+// of the chat instead of the briefing, with half an hour before it.
+const CHAT_LINK_CONTEXT_SECONDS = 1800;
+const consumeChatLink = () => {
+  const params = new URLSearchParams(window.location.search);
+  const groupId = params.get("chat") ?? "";
+  const at = Number(params.get("at"));
+  if (!/^\d{5,}$/u.test(groupId) || !Number.isFinite(at) || at <= 0) {
+    return null;
+  }
+  history.replaceState({}, "", window.location.pathname);
+  return { groupId, at: Math.floor(at) };
+};
+
 const consumeAutostart = () => {
   const params = new URLSearchParams(window.location.search);
   if ((params.get("run") ?? "").toLowerCase() !== "unviewed") {
@@ -2566,6 +2580,7 @@ const boot = async () => {
     renderRunView();
   });
 
+  const chatLink = consumeChatLink();
   const startUnviewed = consumeAutostart();
   // Installable app (PWA): the worker only passes requests through, so the
   // per-boot token in index.html is never served stale from a cache.
@@ -2594,6 +2609,15 @@ const boot = async () => {
     showView("run");
     renderRunView();
     await startUnviewedRun();
+    return;
+  }
+  if (chatLink !== null) {
+    await openMessagesView({
+      groupId: chatLink.groupId,
+      groupName: pictureGroupName(chatLink.groupId),
+      fromUnix: chatLink.at - CHAT_LINK_CONTEXT_SECONDS,
+      scrollToTime: chatLink.at,
+    });
     return;
   }
   // The briefing was prepared in the background: open straight onto it.

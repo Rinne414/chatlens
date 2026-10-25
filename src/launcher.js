@@ -136,7 +136,46 @@ const installNativeBinding = () => {
   });
 };
 
+const NPM_INSTALL_MS = 180000;
+
+// Packages package.json lists that node_modules does not have.
+const missingPackages = (root = toolRoot) => Object.keys(JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).dependencies ?? {})
+  .filter((name) => !fs.existsSync(path.join(root, "node_modules", name, "package.json")));
+
+// This Node's own npm (Windows installer layout, then Unix).
+const npmCliFor = (nodeExe) => [
+  path.join(path.dirname(nodeExe), "node_modules", "npm", "bin", "npm-cli.js"),
+  path.join(path.dirname(nodeExe), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+].find((file) => fs.existsSync(file)) ?? null;
+
+// A source install updated in place (update_ops.js copies the new source over
+// it) can need a package it does not have yet: install what is missing once,
+// with this Node's npm. A bundle (its own node/ folder) ships every package.
+// Never stops the start by itself: ensureDependencies says what is still missing.
+const installMissingPackages = () => {
+  const missing = missingPackages();
+  if (missing.length === 0 || fs.existsSync(path.join(toolRoot, "node"))) {
+    return;
+  }
+  const npmCli = npmCliFor(process.execPath);
+  if (npmCli === null) {
+    process.stderr.write(`缺少 ${missing.join("、")}：请在 ${toolRoot} 里运行一次 npm install。\n`);
+    return;
+  }
+  process.stderr.write(`正在安装新版本需要的 ${missing.join("、")}…\n`);
+  const result = spawnSync(process.execPath, [npmCli, "install", "--omit=dev", "--no-audit", "--no-fund"], {
+    cwd: toolRoot,
+    windowsHide: true,
+    encoding: "utf8",
+    timeout: NPM_INSTALL_MS,
+  });
+  if (result.status !== 0) {
+    process.stderr.write(`自动安装没有成功，请在 ${toolRoot} 里运行一次 npm install。${String(result.stderr ?? "").trim().split(/\r?\n/u).at(-1) ?? ""}\n`);
+  }
+};
+
 const ensureDependencies = () => {
+  installMissingPackages();
   if (!fs.existsSync(bindingPackageDir())) {
     throw new Error(`缺少依赖。请在 ${toolRoot} 里运行一次 npm install（发行版压缩包已自带依赖）。`);
   }
@@ -190,4 +229,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { needsNativeRebuild };
+module.exports = { needsNativeRebuild, missingPackages, npmCliFor };

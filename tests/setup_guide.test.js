@@ -74,7 +74,7 @@ test("a failed first refresh shows its reason and a retry, not a promise", () =>
 
   const text = run("textOfNode(setupFooter(true))");
 
-  assert.match(text, /上次没收成：数据库副本正被占用/u);
+  assert.match(text, /上次没收成：数据库副本正被另一个任务使用/u);
   assert.match(text, /再试一次/u);
   assert.doesNotMatch(text, /自动换成简报/u);
 });
@@ -95,4 +95,14 @@ test("a set-up user with a quiet window (or after 看完了) keeps the briefing"
   assert.equal(scene({ textMessages: 0, everStored: false }), true);
   assert.equal(scene({ textMessages: 0, everStored: true }, "关注群列表为空"), true);
   assert.equal(scene({ textMessages: 12, everStored: true }, "关注群列表为空"), false);
+});
+
+test("raw refresh errors are said in plain words, unknown ones are kept as they are", () => {
+  const run = loadPage();
+  const plain = (raw) => run(`plainSetupError(${JSON.stringify(raw)})`);
+
+  assert.match(plain("导出消息失败（退出码 1）：SqliteError: database disk image is malformed"), /不完整.*自动重试/u);
+  assert.match(plain("SqliteError: file is not a database"), /密钥对不上/u);
+  assert.match(plain("找不到源数据库: C:/x/nt_msg.db（请在设置页检查 QQ 数据库路径）"), /找不到 QQ 的数据库文件/u);
+  assert.equal(plain("网络断了"), "网络断了");
 });

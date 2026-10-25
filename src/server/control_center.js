@@ -26,6 +26,9 @@ const qqCollectionOps = require("./qq_collection_ops");
 const galleryOps = require("./gallery_ops");
 const railOps = require("./rail_ops");
 const groupOps = require("./group_ops");
+const topicThingsOps = require("./topic_things_ops");
+const briefThingsOps = require("./brief_things_ops");
+const vaultOps = require("./vault_ops");
 const picturePass = require("./picture_pass");
 const knowledgeExport = require("../knowledge_export");
 const { createRemoteDevices } = require("./remote_devices");
@@ -282,6 +285,10 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (!remote && await vaultOps.handle(request, response, url, { sendJson, readBody })) {
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/state") {
       sendJson(response, 200, state.getState());
       return;
@@ -344,6 +351,16 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
 
     if (request.method === "GET" && url.pathname === "/api/inbox-extras") {
       sendJson(response, 200, railOps.getInboxExtras(url.searchParams.get("groupIds")));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/group/things") {
+      sendJson(response, 200, topicThingsOps.getThings(url.searchParams));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/group/things") {
+      sendJson(response, 200, topicThingsOps.startThings(await readBody(request)));
       return;
     }
 
@@ -777,6 +794,16 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/brief/things") {
+      sendJson(response, 200, briefThingsOps.getBriefThings());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/brief/things") {
+      sendJson(response, 200, briefThingsOps.startBriefThings());
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/briefing") {
       sendJson(response, 200, briefing.getBriefing({ known: url.searchParams.get("known") }));
       return;
@@ -1128,6 +1155,16 @@ const listen = (port, attempt) => {
         await briefing.afterTick(tick);
         // Pictures after the refresh: its ingest is what adds new ones.
         picturePass.runPass({ reason: "tick" }).catch((error) => console.error(`picture pass failed: ${error.message}`));
+        // A full refresh re-merges group briefs and rewrites their topics:
+        // 值得知道的事 is made anew now (same switches and limits as when the
+        // page asks), so it is ready before the page is opened.
+        if (tick.ok && tick.syncOnly !== true) {
+          try {
+            briefThingsOps.getBriefThings();
+          } catch (error) {
+            console.error(`brief things check failed: ${error.message}`);
+          }
+        }
       },
     });
     desktop.removeLegacyScheduledTask()

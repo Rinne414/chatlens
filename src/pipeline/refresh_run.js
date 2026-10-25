@@ -6,7 +6,10 @@
 // Each watched group continues from its own coverage end (capped at a 7-day
 // look-back), so gaps left while the app was closed fill themselves in.
 //
-//   node src/pipeline/refresh_run.js [--force] [--no-llm]
+//   node src/pipeline/refresh_run.js [--force] [--no-llm] [--sync-only]
+// --sync-only: new messages only (no AI, no notes) -- what the console runs
+// on the side while a refresh spends its time on AI work. A full refresh
+// prints progress=ai-start once the QQ database copy is free for that.
 // Prints one machine-readable line at the end: refreshResult={...json}
 
 const fs = require("node:fs");
@@ -19,7 +22,9 @@ const { REMOTE_LIFETIME_SECONDS, ingestPictures } = require("../picture_store");
 const { REPAIR_STATE_KEY } = require("../repair_picture_text");
 const { backfillStarts, recordFailedExport } = require("../backfill_replies");
 const engine = require("../briefing_engine");
-const { createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary } = require("../llm_summarizer");
+const { callLlm, createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary } = require("../llm_summarizer");
+const { notesSettings, syncNotes } = require("../vault_sync");
+const { runNotesAi, writeNotesStatus, recordSync } = require("../vault_ai");
 const digestEngine = require("../digest_engine");
 const { ensureDigestSchema } = require("../digest_store");
 const { ensureUsageSchema, recordUsage, todaySpend } = require("../llm_usage");
@@ -167,7 +172,7 @@ const refreshGroupList = async (config, mirror, freshPath, env) => {
 };
 
 const briefingEnabled = (config, values) =>
-  values["no-llm"] !== true && config.background?.autoSummarize !== false && isLlmConfigured(config);
+  values["no-llm"] !== true && values["sync-only"] !== true && config.background?.autoSummarize !== false && isLlmConfigured(config);
 
 // Optional daily money budget from 设置 (config.background.dailyBudget):
 // once today's estimated spend reaches it, the briefing stops calling the LLM.
@@ -256,6 +261,101 @@ const requeueDeclinedOnce = (db, { now }) => {
   }
 };
 
+// The briefing comes first: notes work stops once this share of today's AI
+// call cap is used, so a notes backlog never blocks tonight's summaries.
+const NOTES_CALL_SHARE = 0.7;
+// ...and starts no new call after this long in one background refresh: the
+// next refresh (new messages, @ notices) waits until this one has ended.
+// 立即同步 runs on its own and has no such limit.
+const NOTES_TIME_BUDGET_MS = 8 * 60 * 1000;
+
+// 笔记库 (Obsidian): merging names, placing things into topics and writing
+// 群里的共识, under the same gate as the briefing. A failure only warns; the
+// briefing is done already. Progress goes to the settings card.
+const runNotesAiSafely = async (db, client, { config, now, gate, manual = false }) => {
+  const options = { ...engine.DEFAULTS, ...gate };
+  const startedAt = Date.now();
+  const notesGate = () => {
+    if (!manual && Date.now() - startedAt >= NOTES_TIME_BUDGET_MS) {
+      return "notes-time";
+    }
+    const budget = engine.budgetStatus(db, now, options.dailyLlmCallLimit);
+    return budget.used >= Math.floor(budget.limit * NOTES_CALL_SHARE) ? "notes-budget-share" : engine.allowSpend(db, now, options);
+  };
+  try {
+    const outcome = await runNotesAi(db, {
+      config,
+      storeDir: common.storeDir,
+      client,
+      callLlm,
+      model: () => currentModel(client),
+      gate: notesGate,
+      nowUnix: now,
+      manual,
+      onProgress: (progress) => writeNotesStatus(common.storeDir, { aiProgress: { at: common.nowUnix(), ...progress } }),
+    });
+    if (outcome.skipped === undefined) {
+      writeNotesStatus(common.storeDir, { ai: { at: now, ...outcome }, aiProgress: null });
+    }
+    return outcome;
+  } catch (error) {
+    common.warn(`笔记库的 AI 整理失败：${error.message}`);
+    writeNotesStatus(common.storeDir, { aiProgress: null });
+    return { failed: error.message };
+  }
+};
+
+// 立即同步 places new things into topics before writing (no briefing, no
+// name merging, no consensus): the same route, client and gate as a
+// background refresh.
+const runNotesAiAlone = async ({ config, now }) => {
+  if (!isLlmConfigured(config)) {
+    return { skipped: "llm-not-configured" };
+  }
+  let route;
+  try {
+    route = await resolveLlmRoute(config);
+  } catch (error) {
+    return { skipped: "llm-not-configured", reason: error.message };
+  }
+  const db = ensureUsageSchema(ensureBriefingSchema(messageStore.openStore(common.storeDbPath)));
+  setUsageRecorder((entry) => {
+    try {
+      recordUsage(db, entry);
+    } catch (error) {
+      common.warn(`AI 用量未能记录：${error.message}`);
+    }
+  });
+  try {
+    const client = createClient(route.primary, { fallback: route.fallback, onFallback: (error) => markGrokUnavailable(error) });
+    const gate = { ...engineOptions(config, route.primary.detail), spendCheck: moneyBudgetCheck(db, config, now) };
+    return await runNotesAiSafely(db, client, { config, now, gate, manual: true });
+  } finally {
+    setUsageRecorder(null);
+    db.close();
+  }
+};
+
+// Writes the Obsidian notes after each refresh when 自动同步 is on; the
+// outcome is kept for the settings card (store/notes-status.json).
+const syncNotesAfterRefresh = (config, now) => {
+  const settings = notesSettings(config);
+  if (!settings.enabled || !settings.autoSync) {
+    return { skipped: "off" };
+  }
+  const db = messageStore.openStore(common.storeDbPath);
+  try {
+    const result = recordSync(common.storeDir, syncNotes({ db, config, storeDir: common.storeDir, nowUnix: now, serverUrl: process.env.CHATLENS_URL ?? "" }));
+    return result.skipped === undefined ? { written: result.written, topics: result.topics, retired: result.retired } : result;
+  } catch (error) {
+    common.warn(`写 Obsidian 笔记失败：${error.message}`);
+    writeNotesStatus(common.storeDir, { syncError: { at: now, message: error.message } });
+    return { failed: error.message };
+  } finally {
+    db.close();
+  }
+};
+
 const runBriefing = async ({ config, groupIds, now, force }) => {
   let route;
   try {
@@ -287,11 +387,13 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
     const aiDown = map.routeDown !== null;
     const reduce = aiDown ? { skipped: "ai-down" } : await engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate });
     const digests = aiDown ? [] : await runDigests(db, client, { now, gate });
+    const notes = aiDown ? { skipped: "ai-down" } : await runNotesAiSafely(db, client, { config, now, gate });
     return {
       chunksCreated: created,
       map,
       reduce,
       digests,
+      notes,
       // Detailed-level job chunks still queued (the console continues sooner while they last).
       jobQueued: redoStats(db).queued,
       budget: engine.budgetStatus(db, now, profileFor(route.primary.detail).engine.dailyLlmCallLimit),
@@ -312,7 +414,7 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
 const main = async () => {
   const { values } = parseArgs({
     args: process.argv.slice(2),
-    options: { force: { type: "boolean" }, "no-llm": { type: "boolean" } },
+    options: { force: { type: "boolean" }, "no-llm": { type: "boolean" }, "sync-only": { type: "boolean" } },
     strict: true,
   });
   const config = loadConfig();
@@ -431,11 +533,20 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
     });
   }
 
-  const briefing = briefingEnabled(config, values)
+  const syncOnly = values["sync-only"] === true;
+  const withBriefing = briefingEnabled(config, values);
+  if (withBriefing) {
+    // The mirror is free and the messages are in: the console may now fetch
+    // newer ones beside this refresh (background.js).
+    common.progress("ai-start");
+  }
+  const briefing = withBriefing
     ? await timed("briefing", () => runBriefing({ config, groupIds, now, force: values.force === true }))
-    : { skipped: "disabled" };
+    : { skipped: syncOnly ? "sync-only" : "disabled" };
+  const notes = syncOnly ? { skipped: "sync-only" } : await timed("notes", () => syncNotesAfterRefresh(config, now));
 
   common.result("refreshResult", JSON.stringify({
+    syncOnly,
     groups: groupIds.length,
     inserted,
     picturesBackfilled,
@@ -448,9 +559,12 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
     elapsedMs: Date.now() - startedAt,
     timings,
     briefing,
+    notes,
   }));
 };
 
 if (require.main === module) {
   common.runMain(main);
 }
+
+module.exports = { runNotesAiAlone };

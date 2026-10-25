@@ -497,3 +497,18 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .brief-keys-help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0 0 8px; font-size: 13px; }
 .brief-keys-help dt { font-family: ui-monospace, Consolas, monospace; color: var(--accent); white-space: nowrap; }
 .brief-keys-help dd { margin: 0; }
+
+/* 值得知道的事 (brief_things.js); the map and rows themselves are in things.css */
+.brief-things-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-bottom: 10px; }
+.brief-things-head .brief-section-title { margin: 0; }
+.brief-things-tail { display: grid; gap: 6px; }
+.brief-details-fold > .kb-facet-more { font-size: 13.5px; }
+.brief-thing-group { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.brief-thing-group-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.brief-thing-group-head .avatar { width: 28px; height: 28px; }
+.brief-thing-group-actions { display: flex; gap: 6px; margin-left: auto; }
+.brief-thing-source { display: grid; gap: 4px; padding-left: 36px; }
+.brief-thing-source p { margin: 0; line-height: 1.65; }
+.brief-thing-source ul { margin: 0; padding-left: 18px; line-height: 1.65; }
+.brief-thing-quotes { display: flex; flex-wrap: wrap; gap: 6px; }
+.brief-thing-quotes q { padding: 2px 8px; border-radius: 6px; background: var(--bg); color: var(--muted); font-size: 13px; quotes: none; }

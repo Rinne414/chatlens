@@ -255,12 +255,30 @@ const groupStep = (ready) => {
   return step;
 };
 
+// Lands on the AI card itself, not the top of a long settings page.
+const openAiSettings = async () => {
+  await openSettingsView();
+  $("#settings-llm")?.scrollIntoView({ block: "start" });
+};
+
+// Background errors arrive as raw messages (SQLite, file paths). Say what it
+// means and what happens next; the raw text stays one hover away.
+const SETUP_ERROR_HINTS = [
+  // SQLCipher reports a wrong key as "file is not a database": check it first.
+  [/密钥|SQLITE_NOTADB|file is not a database/iu, "数据库密钥对不上（比如换过账号或重装过 QQ）。到设置页重新「自动获取密钥」。"],
+  [/malformed|SQLITE_CORRUPT/iu, "复制下来的 QQ 数据库不完整，多半是 QQ 正在写入。下次刷新会自动重试。"],
+  [/被占用|SQLITE_BUSY|database is locked/iu, "数据库副本正被另一个任务使用，等它做完会再收。"],
+  [/找不到源数据库|ENOENT/iu, "找不到 QQ 的数据库文件。看看第 1 步的账号对不对，或者 QQ 是否换了存储位置。"],
+];
+
+const plainSetupError = (raw) => SETUP_ERROR_HINTS.find(([pattern]) => pattern.test(raw))?.[1] ?? raw;
+
 const aiStep = (status) => {
   const ai = aiReadiness(status);
   return setupStep(4, ai.ok ? "done" : "now", "AI 总结（可选）", ai.detail,
     el("div", {},
       el("p", {}, "填一个 AI 服务（DeepSeek、OpenAI 兼容服务或 Grok 订阅），简报里就会有每个群在聊什么的总结。不填也能用：消息、图片、热点、搜索都照常有。开启后消息文字会发给你选的 AI 服务。"),
-      el("button", { class: "btn small", type: "button", onclick: () => openView("settings") }, "去设置 AI 服务")));
+      el("button", { class: "btn small", type: "button", onclick: openAiSettings }, "去设置 AI 服务")));
 };
 
 // Once the three steps are done, the footer reports what the background
@@ -275,7 +293,7 @@ const setupFooter = (coreReady) => {
       el("p", {}, "正在收第一批消息。第一次要先复制一份 QQ 数据库，可能要几分钟；好了这里会自动换成简报。"));
   }
   const [text, label] = background.lastError
-    ? [el("span", { class: "setup-note error" }, `上次没收成：${background.lastError}`), "再试一次"]
+    ? [el("span", { class: "setup-note error", title: background.lastError }, `上次没收成：${plainSetupError(background.lastError)}`), "再试一次"]
     : background.lastFinishedAt
       ? ["已经收过一次，你选的群这段时间还没有新消息。有新消息后这里会换成简报。", "现在再收一次"]
       : ["准备好了。后台会每隔一阵自动收新消息；想马上开始就点下面。", "现在开始收消息"];

@@ -359,6 +359,7 @@ const openChat = async ({ groupId, groupName, fromUnix, toUnix, fromLastRead, or
   // Only open-ended ranges may page backward into earlier messages.
   msg.hasOlder = Number.isFinite(msg.from) && !Number.isFinite(msg.to);
 
+  const openedStep = msg.step;
   renderMessagesView();
   try {
     await loadMessages(true);
@@ -366,6 +367,13 @@ const openChat = async ({ groupId, groupName, fromUnix, toUnix, fromLastRead, or
     alert(`读取消息失败: ${error.message}`);
   }
   renderMessagesView();
+  // A target these messages could not show (none loaded) must not fire on some
+  // later redraw -- unless another chat was opened meanwhile with its own.
+  if (msg.step === openedStep) {
+    msg.scrollToTime = null;
+    msg.scrollToRowIds = [];
+    msg.scrollToUnread = false;
+  }
   if (msg.panel) {
     loadChatPanel();
   }
@@ -1111,19 +1119,35 @@ const renderChat = () => {
       msg.panel ? el("aside", { id: "chat-panel", class: "chat-panel" }, chatPanelBody()) : null),
     selectionBar);
   setupChatObservers(list);
+  scrollChatToTarget(list, previousScrollTop);
+};
 
+// Where a freshly drawn chat lands: the message or time it was opened at, the
+// last-read divider, or where the reader was. openChat draws once before the
+// messages are loaded; a target used on that empty draw was lost, so every
+// jump to a time (群, 人, 热点, 回顾, 问群聊, Obsidian notes) opened the chat
+// somewhere else. A target now waits until there are messages to land on.
+const scrollChatToTarget = (list, previousScrollTop) => {
+  const msg = app.msg;
+  const hasTarget = (Array.isArray(msg.scrollToRowIds) && msg.scrollToRowIds.length > 0) || msg.scrollToTime != null || msg.scrollToUnread;
+  if (hasTarget && list.querySelectorAll("[data-sentat]").length === 0) {
+    return;
+  }
   if (Array.isArray(msg.scrollToRowIds) && msg.scrollToRowIds.length > 0) {
     const messageNodes = [...list.querySelectorAll("[data-rowid]")];
     const hit = msg.scrollToRowIds
       .map((rowId) => messageNodes.find((node) => node.dataset.rowid === rowId))
       .find((node) => node !== undefined);
+    // Not among the loaded messages: the time below still lands nearby.
+    msg.scrollToRowIds = [];
     if (hit !== undefined) {
-      msg.scrollToRowIds = [];
       msg.scrollToTime = null;
       hit.classList.add("msg-origin-hit");
       hit.scrollIntoView({ block: "center" });
+      return;
     }
-  } else if (msg.scrollToTime != null) {
+  }
+  if (msg.scrollToTime != null) {
     const targetTime = msg.scrollToTime;
     msg.scrollToTime = null;
     const hit = [...list.querySelectorAll("[data-sentat]")].find((node) => Number(node.dataset.sentat) >= targetTime);

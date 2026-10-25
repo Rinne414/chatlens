@@ -151,4 +151,4 @@ const afterTick = async ({ ok, result }) => {
   });
 };
 
-module.exports = { getBriefing, markSeen, retryFailed, saveWatchWords, afterTick, watchlistOf, uinFromPath };
+module.exports = { getBriefing, markSeen, retryFailed, saveWatchWords, afterTick, watchlistOf, watchWordsOf, uinFromPath };

@@ -203,6 +203,12 @@ const UNUSABLE_ANSWER = /truncated|not valid JSON|did not contain|Invalid LLM JS
 // A malformed answer (JSON cut mid-string, a stray comma) is that answer's
 // problem: counted as "down", one bad answer from Grok moved a whole run and
 // the next 15 minutes to DeepSeek (2026-09-30).
+// xAI answers chat it will not summarize with 403 permission-denied and a
+// refusal sentence. That chat is declined (asked elsewhere, call by call); the
+// account is fine. Taken as "Grok is down", one such reply moved every call to
+// the paid fallback for 6 hours (2026-10-25).
+const CONTENT_REFUSAL = /permission-denied[\s\S]*(?:sorry|can['’]t help)/iu;
+
 const shouldFallBack = (error) => {
   if (error instanceof SyntaxError) {
     return false;
@@ -210,6 +216,9 @@ const shouldFallBack = (error) => {
   const status = Number(error?.status);
   if (!Number.isFinite(status)) {
     return !UNUSABLE_ANSWER.test(String(error?.message));
+  }
+  if (status === 403 && CONTENT_REFUSAL.test(String(error?.message))) {
+    return false;
   }
   return status === 401 || status === 402 || status === 403 || status === 429 || status >= 500;
 };

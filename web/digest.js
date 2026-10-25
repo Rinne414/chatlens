@@ -231,7 +231,17 @@ const digestActions = (kind, period, entry) => {
 };
 
 // One digest (any kind) with its header, body and generate button.
-const digestCard = (kind, period, { title, headerExtra = null, emptyText } = {}) => {
+// folded: only the headline and a button that opens the rest (the home page,
+// once 值得知道的事 says the same across groups); toggle flips it.
+const digestFoldButton = (digest, { folded, toggle }) => {
+  const summary = digest.summary;
+  const counts = [["重点", summary.highlights], ["多个群都在聊", summary.crossGroup], ["新东西", summary.newThings], ["没人回答的问题", summary.openQuestions], ["各群一句话", summary.groups]]
+    .filter(([, items]) => (items ?? []).length > 0).map(([label, items]) => `${label} ${items.length}`);
+  return el("button", { class: "kb-facet-more", type: "button", "aria-expanded": String(!folded), onclick: toggle },
+    folded ? `展开全文${counts.length > 0 ? `：${counts.join(" · ")}` : ""}` : "收起全文");
+};
+
+const digestCard = (kind, period, { title, headerExtra = null, emptyText, fold = null } = {}) => {
   const key = digestKey(kind, period);
   const entry = digestState.entries[key];
   if (entry === undefined || (!entry.loading && Date.now() - (entry.loadedAt ?? 0) > DIGEST_STALE_MS)) {
@@ -245,8 +255,11 @@ const digestCard = (kind, period, { title, headerExtra = null, emptyText } = {})
       ? el("p", { class: "brief-empty-line" }, entry?.loading ? "正在读取…" : emptyText ?? "还没有生成。")
       : el("div", { class: "digest-body" },
         digest.summary.headline ? el("p", { class: "digest-headline" }, digest.summary.headline) : null,
-        digest.summary.summary ? el("p", { class: "digest-summary" }, digest.summary.summary) : null,
-        el("div", { class: "digest-grid" }, kind === "day" ? digestDayBody(digest, key) : digestPeriodBody(digest, key)),
+        fold === null ? null : digestFoldButton(digest, fold),
+        fold?.folded ? null : [
+          digest.summary.summary ? el("p", { class: "digest-summary" }, digest.summary.summary) : null,
+          el("div", { class: "digest-grid" }, kind === "day" ? digestDayBody(digest, key) : digestPeriodBody(digest, key)),
+        ],
         el("p", { class: "brief-meta digest-meta" }, digestMeta(digest))),
     digestActions(kind, period, entry));
 };
@@ -254,6 +267,24 @@ const digestCard = (kind, period, { title, headerExtra = null, emptyText } = {})
 /* ---------- the briefing home: today / yesterday ---------- */
 
 const digestHomeState = { day: null };
+// "1": the reader opened the full overview on the home page (kept per browser).
+const DIGEST_HOME_OPEN_KEY = "cc-brief-digest-open";
+
+// Folded under 值得知道的事 while that has things: both answer "what mattered
+// across the groups", and the page was too long to read.
+const digestHomeFold = () => {
+  if (!briefThings.data?.things) {
+    return null;
+  }
+  const open = wallReadPref(DIGEST_HOME_OPEN_KEY, "0") === "1";
+  return {
+    folded: !open,
+    toggle: () => {
+      wallWritePref(DIGEST_HOME_OPEN_KEY, open ? "0" : "1");
+      renderBriefView();
+    },
+  };
+};
 
 const digestHomeSection = () => {
   const today = digestToday();
@@ -267,6 +298,7 @@ const digestHomeSection = () => {
   }, value === today ? "今天" : "昨天");
   return digestCard("day", day, {
     title: "各群总览",
+    fold: digestHomeFold(),
     headerExtra: el("span", { class: "digest-switch" }, pick(today), pick(digestShiftDay(today, -1))),
     emptyText: day === today
       ? "今天的跨群总览还没写。点下面的按钮，AI 会把今天各群已整理的内容汇成一份。"

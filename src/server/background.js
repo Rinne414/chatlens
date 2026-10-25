@@ -85,6 +85,13 @@ let timer = null;
 let child = null;
 // Set by stop(): a refresh killed because the console is closing did not fail.
 let stopping = false;
+// A refresh can spend 30-50 minutes on AI work (merges, digests, notes) after
+// it has fetched the messages; new messages and @ notices would wait for all
+// of it. Once it says the QQ database copy is free (progress=ai-start), a
+// messages-only refresh (--sync-only) runs beside it every interval.
+let aiPhase = false;
+let sideChild = null;
+let sideTimer = null;
 
 // The refresh hashes the whole QQ database and runs in the background, so it
 // yields the CPU to whatever the user is doing. On Windows the processes it
@@ -236,8 +243,80 @@ const logLine = (line) => {
   }
 };
 
+/* ---------- messages beside a long refresh ---------- */
+
+const stopSideTimer = () => {
+  if (sideTimer !== null) {
+    clearTimeout(sideTimer);
+    sideTimer = null;
+  }
+};
+
+const startSideSync = () => {
+  if (sideChild !== null || !status.running || !aiPhase || jobs.isJobRunning() || readiness() !== null) {
+    return false;
+  }
+  sideChild = spawn(process.execPath, [refreshScript, "--sync-only"], { cwd: state.toolRoot, env: { ...process.env, CHATLENS_URL: serverUrl ?? "" }, ...platform.spawnOptionsForTree() });
+  lowerPriority(sideChild.pid);
+  let stdoutText = "";
+  const readStdout = lineReader(logLine);
+  sideChild.stdout.setEncoding("utf8");
+  sideChild.stderr.setEncoding("utf8");
+  sideChild.stdout.on("data", (textChunk) => {
+    stdoutText += textChunk;
+    readStdout(textChunk);
+  });
+  sideChild.stderr.on("data", lineReader(logLine));
+  sideChild.on("error", (error) => {
+    console.error(`messages-only refresh could not start: ${error.message}`);
+  });
+  sideChild.on("close", (code) => {
+    sideChild = null;
+    if (stopping) {
+      return;
+    }
+    const result = parseResult(stdoutText);
+    status.lastSync = { at: new Date().toISOString(), ok: code === 0, inserted: Number(result?.inserted) || 0 };
+    if (code === 0 && result?.skipped === undefined) {
+      Promise.resolve(onTickFinished({ ok: true, result, syncOnly: true })).catch((error) => {
+        console.error(`background post-sync failed: ${error.message}`);
+      });
+    }
+  });
+  return true;
+};
+
+// One interval after the refresh began (when the next one was due), then every interval.
+const scheduleSideSync = (delayMs) => {
+  stopSideTimer();
+  sideTimer = setTimeout(() => {
+    sideTimer = null;
+    if (!status.running || !aiPhase) {
+      return;
+    }
+    startSideSync();
+    scheduleSideSync(settings().intervalMinutes * 60 * 1000);
+  }, Math.max(delayMs, 0));
+  sideTimer.unref?.();
+};
+
+const enterAiPhase = () => {
+  if (aiPhase) {
+    return;
+  }
+  aiPhase = true;
+  const interval = settings().intervalMinutes * 60 * 1000;
+  const started = Date.parse(status.lastStartedAt ?? "") || Date.now();
+  scheduleSideSync(started + interval - Date.now());
+};
+
 const tick = ({ force }) => {
   if (status.running) {
+    return { started: false, reason: "running" };
+  }
+  if (sideChild !== null) {
+    // Its new messages are almost in; the full refresh starts right after.
+    schedule(BUSY_RETRY_MS);
     return { started: false, reason: "running" };
   }
   const blocker = readiness();
@@ -255,13 +334,18 @@ const tick = ({ force }) => {
   status.lastStartedAt = new Date().toISOString();
   status.lastError = null;
   status.nextRunAt = null;
+  aiPhase = false;
   const args = [refreshScript, ...(force ? ["--force"] : [])];
-  child = spawn(process.execPath, args, { cwd: state.toolRoot, ...platform.spawnOptionsForTree() });
+  // CHATLENS_URL: the Obsidian notes link back to chat moments in this console.
+  child = spawn(process.execPath, args, { cwd: state.toolRoot, env: { ...process.env, CHATLENS_URL: serverUrl ?? "" }, ...platform.spawnOptionsForTree() });
   lowerPriority(child.pid);
   // Only this refresh's own output explains its failure: status.log also
   // holds lines from earlier refreshes.
   const tickLog = [];
   const logTickLine = (line) => {
+    if (line.startsWith("progress=ai-start")) {
+      enterAiPhase();
+    }
     logLine(line);
     tickLog.push(line);
     if (tickLog.length > MAX_LOG_LINES) {
@@ -284,6 +368,8 @@ const tick = ({ force }) => {
   child.on("close", (code) => {
     child = null;
     status.running = false;
+    aiPhase = false;
+    stopSideTimer();
     if (stopping) {
       // Killed because the console is closing: not a failure, and the last
       // refresh that did finish stays the one on record (background-status.json).
@@ -437,17 +523,26 @@ const stop = () => {
     clearTimeout(timer);
     timer = null;
   }
+  stopSideTimer();
   if (child !== null) {
     platform.killTree(child.pid);
+  }
+  if (sideChild !== null) {
+    platform.killTree(sideChild.pid);
   }
 };
 
 const runNow = ({ force = true } = {}) => tick({ force });
 
+const serverUrlOf = () => serverUrl;
+
 const getStatus = () => ({
   settings: settings(),
   readinessProblem: readiness(),
   running: status.running,
+  // Messages fetched beside a refresh busy with AI work (see startSideSync).
+  syncing: sideChild !== null,
+  lastSync: status.lastSync ?? null,
   lastStartedAt: status.lastStartedAt,
   lastFinishedAt: status.lastFinishedAt,
   lastResult: status.lastResult,
@@ -456,4 +551,4 @@ const getStatus = () => ({
   log: status.log.slice(-12),
 });
 
-module.exports = { start, stop, runNow, getStatus, saveSettings, notifyAfterTick, followUpDelay, lineReader, parseResult, DEFAULTS };
+module.exports = { start, stop, runNow, serverUrlOf, getStatus, saveSettings, notifyAfterTick, followUpDelay, lineReader, parseResult, DEFAULTS };

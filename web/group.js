@@ -181,13 +181,16 @@ const backToGroupChooser = () => goBackTo((prev) => prev.view === "group" && pre
 
 // A person's page reloads itself; it does not fall back to the group.
 VIEW_RELOADERS.group = () => (app.groupPage.person !== null && !app.groupPage.choosing ? loadPersonPage() : openGroupView());
-VIEW_STEP_RESTORERS.group = (step) => {
+VIEW_STEP_RESTORERS.group = (step, overlay) => {
   if (step?.group && step.person && step.all) {
     openPersonAcross(step.person, step.group);
   } else if (step?.group && step.person) {
     openPersonView(step.person, step.group);
   } else if (step?.group) {
     openGroupView(step.group);
+    if (overlay?.kind === "topic") {
+      reopenTopicDetail(overlay.key);
+    }
   } else {
     showGroupChooser();
   }
@@ -447,26 +450,18 @@ const groupBrief = (brief) => {
     brief.topics.length === 0 ? null : el("div", { class: "brief-group-topics" }, brief.topics.map((topic) => el("span", { class: "tag plain" }, topic))));
 };
 
-const timelineStart = (item) => hktToUnix(item.start);
-
+// Rows and the topic detail live in group_topic.js.
 const groupTimeline = (timeline) => el("section", { class: "card gp-section" },
-  el("h3", {}, "在聊什么", el("span", { class: "kb-meta" }, "　点一条跳到那段消息")),
+  el("div", { class: "gp-section-head" },
+    el("h3", {}, "在聊什么", el("span", { class: "kb-meta" }, "　点一条看这段的全部消息")),
+    timeline.length > 0 ? el("div", { class: "gp-section-tools" }, topicModeSwitch(), topicMode() === "time" ? topicOrderSwitch() : null) : null),
   timeline.length === 0
     ? el("p", { class: "kb-meta" }, "这段时间还没有 AI 总结。后台攒够消息后会自动总结，也可以在「回顾」补齐某一天。")
-    : timeline.map((day) => el("div", { class: "gp-day" },
+    : topicMode() === "things"
+      ? thingsSection(timeline)
+      : orderedTimeline(timeline).map((day) => el("div", { class: "gp-day" },
       el("h4", {}, shortDay(day.day)),
-      el("ol", {}, (app.groupPage.openDays.has(day.day) ? day.items : day.items.slice(0, TOPICS_PER_DAY)).map((item) => {
-        const start = timelineStart(item);
-        return el("li", {},
-          el(start === null ? "div" : "button", {
-            class: "gp-topic",
-            type: start === null ? undefined : "button",
-            onclick: start === null ? undefined : () => openGroupChatAt(start),
-          },
-          start === null ? null : el("span", { class: "gp-topic-time" }, unixToHkt(start).slice(11, 16)),
-          el("strong", {}, item.title),
-          item.summary ? el("span", { class: "gp-topic-sum" }, item.summary) : null));
-      })),
+      el("ol", {}, (app.groupPage.openDays.has(day.day) ? day.items : day.items.slice(0, TOPICS_PER_DAY)).map((item) => el("li", {}, topicRow(item)))),
       day.items.length > TOPICS_PER_DAY && !app.groupPage.openDays.has(day.day)
         ? el("button", {
           class: "kb-facet-more",

@@ -392,6 +392,31 @@ const loadPageContext = () => {
   return context;
 };
 
+test("a jump to a time or to the last read waits for the messages instead of being used up on the empty first draw", () => {
+  const context = loadPageContext();
+  const scrolled = [];
+  const node = (sentAt) => ({ dataset: { sentat: String(sentAt), rowid: String(sentAt) }, classList: { add() {} }, scrollIntoView: () => scrolled.push(sentAt) });
+  const list = (nodes) => ({ querySelectorAll: () => nodes, querySelector: () => null, scrollTop: 0 });
+  vm.runInContext("app.msg.scrollToTime = 200; app.msg.scrollToRowIds = []; app.msg.scrollToUnread = false;", context);
+  const land = vm.runInContext("scrollChatToTarget", context);
+
+  land(list([]), 0);
+  assert.equal(vm.runInContext("app.msg.scrollToTime", context), 200);
+
+  land(list([node(100), node(200), node(300)]), 0);
+  assert.deepEqual(scrolled, [200]);
+  assert.equal(vm.runInContext("app.msg.scrollToTime", context), null);
+
+  vm.runInContext("app.msg.scrollToUnread = true;", context);
+  land(list([]), 0);
+  assert.equal(vm.runInContext("app.msg.scrollToUnread", context), true);
+
+  // A message id that is not among the loaded messages falls back to its time.
+  vm.runInContext("app.msg.scrollToUnread = false; app.msg.scrollToRowIds = ['999']; app.msg.scrollToTime = 300;", context);
+  land(list([node(100), node(200), node(300)]), 0);
+  assert.deepEqual(scrolled, [200, 300]);
+});
+
 test("the chat keeps a bounded window of loaded messages", () => {
   const context = loadPageContext();
   const windowedItems = vm.runInContext("windowedItems", context);

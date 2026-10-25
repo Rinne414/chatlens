@@ -14,6 +14,9 @@
   --warn-soft: #fdf3e2;
   --risk: #b3261e;
   --risk-soft: #fbeae9;
+  /* 值得知道的事: the 问答 kind (data colour, always shown with its word) */
+  --thing-qa: #6f4bb3;
+  --thing-qa-soft: #f1ecfa;
   --console-bg: #14181d;
   --console-ink: #c4ccd6;
   --radius: 10px;
@@ -780,6 +783,8 @@ html[data-theme="dark"] {
   --warn-soft: #33290f;
   --risk: #ef6a62;
   --risk-soft: #3a1c1a;
+  --thing-qa: #a98bf0;
+  --thing-qa-soft: #2a2340;
   --console-bg: #0d1014;
   --console-ink: #aeb7c2;
 }
