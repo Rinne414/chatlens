@@ -40,8 +40,28 @@
 .gallery-context li.focus strong { color: var(--accent); }
 .gallery-detail .kb-overlay-image { min-height: 240px; background-size: contain; background-repeat: no-repeat; background-position: center; }
 
-/* multi-select + export */
-.gallery-selection { position: sticky; bottom: 12px; z-index: 5; margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, .12); }
+/* search */
+.gallery-search { display: inline-flex; flex: 1 1 340px; max-width: 520px; gap: 6px; align-items: center; }
+.gallery-search input { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-size: 13.5px; }
+.gallery-search input:focus { outline: none; border-color: var(--accent); }
+
+/* The count, 多选 and layout stay on screen while scrolling the wall (not in
+   the phone layout, where they would take a quarter of the screen). */
+html:not(.phone) .gallery-page .kb-results-head { position: sticky; top: 0; z-index: 6; padding: 8px 0; background: var(--panel); }
+
+.wall-badge.file { background: rgba(71, 85, 105, .92); }
+.wall-missing-note { position: absolute; inset: 30px 10px 10px; display: grid; place-items: center; color: var(--muted); font-size: 12.5px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; }
+
+/* multi-select + export: every tile has its box (on hover; always while selecting) */
+.gallery-page .wall-pick { width: 30px; height: 30px; border-radius: 8px; }
+.gallery-page .wall-pick input { width: 17px; height: 17px; }
+.gallery-page.selecting .wall-pick { opacity: 1; }
+/* Without hover the box would be invisible yet tappable: shown only while selecting. */
+@media (hover: none) { .gallery-page:not(.selecting) .wall-corner { display: none; } }
+.gallery-page.selecting .wall-open { cursor: pointer; }
+.gallery-selection { position: sticky; bottom: 12px; z-index: 5; margin-top: 12px; display: grid; gap: 6px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
+.gallery-selection-row { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.gallery-selection-count { font-size: 14px; }
 .wall-tile.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
 .wall-tile.selected .wall-open img { opacity: .82; }
 .gallery-day-select { margin-left: auto; font-size: 12px; }

@@ -28,6 +28,10 @@ const fetchAndStore = async (md5, size) => {
   if (picture === null) {
     return { error: "not-found" };
   }
+  // Sent only as a file: Tencent's picture servers do not have it.
+  if (picture.fileName !== "") {
+    return { error: "file-only" };
+  }
   const row = store.fileRow(db(), md5);
   if (row?.gone === 1 || picture.expiresAt <= service.unix()) {
     return { error: "gone" };
@@ -44,6 +48,17 @@ const fetchAndStore = async (md5, size) => {
   return { error: noKey ? "no-rkey" : "unavailable" };
 };
 
+// A picture only ever sent as a file has one local copy, QQ's preview, for
+// every size (copied again if it was cleared for space).
+const qqDataDir = () => String(state.loadConfig().ntDataDir ?? "").trim();
+
+const fileOnlyCopy = (md5) => {
+  if (!store.isFileOnly(db(), md5)) {
+    return null;
+  }
+  return service.anyLocalFile(store.fileRow(db(), md5), md5) ?? store.copyQqPreview(db(), service.storeDir, md5, { ntDataDir: qqDataDir() });
+};
+
 // { filePath } or { error: not-found | gone | no-rkey | unavailable, fallback? }
 // where fallback is the best smaller local copy to show instead.
 const resolvePicture = async (md5, size) => {
@@ -51,7 +66,7 @@ const resolvePicture = async (md5, size) => {
     return { error: "not-found" };
   }
   const row = store.fileRow(db(), md5);
-  const local = service.localFile(row, md5, size);
+  const local = service.localFile(row, md5, size) ?? fileOnlyCopy(md5);
   if (local !== null) {
     store.updateFile(db(), md5, { last_used: service.unix() });
     return { filePath: local };
@@ -109,11 +124,17 @@ const keepOne = async (md5) => {
 // The original as a local file to copy out, without keeping it in the store:
 // the kept copy, QQ's cache variant, the library's local original, or a fresh
 // download into a temp file. `temporary` files are the caller's to delete.
+// A picture sent as a file whose original is nowhere local gives QQ's
+// preview, flagged previewOnly.
 const originalFile = async (md5, localOriginal = () => null) => {
   const row = store.fileRow(db(), md5);
   const local = service.keptPath(row, md5) ?? service.variantPath(row, "cache") ?? localOriginal(md5);
   if (local !== null && fs.existsSync(local)) {
     return { filePath: local, temporary: false };
+  }
+  const preview = fileOnlyCopy(md5);
+  if (preview !== null) {
+    return { filePath: preview, temporary: false, previewOnly: true };
   }
   const fetched = await fetchAndStoreTemp(md5);
   return fetched.error === undefined ? { filePath: fetched.filePath, temporary: true } : { error: fetched.error };
@@ -125,6 +146,9 @@ const fetchAndStoreTemp = async (md5) => {
   const picture = store.locate(db(), md5);
   if (picture === null) {
     return { error: "not-found" };
+  }
+  if (picture.fileName !== "") {
+    return { error: "file-only" };
   }
   if (store.fileRow(db(), md5)?.gone === 1 || picture.expiresAt <= service.unix()) {
     return { error: "gone" };

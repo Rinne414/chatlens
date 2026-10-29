@@ -1240,6 +1240,9 @@ acquireServerLock(state.toolRoot, ownConsoleRunning)
       console.log("这个安装的控制台已经在运行，本次不再重复启动。");
       process.exit(0);
     }
+    // Brings the store's tables up to date before any read-only page query
+    // (the gallery and the read worker never write, so never migrate).
+    state.getStore();
     listen(BASE_PORT, 0);
   })
   .catch((error) => {

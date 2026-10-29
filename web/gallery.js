@@ -20,6 +20,14 @@ const GALLERY_EXPIRY_WARN_DAYS = 7;
 const GALLERY_DAY_CHOICES = [[3, "3 天"], [7, "7 天"], [31, "31 天"], [0, "全部"]];
 const GALLERY_KINDS = [["images", "图片"], ["stickers", "表情包"], ["all", "全部"]];
 const GALLERY_SORTS = [["recent", "最新发的"], ["spread", "传得最广"]];
+const GALLERY_SHAPES = [["wide", "横图"], ["tall", "竖图"], ["square", "方图"], ["long", "长图", "多是手机截图和长条漫画"]];
+const GALLERY_SIZES = [["large", "大图", "长边 1000 以上"], ["medium", "中等", "长边 500–999"], ["small", "小图", "长边不到 500"]];
+const GALLERY_SWITCHES = [
+  ["prompt", "有咒语", "咒语库里能读到生成参数的图"],
+  ["asked", "有人求咒语", "群里有人问过这张图的咒语"],
+  ["file", "以文件发的图", "当作文件发的图片，多是没压缩的原图；显示的是 QQ 的预览"],
+];
+const GALLERY_SEARCH_DELAY_MS = 450;
 const GIF_PICTURE_FORMAT = 2000;
 const GALLERY_ORIGIN = { view: "media", label: "画廊" };
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -35,6 +43,13 @@ app.gallery = {
   groupId: "",
   sender: "",
   senderLabel: "",
+  // Search words, a shape / size bucket and three switches (gallery_store.js).
+  q: "",
+  shape: "",
+  size: "",
+  prompt: false,
+  asked: false,
+  file: false,
   results: null,
   facets: null,
   facetsKey: "",
@@ -71,6 +86,16 @@ const galleryWallSize = () => {
 const galleryFilterParams = () => {
   const tab = app.gallery;
   const params = new URLSearchParams({ kind: tab.kind, ai: tab.ai ? "1" : "0", groupId: tab.groupId, sender: tab.sender });
+  for (const key of ["q", "shape", "size"]) {
+    if (tab[key] !== "") {
+      params.set(key, tab[key]);
+    }
+  }
+  for (const [key] of GALLERY_SWITCHES) {
+    if (tab[key]) {
+      params.set(key, "1");
+    }
+  }
   const bounds = galleryTimeBounds(tab);
   if (bounds.days === undefined) {
     params.set("fromUnix", String(bounds.fromUnix));
@@ -238,7 +263,8 @@ const galleryBadges = (item) => {
     item.groups > 1 ? { text: `${item.groups} 个群`, tone: "repost", title: `在 ${item.groups} 个群出现过 ${item.posts} 次` } : null,
     item.asks > 0 ? { text: `${item.asks} 人求`, tone: "asked" } : null,
     item.format === GIF_PICTURE_FORMAT ? { text: "GIF" } : null,
-    item.ai && !item.kept && days !== null && days <= GALLERY_EXPIRY_WARN_DAYS
+    item.fileName ? { text: "文件", tone: "file", title: `以文件发送：${item.fileName}（显示的是 QQ 的预览）` } : null,
+    item.ai && !item.kept && !item.fileName && days !== null && days <= GALLERY_EXPIRY_WARN_DAYS
       ? { text: days === 0 ? "今天过期" : `${days} 天后过期`, tone: "expiring", title: "腾讯过期后原图就找不回来了" }
       : null,
     item.ai && item.kept ? { text: "已存原图", tone: "kept" } : null,
@@ -263,9 +289,23 @@ const refreshGallerySelection = () => {
   }
 };
 
+// Selecting starts from any tile (its corner box, or Ctrl+click), so nobody
+// has to scroll back up to a button; leaving clears the selection.
+const leaveGallerySelection = () => {
+  replaceGallery({ selecting: false, selected: new Set(), lastPicked: null });
+  renderMediaView();
+};
+
 // One tile changes in place (no re-draw, so no flicker); bulk changes
-// re-draw the visible tiles through refreshGallerySelection.
+// re-draw the visible tiles through refreshGallerySelection. The first pick
+// switches the wall into selecting, which re-draws it once.
 const toggleGallerySelected = (md5, tile, event = null) => {
+  if (!app.gallery.selecting) {
+    replaceGallery({ selecting: true, lastPicked: null });
+    toggleGallerySelected(md5, null);
+    renderMediaView();
+    return;
+  }
   const items = app.gallery.results?.items ?? [];
   const index = items.findIndex((item) => item.md5 === md5);
   if (event?.shiftKey && app.gallery.lastPicked !== null && index >= 0) {
@@ -304,21 +344,24 @@ const gallerySelectionNodes = () => {
   const count = app.gallery.selected.size;
   const loaded = app.gallery.results?.items ?? [];
   return [
-    el("strong", {}, `已选 ${briefNumber(count)} 张`),
-    el("button", { class: "btn small", type: "button", disabled: loaded.length === 0, onclick: () => selectGalleryItems(loaded) },
-      `全选已加载的 ${briefNumber(loaded.length)} 张`),
-    count === 0 ? null : el("button", { class: "btn small", type: "button", onclick: () => {
-      replaceGallery({ selected: new Set() });
-      refreshGallerySelection();
-    } }, "清除"),
-    el("button", {
-      class: "btn small primary",
-      type: "button",
-      disabled: count === 0 || pictureExport.running,
-      title: "把原图复制到下面的文件夹；带咒语的 AI 图附同名 .txt",
-      onclick: () => runPictureExport([...app.gallery.selected], "gallery"),
-    }, `保存原图到文件夹（${briefNumber(count)}）`),
-    el("span", { class: "kb-meta" }, "按住 Shift 点另一张可以连选；腾讯只保留 31 天，更早的图取不到原图。"),
+    el("div", { class: "gallery-selection-row" },
+      el("strong", { class: "gallery-selection-count" }, `已选 ${briefNumber(count)} 张`),
+      el("button", {
+        class: "btn small primary",
+        type: "button",
+        disabled: count === 0 || pictureExport.running,
+        title: "把原图复制到下面的文件夹；带咒语的 AI 图附同名 .txt",
+        onclick: () => runPictureExport([...app.gallery.selected], "gallery"),
+      }, `保存原图到文件夹（${briefNumber(count)}）`),
+      el("button", { class: "btn small", type: "button", disabled: loaded.length === 0, onclick: () => selectGalleryItems(loaded) },
+        `全选已加载的 ${briefNumber(loaded.length)} 张`),
+      el("button", { class: "btn small", type: "button", disabled: count === 0, onclick: () => {
+        replaceGallery({ selected: new Set(), lastPicked: null });
+        refreshGallerySelection();
+      } }, "清空"),
+      el("span", { class: "kb-results-spacer" }),
+      el("button", { class: "btn small", type: "button", title: "退出多选（Esc），已选的会清空", onclick: leaveGallerySelection }, "退出多选")),
+    el("span", { class: "kb-meta" }, "点图片就是选它；按住 Shift 点另一张可以连选。腾讯只保留 31 天，更早的图取不到原图。"),
     gallerySaveTargetRow(),
     pictureExportStatus("gallery"),
   ];
@@ -356,7 +399,7 @@ const gallerySaveTargetRow = () => {
 
 const gallerySelectBox = (item) => el("label", {
   class: app.gallery.selected.has(item.md5) ? "wall-pick picked" : "wall-pick",
-  title: "选中",
+  title: app.gallery.selecting ? "选中" : "选中这张，开始多选（也可以按住 Ctrl 点图片）",
   onclick: (event) => event.stopPropagation(),
 }, el("input", {
   type: "checkbox",
@@ -375,14 +418,22 @@ const gallerySelectBox = (item) => el("label", {
 const galleryTile = (item, index) => wallTile({
   src: pictureUrl(item.md5, "thumb"),
   alt: item.sticker ? "表情" : "图片",
-  onOpen: (event) => (app.gallery.selecting
+  onOpen: (event) => (app.gallery.selecting || event.ctrlKey || event.metaKey
     ? toggleGallerySelected(item.md5, event.currentTarget.closest(".wall-tile"), event)
     : openGalleryDetail(index)),
   badges: galleryBadges(item),
-  corner: app.gallery.selecting ? el("div", { class: "wall-corner" }, gallerySelectBox(item)) : null,
+  // Shown on hover; always while selecting (gallery.css).
+  corner: el("div", { class: "wall-corner desktop-action" }, gallerySelectBox(item)),
   caption: galleryCaption(item),
   extraClass: [item.sticker ? "sticker" : "", app.gallery.selected.has(item.md5) ? "selected" : ""].join(" "),
-  onError: (image) => image.closest(".wall-tile")?.classList.add("broken"),
+  onError: (image) => {
+    const tile = image.closest(".wall-tile");
+    tile?.classList.add("broken");
+    // A picture sent as a file has nothing to show until QQ has a preview of it.
+    if (item.fileName && tile && tile.querySelector(".wall-missing-note") === null) {
+      tile.querySelector(".wall-open")?.append(el("span", { class: "wall-missing-note" }, `${item.fileName}：本机没有 QQ 的预览`));
+    }
+  },
 });
 
 const dayHeaderAction = (day) => (app.gallery.selecting
@@ -408,7 +459,75 @@ const galleryRangeLabel = () => {
     : `${unixToHkt(range.fromUnix).slice(5, 16)} – ${unixToHkt(range.toUnix).slice(5, 16)}`;
 };
 
+/* ---------- search ---------- */
+
+// composing: an input method (pinyin…) is mid-word; nothing searches or
+// redraws the box until it ends (a redraw would cancel the word).
+const gallerySearch = { timer: null, composing: false, renderPending: false };
+
+const scheduleGallerySearch = (value) => {
+  clearTimeout(gallerySearch.timer);
+  gallerySearch.timer = setTimeout(() => runGallerySearch(value), GALLERY_SEARCH_DELAY_MS);
+};
+
+const runGallerySearch = (value) => {
+  clearTimeout(gallerySearch.timer);
+  gallerySearch.timer = null;
+  const q = value.trim();
+  if (q !== app.gallery.q) {
+    applyGalleryFilter({ q });
+  }
+};
+
+// The box is drawn again with every result; typing keeps its text, focus and
+// caret (text typed after the search started is not lost).
+const restoreGallerySearchFocus = (typed) => {
+  const input = document.getElementById("gallery-search");
+  if (input !== null && typed !== null) {
+    input.value = typed.value;
+    input.focus();
+    input.setSelectionRange(typed.caret, typed.caret);
+  }
+};
+
+const gallerySearchBox = () => el("form", {
+  class: "gallery-search",
+  role: "search",
+  onsubmit: (event) => {
+    event.preventDefault();
+    runGallerySearch(event.target.querySelector("input").value);
+  },
+},
+el("input", {
+  id: "gallery-search",
+  type: "search",
+  value: app.gallery.q,
+  placeholder: "搜图：咒语、LoRA、模型、文件名、发图人、配的话",
+  "aria-label": "搜图",
+  title: "几个词用空格隔开，每个词都要对上（可以分别对上不同地方）",
+  oninput: (event) => {
+    if (!event.isComposing && !gallerySearch.composing) {
+      scheduleGallerySearch(event.target.value);
+    }
+  },
+  oncompositionstart: () => {
+    gallerySearch.composing = true;
+    clearTimeout(gallerySearch.timer);
+  },
+  oncompositionend: (event) => {
+    gallerySearch.composing = false;
+    const { value } = event.target;
+    if (gallerySearch.renderPending) {
+      gallerySearch.renderPending = false;
+      renderMediaView();
+    }
+    scheduleGallerySearch(value);
+  },
+}),
+el("button", { class: "btn small", type: "submit" }, "搜索"));
+
 const galleryToolbar = () => el("div", { class: "gallery-toolbar" },
+  gallerySearchBox(),
   el("div", { class: "wall-modes", role: "group", "aria-label": "时间范围" },
     galleryCalendarButtons(),
     GALLERY_DAY_CHOICES.map(([days, label]) => el("button", {
@@ -430,6 +549,8 @@ const galleryToolbar = () => el("div", { class: "gallery-toolbar" },
     el("input", { type: "checkbox", checked: app.gallery.ai, onchange: (event) => applyGalleryFilter({ ai: event.target.checked }) }),
     "只看 AI 图"));
 
+const galleryLabel = (choices, value) => choices.find(([key]) => key === value)?.[1] ?? value;
+
 const galleryConditions = () => {
   const tab = app.gallery;
   const chips = [
@@ -439,6 +560,10 @@ const galleryConditions = () => {
     galleryCursorChip(),
     tab.groupId === "" ? null : { text: `群：${pictureGroupName(tab.groupId)}`, remove: () => applyGalleryFilter({ groupId: "" }) },
     tab.sender === "" ? null : { text: `发图人：${tab.senderLabel || tab.sender}`, remove: () => applyGalleryFilter({ sender: "", senderLabel: "" }) },
+    tab.q === "" ? null : { text: `搜：${tab.q}`, remove: () => applyGalleryFilter({ q: "" }) },
+    tab.shape === "" ? null : { text: `形状：${galleryLabel(GALLERY_SHAPES, tab.shape)}`, remove: () => applyGalleryFilter({ shape: "" }) },
+    tab.size === "" ? null : { text: `大小：${galleryLabel(GALLERY_SIZES, tab.size)}`, remove: () => applyGalleryFilter({ size: "" }) },
+    ...GALLERY_SWITCHES.filter(([key]) => tab[key]).map(([key, label]) => ({ text: label, remove: () => applyGalleryFilter({ [key]: false }) })),
   ].filter((chip) => chip !== null);
   if (chips.length === 0) {
     return null;
@@ -493,7 +618,28 @@ const galleryFacetSections = () => {
       facetRow({ label: "图片", count: facets.kinds.images, active: tab.kind === "images", onClick: () => applyGalleryFilter({ kind: "images" }) }),
       facetRow({ label: "表情包", count: facets.kinds.stickers, active: tab.kind === "stickers", onClick: () => applyGalleryFilter({ kind: "stickers" }) }),
       facetRow({ label: "只看 AI 图", count: facets.ai, active: tab.ai, onClick: () => applyGalleryFilter({ ai: !tab.ai }) }),
+      ...GALLERY_SWITCHES.map(([key, label, title]) => facetRow({
+        label,
+        title,
+        count: facets.extras?.[key] ?? null,
+        active: tab[key],
+        onClick: () => applyGalleryFilter({ [key]: !tab[key] }),
+      })),
     ]),
+    galleryFacetSection("shape", "形状", GALLERY_SHAPES.map(([shape, label, title]) => facetRow({
+      label,
+      title: title ?? label,
+      count: facets.shapes?.[shape] ?? null,
+      active: tab.shape === shape,
+      onClick: () => applyGalleryFilter({ shape: tab.shape === shape ? "" : shape }),
+    }))),
+    galleryFacetSection("size", "大小", GALLERY_SIZES.map(([size, label, title]) => facetRow({
+      label,
+      title,
+      count: facets.sizes?.[size] ?? null,
+      active: tab.size === size,
+      onClick: () => applyGalleryFilter({ size: tab.size === size ? "" : size }),
+    }))),
     galleryFacetSection("group", "群", facets.groups.map((row) => facetRow({
       label: row.label || row.value,
       count: row.count,
@@ -576,7 +722,13 @@ const renderMediaView = () => {
     return;
   }
   const tab = app.gallery;
-  setChildren(root, el("section", { class: "panel kb-page gallery-page" },
+  if (gallerySearch.composing) {
+    gallerySearch.renderPending = true;
+    return;
+  }
+  const focused = document.activeElement;
+  const typed = focused?.id === "gallery-search" ? { value: focused.value, caret: focused.selectionStart } : null;
+  setChildren(root, el("section", { class: tab.selecting ? "panel kb-page gallery-page selecting" : "panel kb-page gallery-page" },
     galleryToolbar(),
     galleryConditions(),
     el("div", { class: "kb-layout" },
@@ -591,12 +743,18 @@ const renderMediaView = () => {
             class: tab.selecting ? "btn small active desktop-action" : "btn small primary desktop-action",
             type: "button",
             "aria-pressed": String(tab.selecting),
-            title: "选几张图，一起把原图保存到文件夹",
+            title: tab.selecting
+              ? "退出多选（Esc），已选的会清空"
+              : "选几张图，一起把原图保存到文件夹。也可以直接点图片右上角的方框，或按住 Ctrl 点图片",
             onclick: () => {
-              replaceGallery({ selecting: !tab.selecting, lastPicked: null });
+              if (tab.selecting) {
+                leaveGallerySelection();
+                return;
+              }
+              replaceGallery({ selecting: true, lastPicked: null });
               renderMediaView();
             },
-          }, tab.selecting ? "完成选择" : "☑ 多选保存"),
+          }, tab.selecting ? "退出多选" : "多选"),
           wallControls({
             mode: galleryWallMode(),
             modes: GALLERY_MODES,
@@ -616,4 +774,5 @@ const renderMediaView = () => {
         galleryWall(),
         tab.selecting ? el("div", { id: "gallery-selection", class: "gallery-selection" }, gallerySelectionNodes()) : null,
         el("div", { id: "gallery-foot", class: "wall-foot" }, galleryFootText())))));
+  restoreGallerySearchFocus(typed);
 };

@@ -150,14 +150,14 @@ const briefPictureSelectionBar = (data) => {
     el("strong", {}, `已选 ${briefNumber(count)} 张`),
     el("button", { class: "btn small", type: "button", onclick: () => { briefPictures.selected = new Set([...briefPictures.selected, ...loaded]); renderBriefView(); } },
       `全选这里的 ${briefNumber(loaded.length)} 张`),
-    count === 0 ? null : el("button", { class: "btn small", type: "button", onclick: () => { briefPictures.selected = new Set(); renderBriefView(); } }, "清除"),
+    count === 0 ? null : el("button", { class: "btn small", type: "button", onclick: () => { briefPictures.selected = new Set(); renderBriefView(); } }, "清空"),
     el("button", {
       class: "btn small primary",
       type: "button",
       disabled: count === 0 || pictureExport.running,
       onclick: () => runPictureExport([...briefPictures.selected], BRIEF_PICTURE_OWNER),
     }, `保存原图到文件夹（${briefNumber(count)}）`),
-    target === null ? null : el("span", { class: "brief-meta" }, "保存到：", el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), "（在「画廊 → 多选保存」可以改）"),
+    target === null ? null : el("span", { class: "brief-meta" }, "保存到：", el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), "（在「画廊 → 多选」可以改）"),
     pictureExportStatus(BRIEF_PICTURE_OWNER));
 };
 
@@ -188,12 +188,17 @@ const briefImages = (data) => {
         el("button", {
           class: briefPictures.selecting ? "btn small active desktop-action" : "btn small primary desktop-action",
           type: "button",
+          title: briefPictures.selecting ? "退出多选，已选的会清空" : "选几张图，一起把原图保存到文件夹",
           onclick: () => {
             briefPictures.selecting = !briefPictures.selecting;
+            // The same as 画廊: leaving clears what was picked.
+            if (!briefPictures.selecting) {
+              briefPictures.selected = new Set();
+            }
             loadBriefSaveTarget();
             renderBriefView();
           },
-        }, briefPictures.selecting ? "完成选择" : "☑ 多选保存"),
+        }, briefPictures.selecting ? "退出多选" : "多选"),
         el("button", {
           class: "btn small",
           type: "button",

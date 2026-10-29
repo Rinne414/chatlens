@@ -9,7 +9,7 @@
 const PICTURE_MD5 = /^[a-f0-9]{32}$/u;
 const PICTURE_BUDGETS = [2, 5, 10, 20, 50, 100];
 const KEEP_TEXT = {
-  kept: "原图已永久保存在本工具里（清理空间时不会删）。要拿出来用，点「下载原图」或在画廊「多选保存」到文件夹。",
+  kept: "原图已永久保存在本工具里（清理空间时不会删）。要拿出来用，点「下载原图」或在画廊「多选」后保存到文件夹。",
   gone: "腾讯服务器已经删除这张图。",
   "no-rkey": "拿不到 QQ 的图片钥匙，请确认 QQ 正在运行。",
   unavailable: "暂时下载不到这张图。",
@@ -216,7 +216,8 @@ VIEW_LEAVE_HOOKS.push(closePictureViewer);
 const pictureViewerActions = (viewer) => {
   const notice = el("p", { class: "card-sub picture-viewer-notice" }, viewer.notice);
   return el("div", { class: "picture-viewer-actions" },
-    viewer.size === "original"
+    // A picture sent as a file has only QQ's preview here.
+    viewer.size === "original" || viewer.fileName
       ? null
       : el("button", {
         class: "btn small primary",
@@ -228,7 +229,7 @@ const pictureViewerActions = (viewer) => {
       }, "查看原图"),
     viewer.kept
       ? el("span", { class: "tag" }, "原图已留存")
-      : el("button", {
+      : viewer.fileName ? null : el("button", {
         class: "btn small",
         disabled: viewer.gone || viewer.busy,
         onclick: async () => {
@@ -267,7 +268,7 @@ const renderPictureViewer = () => {
   const meta = [
     viewer.width > 0 ? `${viewer.width}×${viewer.height}` : "",
     viewer.bytes > 0 ? formatByteSize(viewer.bytes) : "",
-    days === null ? "" : `腾讯还将保留约 ${days} 天`,
+    viewer.fileName ? `以文件发送：${viewer.fileName}，这里显示的是 QQ 的预览` : days === null ? "" : `腾讯还将保留约 ${days} 天`,
   ].filter((part) => part.length > 0).join(" · ");
   const image = viewer.gone
     ? el("div", { class: "picture-viewer-missing" }, "腾讯服务器已经删除这张图。")
@@ -325,6 +326,7 @@ const openPictureViewer = (picture) => {
     bytes: Number(picture.size) || 0,
     expiresAt: Number(picture.expiresAt) || 0,
     gone: picture.gone === 1 || picture.gone === true,
+    fileName: String(picture.fileName ?? ""),
     notice: "",
     busy: false,
   };

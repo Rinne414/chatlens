@@ -103,7 +103,9 @@ const galleryDetailMeta = (detail) => {
   return [
     item.width > 0 ? `${item.width}×${item.height}` : "",
     item.size > 0 ? formatByteSize(item.size) : "",
-    item.kept ? "原图已永久保存在本工具里" : days === null ? "" : `腾讯还保留约 ${days} 天`,
+    item.fileName
+      ? `以文件发送：${item.fileName}，这里显示的是 QQ 的预览（最长边约 1280）`
+      : item.kept ? "原图已永久保存在本工具里" : days === null ? "" : `腾讯还保留约 ${days} 天`,
   ].filter((part) => part !== "").join(" · ");
 };
 
@@ -112,7 +114,7 @@ const galleryDetailActions = (detail) => {
   const shown = item.shown ?? item.origin;
   const sender = shown === null ? "" : shown.speakerUin || shown.speaker;
   return el("div", { class: "row gallery-detail-actions" },
-    detail.size === "original" || item.gone
+    detail.size === "original" || item.gone || item.fileName
       ? null
       : el("button", { class: "btn small primary", type: "button", onclick: () => galleryDetailPatch(item.md5, { size: "original", notice: "正在向腾讯取原图…" }) }, "看原图"),
     item.gone
@@ -122,8 +124,8 @@ const galleryDetailActions = (detail) => {
         href: pictureUrl(item.md5, "original"),
         download: "",
         title: "下载到浏览器的下载文件夹，文件名是「时间_群_发图人_编号」，不会和别的图重名",
-      }, "下载原图"),
-    item.kept || item.gone
+      }, item.fileName ? "下载 QQ 的预览" : "下载原图"),
+    item.kept || item.gone || item.fileName
       ? null
       : el("button", {
         class: "btn small",
@@ -285,12 +287,23 @@ const renderGalleryDetailLayer = () => {
   }
 };
 
+// Esc closes the top layer only: the open picture first, then 多选.
 document.addEventListener("keydown", (event) => {
-  if (app.view !== "media" || app.gallery.detail === null) {
+  if (app.view !== "media") {
     return;
   }
-  const tag = document.activeElement?.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+  // A tile's box keeps focus after a click; only typing places count.
+  const focused = document.activeElement;
+  const typing = focused?.tagName === "TEXTAREA" || focused?.tagName === "SELECT"
+    || (focused?.tagName === "INPUT" && !["checkbox", "radio", "range"].includes(focused.type));
+  if (typing) {
+    return;
+  }
+  if (app.gallery.detail === null) {
+    if (event.key === "Escape" && app.gallery.selecting && pictureUi.viewer === null && !event.defaultPrevented) {
+      event.preventDefault();
+      leaveGallerySelection();
+    }
     return;
   }
   if (event.key === "Escape") {

@@ -48,6 +48,12 @@ const filterFrom = (params) => ({
   sender: String(params.get("sender") ?? "").slice(0, 80),
   kind: params.get("kind") ?? "images",
   ai: params.get("ai") === "1",
+  q: String(params.get("q") ?? "").slice(0, 200),
+  shape: params.get("shape") ?? "",
+  size: params.get("size") ?? "",
+  prompt: params.get("prompt") === "1",
+  asked: params.get("asked") === "1",
+  file: params.get("file") === "1",
 });
 
 const list = (params) => withReadOnlyStore((db) => gallery.listPictures(db, {

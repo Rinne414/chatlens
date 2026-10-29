@@ -135,3 +135,53 @@ test("rejects an invalid range, kind or md5", () => {
     assert.throws(() => gallery.pictureDetail(db, "../etc"), /图片编号/u);
   });
 });
+
+test("search matches the text sent with a picture, who posted it, a file name, and the prompt library", () => {
+  withStore((db, dir) => {
+    db.prepare("INSERT INTO messages (group_id, row_id, sent_at, speaker, speaker_uin, text, is_media) VALUES ('1', '3', ?, 'Bob', '10002', '新出的 Anima 立绘', 0)").run(NOW - 500);
+    db.prepare(`INSERT INTO pictures (group_id, row_id, seq, md5, width, height, size, format, sent_at, expires_at, sticker, file_name)
+      VALUES ('1', 'm5', 2000, ?, 2752, 2144, 9616710, 1001, ?, ?, 0, 'Moss_00008_.png')`).run(md5("e"), NOW - 50, NOW + 86400);
+    const kbPath = path.join(dir, "knowledge.db");
+    const kb = knowledgeStore.openKnowledgeStore(kbPath);
+    kb.prepare(`INSERT INTO images (hash, generator, prompt, checkpoint, parsed_at) VALUES (?, 'comfyui', 'silver hair, maid', 'anima', 1)`).run(A);
+    kb.prepare("INSERT INTO prompt_requests (group_id, ask_row_id, image_hash) VALUES ('1', 't9', ?)").run(A);
+    kb.close();
+    const reader = new Database(path.join(dir, "messages.db"), { readonly: true });
+    reader.prepare("ATTACH DATABASE ? AS kb").run(kbPath);
+    const found = (options) => gallery.listPictures(reader, { ...range, ...options }).items.map((item) => item.md5);
+    try {
+      assert.deepEqual(found({ q: "anima 立绘" }), [B]);
+      assert.deepEqual(found({ q: "MAID" }), [A]);
+      assert.deepEqual(found({ q: "alice" }), [A]);
+      assert.deepEqual(found({ q: "moss" }), [md5("e")]);
+      assert.deepEqual(found({ q: "100%" }), []);
+      assert.deepEqual(found({ prompt: true }), [A]);
+      assert.deepEqual(found({ asked: true }), [A]);
+      assert.deepEqual(found({ file: true }), [md5("e")]);
+      assert.equal(gallery.listPictures(reader, { ...range, file: true }).items[0].fileName, "Moss_00008_.png");
+      // A switch adds to the others: with 有咒语 on, file counts files that have a prompt.
+      assert.deepEqual(gallery.galleryFacets(reader, { ...range, prompt: true }).extras, { prompt: 1, asked: 1, file: 0 });
+      assert.deepEqual(gallery.galleryFacets(reader, range).extras, { prompt: 1, asked: 1, file: 1 });
+    } finally {
+      reader.close();
+    }
+  });
+});
+
+test("shape and size buckets filter and count without their own selection", () => {
+  withStore((db) => {
+    db.prepare(`INSERT INTO pictures (group_id, row_id, seq, md5, width, height, size, format, sent_at, expires_at, sticker)
+      VALUES ('1', 'm6', 0, ?, 1080, 2400, 900000, 1000, ?, ?, 0)`).run(md5("f"), NOW - 40, NOW + 86400);
+    const found = (options) => gallery.listPictures(db, { ...range, ...options }).items.map((item) => item.md5);
+    assert.deepEqual(found({ shape: "tall" }), [A]);
+    assert.deepEqual(found({ shape: "square" }), [B]);
+    assert.deepEqual(found({ shape: "long" }), [md5("f")]);
+    assert.deepEqual(found({ size: "large" }), [md5("f"), B, A]);
+    assert.deepEqual(found({ size: "small" }), []);
+    assert.deepEqual(found({ kind: "stickers", size: "small" }), [S]);
+    const facets = gallery.galleryFacets(db, { ...range, shape: "long" });
+    assert.deepEqual(facets.shapes, { wide: 0, square: 1, tall: 1, long: 1 });
+    assert.deepEqual(facets.sizes, { large: 1, medium: 0, small: 0 });
+    assert.throws(() => gallery.listPictures(db, { ...range, shape: "round" }), /未知的形状/u);
+  });
+});

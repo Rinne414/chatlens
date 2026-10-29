@@ -12,9 +12,10 @@ const PICTURE_EXPORT_REASONS = {
   "no-rkey": "QQ 没在运行，拿不到图片钥匙",
   unavailable: "暂时下载不到",
   "not-found": "没有记录",
+  "file-only": "是以文件发的图，本机没有原文件也没有 QQ 的预览",
 };
 
-const pictureExport = { owner: null, running: false, stop: false, done: 0, total: 0, exported: 0, prompts: 0, failed: {}, folder: null, path: null, error: null };
+const pictureExport = { owner: null, running: false, stop: false, done: 0, total: 0, exported: 0, prompts: 0, previews: 0, failed: {}, folder: null, path: null, error: null };
 
 const pictureExportFailedText = () => Object.entries(pictureExport.failed)
   .map(([reason, count]) => `${count} 张${PICTURE_EXPORT_REASONS[reason] ?? reason}`)
@@ -29,8 +30,12 @@ const pictureExportText = () => {
   if (job.running) {
     return `正在导出 ${job.done} / ${job.total}…`;
   }
+  const originals = job.exported - job.previews;
   return [
-    `导出了 ${job.exported} 张原图${job.prompts > 0 ? `（${job.prompts} 张附咒语 .txt）` : ""}`,
+    originals > 0 || job.previews === 0 ? `导出了 ${originals} 张原图` : "",
+    // Pictures sent as files whose original is nowhere on this computer.
+    job.previews > 0 ? `${originals > 0 ? "；" : ""}${job.previews} 张以文件发的图本机没有原文件，存的是 QQ 的预览（最长边约 1280）` : "",
+    job.prompts > 0 ? `（${job.prompts} 张附咒语 .txt）` : "",
     failed === "" ? "" : `；${failed}`,
     job.stop && job.done < job.total ? `；已停下，还有 ${job.total - job.done} 张没导出` : "",
   ].join("");
@@ -73,7 +78,7 @@ const runPictureExport = async (md5s, owner) => {
     return;
   }
   const chosen = [...new Set(md5s)];
-  Object.assign(pictureExport, { owner, running: true, stop: false, done: 0, total: chosen.length, exported: 0, prompts: 0, failed: {}, folder: null, path: null, error: null });
+  Object.assign(pictureExport, { owner, running: true, stop: false, done: 0, total: chosen.length, exported: 0, prompts: 0, previews: 0, failed: {}, folder: null, path: null, error: null });
   renderPictureExportStatus();
   try {
     for (let start = 0; start < chosen.length && !pictureExport.stop; start += PICTURE_EXPORT_BATCH) {
@@ -85,6 +90,7 @@ const runPictureExport = async (md5s, owner) => {
         if (item.status === "exported") {
           pictureExport.exported += 1;
           pictureExport.prompts += item.prompt ? 1 : 0;
+          pictureExport.previews += item.previewOnly ? 1 : 0;
         } else {
           pictureExport.failed[item.status] = (pictureExport.failed[item.status] ?? 0) + 1;
         }

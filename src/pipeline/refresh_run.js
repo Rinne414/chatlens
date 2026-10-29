@@ -18,7 +18,8 @@ const { parseArgs } = require("node:util");
 const { loadConfig, latestGroupListPath } = require("../server/toolkit_state");
 const messageStore = require("../message_store");
 const { ensureBriefingSchema, getState, setState, redoStats, requeueDeclined } = require("../briefing_store");
-const { REMOTE_LIFETIME_SECONDS, ingestPictures } = require("../picture_store");
+const { REMOTE_LIFETIME_SECONDS, ingestPictures, pendingQqPreviews, copyQqPreview } = require("../picture_store");
+const lateRows = require("../late_rows");
 const { REPAIR_STATE_KEY } = require("../repair_picture_text");
 const { backfillStarts, recordFailedExport } = require("../backfill_replies");
 const engine = require("../briefing_engine");
@@ -107,6 +108,69 @@ const ingestPictureBackfill = (filePath, groupIds) => {
       setState(db, PICTURE_BACKFILL_KEY, { groups: [...new Set([...done, ...groupIds.filter((groupId) => !failed.has(groupId))])] });
     })();
     return inserted;
+  } finally {
+    db.close();
+  }
+};
+
+// Late-written messages (src/late_rows.js): the window read again this tick
+// and, until done, one slice of the one-time 31-day re-read.
+const lateReadPlan = (now) => {
+  const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
+  try {
+    return { recovery: lateRows.recoverySlice(getState(db, lateRows.RECOVERY_KEY, null), now) };
+  } finally {
+    db.close();
+  }
+};
+
+// Keeps only what the store lacks and writes it next to the export.
+// { path: null when nothing is new, complete: every group read through }, or
+// null when the export did not happen.
+const unstoredExport = (exportPath, targetPath) => {
+  if (!fs.existsSync(exportPath)) {
+    return null;
+  }
+  const exportData = JSON.parse(fs.readFileSync(exportPath, "utf8"));
+  const complete = (exportData.incompleteGroups ?? []).length === 0;
+  const db = messageStore.openStore(common.storeDbPath);
+  try {
+    const part = lateRows.unstoredPart(db, exportData);
+    if (part.messages.length === 0 && part.mediaMessages.length === 0) {
+      return { path: null, complete };
+    }
+    common.writeJson(targetPath, part);
+    return { path: targetPath, complete };
+  } finally {
+    db.close();
+  }
+};
+
+// Pictures sent as files show QQ's own local preview (picture_store.js).
+const QQ_PREVIEWS_PER_TICK = 300;
+
+const copyFilePreviews = (now, ntDataDir) => {
+  const db = messageStore.openStore(common.storeDbPath);
+  let copied = 0;
+  try {
+    for (const md5 of pendingQqPreviews(db, { now, limit: QQ_PREVIEWS_PER_TICK })) {
+      try {
+        copied += copyQqPreview(db, common.storeDir, md5, { ntDataDir }) === null ? 0 : 1;
+      } catch (error) {
+        common.warn(`复制 QQ 预览图失败（${md5}）：${error.message}`);
+      }
+    }
+    return copied;
+  } finally {
+    db.close();
+  }
+};
+
+const saveRecoveryProgress = (slice, now, complete) => {
+  const db = ensureBriefingSchema(messageStore.openStore(common.storeDbPath));
+  try {
+    const saved = getState(db, lateRows.RECOVERY_KEY, null);
+    setState(db, lateRows.RECOVERY_KEY, lateRows.recoveryStateAfter(slice, now, { complete, saved }));
   } finally {
     db.close();
   }
@@ -448,6 +512,11 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   const replyStartsPath = path.join(workDir, "reply-starts.json");
   const replyExportPath = path.join(workDir, "reply-export.json");
   let replyBackfill = null;
+  const { recovery } = lateReadPlan(now);
+  const lateExports = [
+    { name: "late", fromUnix: now - lateRows.LATE_REREAD_SECONDS, toUnix: now },
+    recovery === null ? null : { name: "recovery", ...recovery },
+  ].filter((item) => item !== null).map((item) => ({ ...item, exportPath: path.join(workDir, `${item.name}-export.json`) }));
   common.writeJson(startsPath, starts);
   const env = { NTQQ_DB_KEY: readSecretSync("ntqqKey"), QQ_GROUP_STARTS_JSON: startsPath };
   const scanLimit = Number(config.defaultScanLimit) > 0 ? Number(config.defaultScanLimit) : 1000000;
@@ -475,6 +544,15 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
         { env },
         "导出消息失败",
       ));
+      // Not resumed from coverage (no group starts): the whole window again.
+      for (const late of lateExports) {
+        const exported = await timed(`${late.name}Export`, () => common.runNodeScript("export_group_recent.js", [
+          mirror.messageDb, mirror.groupDb, groupIds.join(","), late.fromUnix, late.toUnix, late.exportPath, scanLimit,
+        ], { env: { NTQQ_DB_KEY: env.NTQQ_DB_KEY }, quiet: true }));
+        if (exported.code !== 0) {
+          common.warn(`重新读取晚到的消息失败，下次刷新再试（退出码 ${exported.code}）`);
+        }
+      }
       if (repairText) {
         const repair = await timed("textRepair", () => common.runNodeScript("repair_picture_text.js", [mirror.messageDb, common.storeDbPath], { env }));
         const line = repair.stdout.split(/\r?\n/u).find((item) => item.startsWith("repairResult="));
@@ -516,6 +594,22 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   const ingest = await timed("ingest", () => common.runNodeScript("ingest_store.js", [exportPath, common.storeDbPath, `bg-${common.localStamp()}`], { env }));
   const inserted = Number(/inserted=(\d+)/u.exec(ingest.stdout)?.[1] ?? 0);
   const picturesBackfilled = fs.existsSync(picturesPath) ? ingestPictureBackfill(picturesPath, backfillGroups) : 0;
+  // After the regular ingest, so only what it did not bring is left.
+  const lateFound = {};
+  const lateIngested = [];
+  for (const late of lateExports) {
+    const unstored = unstoredExport(late.exportPath, path.join(workDir, `${late.name}-unstored.json`));
+    const stored = unstored?.path ? await timed(`${late.name}Ingest`, () => common.runNodeScript("ingest_store.js", [
+      unstored.path, common.storeDbPath, `${late.name}-${common.localStamp()}`,
+    ], { env })) : null;
+    if (stored !== null && stored.code === 0) {
+      lateFound[late.name] = Number(/inserted=(\d+)/u.exec(stored.stdout)?.[1] ?? 0);
+      lateIngested.push(unstored.path);
+    }
+    if (late.name === "recovery" && unstored !== null && (stored === null || stored.code === 0)) {
+      saveRecoveryProgress(late, now, unstored.complete);
+    }
+  }
   if (fs.existsSync(replyExportPath)) {
     const backfill = await timed("replyBackfill", () => common.runNodeScript("backfill_replies.js", [replyExportPath, common.storeDbPath], { env }));
     const line = backfill.stdout.split(/\r?\n/u).find((item) => item.startsWith("backfillResult="));
@@ -523,12 +617,17 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   }
 
   const ntDataDir = String(config.ntDataDir ?? "").trim();
+  const filePreviews = await timed("filePreviews", async () => copyFilePreviews(now, ntDataDir));
+
   if (ntDataDir.length > 0 && fs.existsSync(ntDataDir)) {
     await timed("knowledge", async () => {
-      await common.runNodeScript("analyze_export.js", [exportPath, analysisDir], { env, quiet: true });
-      const mediaMessages = path.join(analysisDir, "media-messages.json");
-      if (fs.existsSync(mediaMessages)) {
-        await common.runNodeScript("harvest_run_media.js", [mediaMessages, ntDataDir, common.knowledgeDbPath, exportPath], { env, quiet: true });
+      for (const [index, source] of [exportPath, ...lateIngested].entries()) {
+        const dir = index === 0 ? analysisDir : `${analysisDir}-${index}`;
+        await common.runNodeScript("analyze_export.js", [source, dir], { env, quiet: true });
+        const mediaMessages = path.join(dir, "media-messages.json");
+        if (fs.existsSync(mediaMessages)) {
+          await common.runNodeScript("harvest_run_media.js", [mediaMessages, ntDataDir, common.knowledgeDbPath, source], { env, quiet: true });
+        }
       }
     });
   }
@@ -550,6 +649,10 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
     groups: groupIds.length,
     inserted,
     picturesBackfilled,
+    // Messages QQ wrote after an earlier refresh had read past their time.
+    lateFound,
+    recovery,
+    filePreviews,
     textRepair,
     replyBackfill,
     // Where each group's window began: older messages of this tick came

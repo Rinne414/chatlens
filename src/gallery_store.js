@@ -19,6 +19,78 @@ const KINDS = new Set(["images", "stickers", "all"]);
 const SORTS = new Set(["recent", "spread"]);
 const MD5 = /^[a-f0-9]{32}$/u;
 
+// Shape and size buckets over a posting's stated dimensions (p.width/height;
+// 0 when unknown, which no bucket matches). A long picture is mostly a phone
+// screenshot or a comic strip.
+const KNOWN = "p.width > 0 AND p.height > 0";
+const SHAPES = {
+  wide: `${KNOWN} AND p.width > p.height * 1.15`,
+  square: `${KNOWN} AND p.width <= p.height * 1.15 AND p.height <= p.width * 1.15`,
+  tall: `${KNOWN} AND p.height > p.width * 1.15 AND p.height < p.width * 1.8`,
+  long: `${KNOWN} AND p.height >= p.width * 1.8`,
+};
+const LARGE_SIDE = 1000;
+const SMALL_SIDE = 500;
+const SIZES = {
+  large: `max(p.width, p.height) >= ${LARGE_SIDE}`,
+  medium: `max(p.width, p.height) >= ${SMALL_SIDE} AND max(p.width, p.height) < ${LARGE_SIDE}`,
+  small: `${KNOWN} AND max(p.width, p.height) < ${SMALL_SIDE}`,
+};
+
+// Opt-in switches; the two that need the prompt library match nothing
+// without it.
+const extraConditions = (db) => {
+  const kb = hasKnowledge(db);
+  return {
+    prompt: kb ? "EXISTS (SELECT 1 FROM kb.images ki WHERE ki.hash = p.md5 AND ki.prompt <> '')" : "0",
+    asked: kb ? "EXISTS (SELECT 1 FROM kb.prompt_requests kr WHERE kr.image_hash = p.md5)" : "0",
+    file: "p.file_name <> ''",
+  };
+};
+
+const escapeLike = (text) => text.replace(/[\\%_]/gu, (character) => `\\${character}`);
+
+const searchWords = (q) => String(q ?? "").trim().split(/\s+/u).filter((word) => word.length > 0);
+
+const LIKE = "LIKE @like ESCAPE '\\'";
+
+// Pictures posted in the window that one word finds: in the prompt, a LoRA or
+// the model (prompt library; its tags are cut from the prompt, so the prompt
+// covers them), the file name, who posted it, or the text sent with it (the
+// same QQ message's text row: its row id without "m").
+const wordMatches = (db, word, { fromUnix, toUnix }) => {
+  const args = { like: `%${escapeLike(word)}%`, fromUnix, toUnix };
+  const inWindow = "p.sent_at >= @fromUnix AND p.sent_at < @toUnix";
+  const queries = [
+    `SELECT p.md5 FROM pictures p WHERE ${inWindow} AND p.file_name ${LIKE}`,
+    `SELECT p.md5 FROM messages sm JOIN pictures p ON p.group_id = sm.group_id AND p.row_id IN (sm.row_id, 'm' || sm.row_id)
+     WHERE sm.sent_at >= @fromUnix AND sm.sent_at < @toUnix AND (sm.text ${LIKE} OR sm.speaker ${LIKE})`,
+  ];
+  if (hasKnowledge(db)) {
+    queries.push(`SELECT p.md5 FROM pictures p WHERE ${inWindow} AND p.md5 IN (
+      SELECT hash FROM kb.images WHERE prompt ${LIKE} OR checkpoint ${LIKE}
+      UNION SELECT hash FROM kb.image_loras WHERE lora_name ${LIKE})`);
+  }
+  return new Set(queries.flatMap((sql) => db.prepare(sql).all(args).map((row) => row.md5)));
+};
+
+// The list and the facet counts are two requests with the same words: the
+// matches are kept a minute per store, words and window.
+const SEARCH_CACHE_MS = 60 * 1000;
+let searchCache = { key: "", at: 0, md5s: [] };
+
+// md5s every word finds (each word may match a different field).
+const searchMatches = (db, words, window) => {
+  const key = JSON.stringify([db.name, words, window.fromUnix, window.toUnix]);
+  if (searchCache.key === key && Date.now() - searchCache.at < SEARCH_CACHE_MS) {
+    return searchCache.md5s;
+  }
+  const [first, ...rest] = words.map((word) => wordMatches(db, word, window));
+  const md5s = [...first].filter((md5) => rest.every((set) => set.has(md5)));
+  searchCache = { key, at: Date.now(), md5s };
+  return md5s;
+};
+
 const hasKnowledge = (db) => db.prepare("PRAGMA database_list").all().some((row) => row.name === "kb");
 
 // SQL for "this picture is AI-generated" over pictures aliased `p`.
@@ -35,13 +107,23 @@ const clampLimit = (limit) => {
 };
 
 // Filters shared by the list and the facet counts. `sender` is a QQ number, or
-// a display name for rows stored before the number was recorded.
-const buildFilter = (db, { fromUnix, toUnix, groupId = "", sender = "", kind = "images", ai = false }) => {
+// a display name for rows stored before the number was recorded. `q` is the
+// search text, shape / size a bucket name, prompt / asked / file switches.
+const buildFilter = (db, {
+  fromUnix, toUnix, groupId = "", sender = "", kind = "images", ai = false,
+  q = "", shape = "", size = "", prompt = false, asked = false, file = false,
+}) => {
   if (!Number.isFinite(fromUnix) || !Number.isFinite(toUnix) || fromUnix >= toUnix) {
     throw new Error("时间范围无效。");
   }
   if (!KINDS.has(kind)) {
     throw new Error(`未知的类型：${kind}`);
+  }
+  if (shape !== "" && SHAPES[shape] === undefined) {
+    throw new Error(`未知的形状：${shape}`);
+  }
+  if (size !== "" && SIZES[size] === undefined) {
+    throw new Error(`未知的大小：${size}`);
   }
   const conditions = ["p.sent_at >= @fromUnix", "p.sent_at < @toUnix"];
   const args = { fromUnix, toUnix };
@@ -54,6 +136,23 @@ const buildFilter = (db, { fromUnix, toUnix, groupId = "", sender = "", kind = "
   }
   if (ai) {
     conditions.push(aiCondition(db));
+  }
+  if (shape !== "") {
+    conditions.push(SHAPES[shape]);
+  }
+  if (size !== "") {
+    conditions.push(SIZES[size]);
+  }
+  const extras = extraConditions(db);
+  for (const [name, on] of [["prompt", prompt], ["asked", asked], ["file", file]]) {
+    if (on) {
+      conditions.push(extras[name]);
+    }
+  }
+  const words = searchWords(q);
+  if (words.length > 0) {
+    args.searchMd5s = JSON.stringify(searchMatches(db, words, { fromUnix, toUnix }));
+    conditions.push("p.md5 IN (SELECT value FROM json_each(@searchMd5s))");
   }
   let join = "";
   if (sender !== "") {
@@ -77,7 +176,8 @@ const pageRows = (db, filter, { sort, limit, offset }) => db.prepare(`
   SELECT p.md5, MIN(p.sent_at) AS firstAt, MAX(p.sent_at) AS lastAt,
          (SELECT COUNT(*) FROM pictures q WHERE q.md5 = p.md5) AS posts, ${SPREAD_GROUPS} AS groups,
          MAX(p.width) AS width, MAX(p.height) AS height, MAX(p.size) AS size,
-         MAX(p.format) AS format, MAX(p.sticker) AS sticker, MAX(p.expires_at) AS expiresAt
+         MAX(p.format) AS format, MAX(p.sticker) AS sticker, MAX(p.expires_at) AS expiresAt,
+         (SELECT CASE WHEN MIN(q.file_name) <> '' THEN MAX(q.file_name) ELSE '' END FROM pictures q WHERE q.md5 = p.md5) AS fileName
   FROM pictures p ${filter.join}
   WHERE ${filter.where}
   GROUP BY p.md5
@@ -146,13 +246,17 @@ const describe = (row, occurrences, file, knowledge, options) => {
     sticker: row.sticker === 1,
     expiresAt: row.expiresAt,
     lastAt: row.lastAt,
+    // Set when it was sent as a file: what is shown is QQ's own preview.
+    fileName: row.fileName ?? "",
     shown: shown === undefined ? null : posting(shown),
     origin: origin === undefined ? null : posting(origin),
     groups: new Set(occurrences.map((item) => item.groupId)).size,
     posts: occurrences.length,
     hasThumb: file?.hasThumb === 1,
     kept: file?.kept === 1,
-    gone: file?.gone === 1,
+    // Tencent never had a picture sent only as a file, so it cannot be gone
+    // there (an older picture pass may have asked anyway).
+    gone: file?.gone === 1 && !row.fileName,
     ai: file?.probe === "ai" || aiKnown,
     generator: aiKnown ? knowledge.generator : "",
     checkpoint: aiKnown ? knowledge.checkpoint : "",
@@ -162,9 +266,11 @@ const describe = (row, occurrences, file, knowledge, options) => {
   };
 };
 
+const DEFAULT_OPTIONS = { groupId: "", sender: "", kind: "images", ai: false, q: "", shape: "", size: "", prompt: false, asked: false, file: false };
+
 const listPictures = (db, options) => {
   const sort = SORTS.has(options.sort) ? options.sort : "recent";
-  const normalized = { groupId: "", sender: "", kind: "images", ai: false, ...options };
+  const normalized = { ...DEFAULT_OPTIONS, ...options };
   const filter = buildFilter(db, normalized);
   const limit = clampLimit(options.limit);
   const offset = Math.max(0, Number.parseInt(options.offset ?? 0, 10) || 0);
@@ -185,8 +291,36 @@ const listPictures = (db, options) => {
 
 // Counts for the sidebar under the current filter; each dimension is counted
 // without its own selection, so the other options stay visible.
+// Distinct pictures per bucket. Shape and size are counted without their own
+// selection (picking another bucket replaces it); each switch adds to the
+// others, so it is counted with the others as they are and itself off.
+// Counts that end up with the same filter (the usual case: nothing chosen)
+// share one pass.
+const bucketFacets = (db, normalized) => {
+  const counts = [
+    ...Object.entries(SHAPES).map(([bucket, condition]) => ({ dimension: "shapes", bucket, condition, options: { ...normalized, shape: "" } })),
+    ...Object.entries(SIZES).map(([bucket, condition]) => ({ dimension: "sizes", bucket, condition, options: { ...normalized, size: "" } })),
+    ...Object.entries(extraConditions(db)).map(([bucket, condition]) => ({ dimension: "extras", bucket, condition, options: { ...normalized, [bucket]: false } })),
+  ];
+  const passes = new Map();
+  for (const count of counts) {
+    const key = JSON.stringify(count.options);
+    passes.set(key, [...(passes.get(key) ?? []), count]);
+  }
+  const result = { shapes: {}, sizes: {}, extras: {} };
+  for (const group of passes.values()) {
+    const filter = buildFilter(db, group[0].options);
+    const columns = group.map((count, index) => `COUNT(DISTINCT CASE WHEN ${count.condition} THEN p.md5 END) AS c${index}`);
+    const row = db.prepare(`SELECT ${columns.join(", ")} FROM pictures p ${filter.join} WHERE ${filter.where}`).get(filter.args);
+    group.forEach((count, index) => {
+      result[count.dimension][count.bucket] = row[`c${index}`];
+    });
+  }
+  return result;
+};
+
 const galleryFacets = (db, options) => {
-  const normalized = { groupId: "", sender: "", kind: "images", ai: false, ...options };
+  const normalized = { ...DEFAULT_OPTIONS, ...options };
   const distinct = (filter, extra = "") =>
     db.prepare(`SELECT COUNT(DISTINCT p.md5) AS n FROM pictures p ${filter.join} WHERE ${filter.where} ${extra}`).get(filter.args).n;
   const allKinds = buildFilter(db, { ...normalized, kind: "all", ai: false });
@@ -216,7 +350,7 @@ const galleryFacets = (db, options) => {
     WHERE ${bySender.where} AND m.speaker <> ''
     GROUP BY value ORDER BY count DESC
   `).all(bySender.args);
-  return { kinds, ai, spread, groups, senders };
+  return { kinds, ai, spread, groups, senders, ...bucketFacets(db, normalized) };
 };
 
 // Everything the detail view needs about one picture.
@@ -230,7 +364,8 @@ const pictureDetail = (db, md5) => {
   }
   const meta = db.prepare(`
     SELECT MAX(width) AS width, MAX(height) AS height, MAX(size) AS size, MAX(format) AS format,
-           MAX(sticker) AS sticker, MAX(expires_at) AS expiresAt
+           MAX(sticker) AS sticker, MAX(expires_at) AS expiresAt,
+           CASE WHEN MIN(file_name) <> '' THEN MAX(file_name) ELSE '' END AS fileName
     FROM pictures WHERE md5 = ?
   `).get(md5);
   const file = filesOf(db, [md5]).get(md5);
@@ -241,7 +376,7 @@ const pictureDetail = (db, md5) => {
     ...meta,
     sticker: meta.sticker === 1,
     kept: file?.kept === 1,
-    gone: file?.gone === 1,
+    gone: file?.gone === 1 && !meta.fileName,
     probe: file?.probe ?? "",
     ai: file?.probe === "ai" || aiKnown,
     generator: aiKnown ? knowledge.generator : "",

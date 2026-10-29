@@ -5,7 +5,10 @@
 //
 // pictures:      one row per picture per message; sticker = 1 for stickers,
 //                which only ever get a thumbnail (never an AI check, preview
-//                or kept original).
+//                or kept original). file_name is set for a picture sent as a
+//                file: Tencent serves those only as group files, so nothing
+//                is fetched for them; QQ's own local preview (local_path) is
+//                copied in as their preview instead (copyQqPreview).
 //                row_id matches the media row in `messages` (m<rowId>).
 // picture_files: one row per md5: which copies exist under store/pictures/
 //                (thumb = Tencent's spec 198: 300px; preview = its spec 720, which is up
@@ -74,6 +77,11 @@ const ensurePictureSchema = (db) => {
   if (!pictureColumns.includes("sticker")) {
     db.prepare("ALTER TABLE pictures ADD COLUMN sticker INTEGER NOT NULL DEFAULT 0").run();
   }
+  for (const column of ["file_name", "local_path"]) {
+    if (!pictureColumns.includes(column)) {
+      db.prepare(`ALTER TABLE pictures ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`).run();
+    }
+  }
   return db;
 };
 
@@ -89,8 +97,8 @@ const picturePath = (storeDir, kind, md5, ext) => {
 
 const ingestPictures = (db, rows) => {
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO pictures (group_id, row_id, seq, md5, file_id, legacy_path, size, width, height, format, sent_at, expires_at, sticker)
-    VALUES (@groupId, @rowId, @seq, @md5, @fileId, @legacyPath, @size, @width, @height, @format, @sentAt, @expiresAt, @sticker)
+    INSERT OR IGNORE INTO pictures (group_id, row_id, seq, md5, file_id, legacy_path, size, width, height, format, sent_at, expires_at, sticker, file_name, local_path)
+    VALUES (@groupId, @rowId, @seq, @md5, @fileId, @legacyPath, @size, @width, @height, @format, @sentAt, @expiresAt, @sticker, @fileName, @localPath)
   `);
   let inserted = 0;
   for (const row of rows) {
@@ -109,6 +117,8 @@ const ingestPictures = (db, rows) => {
       // Older bodies carry no expiry; upload + 31 days is what Tencent applies.
       expiresAt: row.expiresAt > 0 ? row.expiresAt : row.sentAt + REMOTE_LIFETIME_SECONDS,
       sticker: row.sticker === true ? 1 : 0,
+      fileName: row.fileName ?? "",
+      localPath: row.localPath ?? "",
     }).changes;
   }
   return inserted;
@@ -136,8 +146,9 @@ const updateFile = (db, md5, patch, now = Math.floor(Date.now() / 1000)) => {
 const locate = (db, md5) =>
   db.prepare(`
     SELECT md5, file_id AS fileId, legacy_path AS legacyPath, size, width, height, format,
-           sent_at AS sentAt, expires_at AS expiresAt, group_id AS groupId, row_id AS rowId
-    FROM pictures WHERE md5 = ? ORDER BY expires_at DESC LIMIT 1
+           sent_at AS sentAt, expires_at AS expiresAt, group_id AS groupId, row_id AS rowId,
+           file_name AS fileName, local_path AS localPath
+    FROM pictures WHERE md5 = ? ORDER BY file_name <> '', expires_at DESC LIMIT 1
   `).get(md5) ?? null;
 
 // Distinct pictures still on Tencent's servers that match `where` (SQL over
@@ -151,6 +162,7 @@ const liveCandidates = (db, { now, where, order, limit, params = {} }) =>
     FROM pictures p
     LEFT JOIN picture_files f ON f.md5 = p.md5
     WHERE p.expires_at > @now
+      AND p.file_name = ''
       AND COALESCE(f.gone, 0) = 0
       AND COALESCE(f.failures, 0) < 3
       AND (${where})
@@ -223,8 +235,9 @@ const picturesForRows = (db, groupId, rowIds) => {
     return new Map();
   }
   const rows = db.prepare(`
-    SELECT p.row_id AS rowId, p.seq, p.md5, p.width, p.height, p.size, p.format, p.expires_at AS expiresAt, p.sticker,
-           COALESCE(f.thumb, '') <> '' AS hasThumb, COALESCE(f.kept, 0) AS kept, COALESCE(f.gone, 0) AS gone,
+    SELECT p.row_id AS rowId, p.seq, p.md5, p.width, p.height, p.size, p.format, p.expires_at AS expiresAt, p.sticker, p.file_name AS fileName,
+           COALESCE(f.thumb, '') <> '' AS hasThumb, COALESCE(f.kept, 0) AS kept,
+           CASE WHEN p.file_name <> '' THEN 0 ELSE COALESCE(f.gone, 0) END AS gone,
            COALESCE(f.probe, '') AS probe
     FROM pictures p LEFT JOIN picture_files f ON f.md5 = p.md5
     WHERE p.group_id = ? AND p.row_id IN (SELECT value FROM json_each(?))
@@ -292,7 +305,7 @@ const pendingCounts = (db, now) =>
            COUNT(DISTINCT CASE WHEN ${PROBE_WHERE} THEN p.md5 END) AS probes,
            COUNT(DISTINCT CASE WHEN ${PREVIEW_WANTED} THEN p.md5 END) AS previews
     FROM pictures p LEFT JOIN picture_files f ON f.md5 = p.md5
-    WHERE p.expires_at > ? AND COALESCE(f.gone, 0) = 0 AND COALESCE(f.failures, 0) < 3
+    WHERE p.expires_at > ? AND p.file_name = '' AND COALESCE(f.gone, 0) = 0 AND COALESCE(f.failures, 0) < 3
   `).get(now);
 
 // What to clear when over the budget, tier by tier: originals opened in the
@@ -317,6 +330,85 @@ const evictionCandidates = (db, tier, limit) => {
   `).all(limit);
 };
 
+/* ---------- pictures sent as files: QQ's own preview ---------- */
+
+// Only files inside QQ's own file folder are ever read.
+const QQ_FILE_FOLDER = /[\\/]nt_data[\\/]File[\\/]/iu;
+const MAX_QQ_PREVIEW_BYTES = 64 * 1024 * 1024;
+
+const sniffExtension = (bytes) => {
+  if (bytes.length >= 8 && bytes.readUInt32BE(0) === 0x89504e47) {
+    return "png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "jpg";
+  }
+  if (bytes.length >= 6 && bytes.toString("latin1", 0, 4) === "GIF8") {
+    return "gif";
+  }
+  if (bytes.length >= 12 && bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP") {
+    return "webp";
+  }
+  return bytes.length >= 2 && bytes.toString("latin1", 0, 2) === "BM" ? "bmp" : null;
+};
+
+// The path is resolved first, so "../" cannot leave QQ's folder.
+const readQqPreview = (localPath) => {
+  const resolved = path.resolve(localPath);
+  if (!QQ_FILE_FOLDER.test(resolved)) {
+    return null;
+  }
+  try {
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile() || stat.size === 0 || stat.size > MAX_QQ_PREVIEW_BYTES) {
+      return null;
+    }
+    const bytes = fs.readFileSync(resolved);
+    const ext = sniffExtension(bytes);
+    return ext === null ? null : { bytes, ext };
+  } catch {
+    return null;
+  }
+};
+
+// Copies QQ's preview of a picture sent as a file into the store as its
+// preview: the path the message names, else where QQ puts it under its data
+// folder (File/Thumb/<md5>_750.jpg; the message may name it only later).
+// Returns the stored path, or null when QQ has no preview (yet).
+const copyQqPreview = (db, storeDir, md5, { ntDataDir = "" } = {}) => {
+  const named = db.prepare("SELECT DISTINCT local_path AS localPath FROM pictures WHERE md5 = ? AND local_path <> ''").all(md5)
+    .map((row) => row.localPath);
+  const derived = ntDataDir === "" || !MD5.test(md5) ? [] : [path.join(ntDataDir, "File", "Thumb", `${md5}_750.jpg`)];
+  for (const localPath of [...named, ...derived]) {
+    const preview = readQqPreview(localPath);
+    if (preview === null) {
+      continue;
+    }
+    const target = picturePath(storeDir, "preview", md5, preview.ext);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const temp = `${target}.tmp-${process.pid}`;
+    fs.writeFileSync(temp, preview.bytes);
+    fs.renameSync(temp, target);
+    updateFile(db, md5, { preview: path.basename(target), preview_bytes: preview.bytes.length, evicted: 0 });
+    return target;
+  }
+  return null;
+};
+
+// Picture files of the last 31 days without a copied preview, newest first.
+// One cleared for space is copied again only when it is opened.
+const pendingQqPreviews = (db, { now, limit }) =>
+  db.prepare(`
+    SELECT p.md5 FROM pictures p LEFT JOIN picture_files f ON f.md5 = p.md5
+    WHERE p.file_name <> '' AND p.sent_at > ? AND COALESCE(f.preview, '') = '' AND COALESCE(f.evicted, 0) = 0
+    GROUP BY p.md5 ORDER BY MAX(p.sent_at) DESC LIMIT ?
+  `).all(now - REMOTE_LIFETIME_SECONDS, limit).map((row) => row.md5);
+
+// True when every posting of the md5 was a file (nothing to fetch from Tencent).
+const isFileOnly = (db, md5) =>
+  db.prepare("SELECT COUNT(*) AS n FROM pictures WHERE md5 = ? AND file_name = ''").get(md5).n === 0
+  && db.prepare("SELECT 1 FROM pictures WHERE md5 = ? LIMIT 1").get(md5) !== undefined;
+
 const removeFile = (storeDir, kind, md5, name) => {
   if (name === "") {
     return;
@@ -327,6 +419,9 @@ const removeFile = (storeDir, kind, md5, name) => {
 
 module.exports = {
   REMOTE_LIFETIME_SECONDS,
+  copyQqPreview,
+  pendingQqPreviews,
+  isFileOnly,
   ensurePictureSchema,
   pictureRoot,
   picturePath,

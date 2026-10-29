@@ -67,7 +67,7 @@ const exportOne = async (directory, md5) => {
   try {
     const name = uniqueName(directory, fileStem(md5, firstPosting(md5)), extensionOf(source.filePath));
     fs.copyFileSync(source.filePath, path.join(directory, name), fs.constants.COPYFILE_EXCL);
-    return { md5, status: "exported", file: name, prompt: writeSidecar(directory, name, md5) };
+    return { md5, status: "exported", file: name, prompt: writeSidecar(directory, name, md5), previewOnly: source.previewOnly === true };
   } finally {
     if (source.temporary) {
       fs.rmSync(source.filePath, { force: true });

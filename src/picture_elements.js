@@ -15,8 +15,19 @@
 // Elements are not descended into, so the picture a reply QUOTES (nested
 // inside the reply element) is never attributed to the replier.
 
+// A file element (type 3) whose name ends in a picture extension is a picture
+// sent as a file, usually an original kept whole (AI pictures with their
+// prompt). It is recorded like a picture, but Tencent serves it only through
+// the group-file service, so what can be shown is QQ's own local preview:
+//   45402 file name    45405 size    45406 md5 (16 bytes)    45411/45412 size
+//   45954 "::NTOSFull::<...>/nt_data/File/Thumb/<md5>_750.jpg" (despite the
+//         name a PNG up to 1280 px, written once QQ has shown the file)
+
 const ELEMENT_TYPE_FIELD = 45002;
 const PICTURE_ELEMENT = 2;
+const FILE_ELEMENT = 3;
+const FILE_FORMATS = { jpg: 1000, jpeg: 1000, png: 1001, webp: 1002, bmp: 1005, gif: 2000 };
+const LOCAL_PATH_PREFIX = "::NTOSFull::";
 const MAX_DEPTH = 4;
 const LEGACY_PATH = /^(\/gchatpic_new\/\d+\/[\w-]+)\/\d+(?:\?.*)?$/u;
 const FILE_ID = /[?&]fileid=([\w-]+)/u;
@@ -141,6 +152,45 @@ const toBuffer = (body) => {
   return null;
 };
 
+const fileExtension = (name) => name.match(/\.([a-z]{3,4})$/iu)?.[1].toLowerCase() ?? "";
+
+const imageFileFrom = (fields) => {
+  const fileName = textField(fields, 45402);
+  const format = FILE_FORMATS[fileExtension(fileName)];
+  const md5 = bytesField(fields, 45406);
+  if (format === undefined || md5 === null || md5.length !== 16) {
+    return null;
+  }
+  const localPath = textField(fields, 45954);
+  return {
+    md5: md5.toString("hex"),
+    fileId: "",
+    legacyPath: "",
+    size: numberField(fields, 45405) ?? 0,
+    width: numberField(fields, 45411) ?? 0,
+    height: numberField(fields, 45412) ?? 0,
+    format,
+    subType: null,
+    expiresAt: numberField(fields, 45505) ?? 0,
+    fileName,
+    localPath: localPath.startsWith(LOCAL_PATH_PREFIX) ? localPath.slice(LOCAL_PATH_PREFIX.length) : localPath,
+  };
+};
+
+// Pictures sent as files (see above); a quoted file is never included.
+const extractImageFiles = (body) => {
+  const buf = toBuffer(body);
+  if (buf === null) {
+    return [];
+  }
+  const elements = [];
+  collectElements(buf, 0, elements);
+  return elements
+    .filter((fields) => numberField(fields, ELEMENT_TYPE_FIELD) === FILE_ELEMENT)
+    .map(imageFileFrom)
+    .filter((picture) => picture !== null);
+};
+
 // All picture elements of one message, stickers included (see isSticker).
 const extractPictures = (body) => {
   const buf = toBuffer(body);
@@ -158,16 +208,20 @@ const extractPictures = (body) => {
 const isSticker = (picture) => picture.subType !== null && picture.subType !== 0;
 
 // Stickers are numbered from here so a real picture keeps the seq it had
-// before stickers were recorded (seq is part of the pictures primary key).
+// before stickers were recorded (seq is part of the pictures primary key);
+// pictures sent as files from FILE_SEQ_BASE for the same reason.
 const STICKER_SEQ_BASE = 1000;
+const FILE_SEQ_BASE = 2000;
 
 // The pictures of one message as stored: real pictures seq 0..n, stickers
-// flagged and numbered from STICKER_SEQ_BASE.
+// flagged and numbered from STICKER_SEQ_BASE, picture files (fileName set)
+// from FILE_SEQ_BASE.
 const messagePictures = (body) => {
   const all = extractPictures(body);
   const plain = all.filter((picture) => !isSticker(picture)).map((picture, index) => ({ ...picture, sticker: false, seq: index }));
   const stickers = all.filter(isSticker).map((picture, index) => ({ ...picture, sticker: true, seq: STICKER_SEQ_BASE + index }));
-  return [...plain, ...stickers];
+  const files = extractImageFiles(body).map((picture, index) => ({ ...picture, sticker: false, seq: FILE_SEQ_BASE + index }));
+  return [...plain, ...stickers, ...files];
 };
 
 // True for one element message of type picture (stickers included).
@@ -176,4 +230,4 @@ const isPictureElement = (buf) => {
   return fields !== null && numberField(fields, ELEMENT_TYPE_FIELD) === PICTURE_ELEMENT;
 };
 
-module.exports = { STICKER_SEQ_BASE, extractPictures, messagePictures, isSticker, isPictureElement, decodeFields };
+module.exports = { STICKER_SEQ_BASE, FILE_SEQ_BASE, extractPictures, extractImageFiles, messagePictures, isSticker, isPictureElement, decodeFields };

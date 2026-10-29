@@ -18,6 +18,7 @@ const STATE_TEXT = {
   "no-rkey": "拿不到 QQ 的图片钥匙：请确认 QQ 正在运行。",
   unavailable: "暂时下载不到这张图，稍后再试。",
   "not-found": "没有这张图的记录。",
+  "file-only": "这张图是以文件发的，本机找不到原文件，也还没有 QQ 的预览。",
 };
 
 const sendImage = (response, filePath, extraHeaders = {}) => {
