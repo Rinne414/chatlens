@@ -8,7 +8,7 @@
    until the next one (per browser: localStorage). */
 
 // v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
-const WHATS_NEW_RELEASE = "v0.0.27";
+const WHATS_NEW_RELEASE = "v0.0.28";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -17,11 +17,10 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
-  { title: "先看「值得知道的事」", detail: "各群这段时间的话题合并成几件事：几个群都在讲的算一件，越重要泡泡越大，闲聊折起来。点开一件看每个群怎么说，一键进那个群的消息。下面的「各群总览」收成一句话，点「展开全文」看全部。", view: null, selector: ".brief-things" },
-  { title: "AI 整理时也照常收新消息", detail: "后台的 AI 整理一轮有时要半小时以上，以前这段时间不收新消息、@你也不提醒；现在照常按刷新间隔收，提醒也照常。", view: null, selector: null },
-  { title: "群里每段话题聊了多久、几个人", detail: "群页「在聊什么」每段写着几点到几点、多少条、几个人、谁说得最多；点开看这一段的全部消息和图片，也能让 AI 只总结这一段。", view: "group", selector: "#view-group .gp-section-tools" },
-  { title: "写进 Obsidian 笔记库", detail: "设置里新增「Obsidian 笔记库」：按主题写笔记（一个模型连同它的版本、LoRA、插件和教程在一则里），每天一则日报、每个群一则。默认关着，你点「开始写笔记」才写；「我的笔记」下你写的字永远保留。", view: "settings", selector: "#notes-card" },
-  { title: "跳到某个时间点准了", detail: "从群页、个人页、热点、回顾、问群聊跳进聊天，以前常停在别处；现在停在那条消息上。", view: null, selector: null },
+  { title: "画廊不再漏图", detail: "QQ 有时过几十分钟甚至一两天才把一部分消息写进数据库，以前这些消息和图片就一直漏掉了。现在每次刷新都会回头再读最近两天；最近 31 天也会重新核对一遍，更新后马上做、之后每周一次，分在几次刷新里（每次多花几秒到半分钟）。", view: "media", selector: "#gallery-count" },
+  { title: "以文件发的图也在画廊里", detail: "当文件发的图片（多是没压缩的 AI 原图）以前画廊里看不到；现在会显示，标着「文件」，左边「以文件发的图」可以只看它们。显示的是 QQ 的预览，保存时本机有原文件就存原文件。", view: "media", selector: "#gallery-facets-body" },
+  { title: "搜图和更多筛选", detail: "画廊上方可以搜咒语、LoRA、模型、文件名、发图人和跟图一起发的话；左边新增形状（横图、竖图、方图、长图）、大小，以及「有咒语」「有人求咒语」。", view: "media", selector: "#gallery-search" },
+  { title: "多选不用拉回顶端", detail: "鼠标移到图上，右上角有勾选框，点一下就开始多选（也可以按住 Ctrl 点图）；张数和「多选」按钮跟着屏幕走，底部一栏保存，按 Esc 退出。", view: "media", selector: ".gallery-page .kb-results-head" },
 ];
 
 const whatsNewState = { hidden: false };
