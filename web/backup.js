@@ -455,8 +455,8 @@ const backupRescueProgressText = () => {
   }
   const tail = rescue.failed > 0 ? `，${rescue.failed} 张没取到` : "";
   return rescue.running
-    ? `正在保存 ${rescue.done} / ${rescue.total}（已存 ${rescue.kept} 张${tail}）…`
-    : `这批完成：存下 ${rescue.kept} 张${tail}。`;
+    ? `正在留存 ${rescue.done} / ${rescue.total}（已留存 ${rescue.kept} 张${tail}）…`
+    : `这批完成：留存了 ${rescue.kept} 张${tail}。在画廊「留存的原图」里能看到。`;
 };
 
 const rescueAllExpiring = async () => {
@@ -521,7 +521,7 @@ const backupRescueTile = (item) => {
       onclick: () => openPictureViewer({ ...item, probe: "ai" }),
     }, el("img", { src: pictureUrl(item.md5, "thumb"), alt: "", loading: "lazy", decoding: "async" })),
     el("span", { class: item.daysLeft <= 7 ? "wall-badge expiring" : "wall-badge" }, item.daysLeft === 0 ? "今天过期" : `${item.daysLeft} 天`),
-    el("label", { class: picked ? "wall-pick picked" : "wall-pick", title: "选中以便导出", onclick: (event) => event.stopPropagation() },
+    el("label", { class: picked ? "wall-pick picked" : "wall-pick", title: "选中以便另存到文件夹", onclick: (event) => event.stopPropagation() },
       el("input", { type: "checkbox", checked: picked, "aria-label": "选中这张图", onchange: (event) => toggleRescuePick(item.md5, event.target.closest(".backup-rescue-tile")) })));
 };
 
@@ -537,7 +537,7 @@ const backupRescueSelection = (items) => {
       disabled: count === 0 || pictureExport.running,
       title: "把原图复制到 reports 下的新文件夹，附咒语 .txt",
       onclick: () => runPictureExport([...backupState.picked], "backup"),
-    }, `导出所选到文件夹（${briefNumber(count)}）`),
+    }, `另存所选到文件夹（${briefNumber(count)}）`),
     pictureExportStatus("backup"));
 };
 
@@ -553,11 +553,11 @@ const backupAutoKeep = (expiring, items) => {
   return el("label", { class: "backup-auto-keep" },
     el("input", { type: "checkbox", checked: expiring.keepAi === true, disabled: pictureUi.busy, onchange: toggle }),
     el("span", {},
-      el("strong", {}, "以后自动保存所有 AI 原图"),
+      el("strong", {}, "以后自动留存所有 AI 原图"),
       el("span", { class: "card-sub" },
         expiring.keepAi === true
-          ? " 已开启：后台每次刷新后按过期先后慢慢存，不用守着页面。"
-          : ` 后台每次刷新后按过期先后慢慢存到工具的永久副本，不用守着页面。${items.length > 0 ? `现在待存 ${briefNumber(items.length)} 张，约 ${formatByteSize(bytes)}；` : ""}之后每张约 1.5 MB，不占图片缓存上限。`)));
+          ? " 已开启：后台每次刷新后按过期先后慢慢留存，不用守着页面。"
+          : ` 后台每次刷新后按过期先后慢慢留存到本工具里，不用守着页面。${items.length > 0 ? `现在待留存 ${briefNumber(items.length)} 张，约 ${formatByteSize(bytes)}；` : ""}之后每张约 1.5 MB，不占图片缓存上限。`)));
 };
 
 const backupRescue = () => {
@@ -577,12 +577,12 @@ const backupRescue = () => {
         : rescue?.running
           ? el("button", { class: "btn", type: "button", onclick: () => { backupState.rescue = { ...backupState.rescue, stop: true }; } }, "停下")
           : el("button", { class: "btn primary", type: "button", onclick: rescueAllExpiring },
-            `全部保存（${briefNumber(items.length)} 张）`)),
+            `全部留存（${briefNumber(items.length)} 张）`)),
     rescue === null ? null : el("p", { id: "backup-rescue-progress", class: "backup-rescue-progress", "aria-live": "polite" }, backupRescueProgressText()),
     backupAutoKeep(expiring, items),
     items.length === 0 ? null : backupRescueSelection(items),
     items.length === 0
-      ? el("p", { class: "backup-ok" }, "✓ 现在没有待保存的 AI 原图。")
+      ? el("p", { class: "backup-ok" }, "✓ 现在没有待留存的 AI 原图。")
       : el("div", { class: "backup-rescue-scroll" }, imageWall({
         key: "rescue",
         entries: items.map((item) => ({ kind: "tile", ratio: 1, item })),

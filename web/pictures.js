@@ -9,7 +9,7 @@
 const PICTURE_MD5 = /^[a-f0-9]{32}$/u;
 const PICTURE_BUDGETS = [2, 5, 10, 20, 50, 100];
 const KEEP_TEXT = {
-  kept: "原图已永久保存在本工具里（清理空间时不会删）。要拿出来用，点「下载原图」或在画廊「多选」后保存到文件夹。",
+  kept: "原图已留存在本工具里（清理空间时不会删），在画廊「留存的原图」里能找到。要放进你自己的文件夹，用「另存为」。",
   gone: "腾讯服务器已经删除这张图。",
   "no-rkey": "拿不到 QQ 的图片钥匙，请确认 QQ 正在运行。",
   unavailable: "暂时下载不到这张图。",
@@ -24,7 +24,7 @@ const RKEY_TEXT = {
   "scan-failed": "读取 QQ 内存失败。",
 };
 const PASS_LABELS = { ok: "成功", plain: "不是 AI 图", gone: "已删除", failed: "失败" };
-const PASS_STEPS = { ai: "AI 检查", previews: "AI 预览", keep: "留原图", thumbs: "缩略图" };
+const PASS_STEPS = { ai: "AI 检查", previews: "AI 预览", keep: "留存原图", thumbs: "缩略图" };
 
 const pictureUi = {
   status: null,
@@ -221,19 +221,45 @@ const pictureViewerActions = (viewer) => {
       ? null
       : el("button", {
         class: "btn small primary",
-        disabled: viewer.gone || viewer.busy,
+        disabled: (viewer.gone && !viewer.kept) || viewer.busy,
         onclick: () => {
-          pictureUi.viewer = { ...viewer, size: "original", notice: "正在向腾讯取原图…" };
+          pictureUi.viewer = { ...viewer, size: "original", notice: viewer.kept ? "" : "正在向腾讯取原图…" };
           renderPictureViewer();
         },
-      }, "查看原图"),
+      }, "看原图"),
+    el("button", {
+      class: "btn small",
+      disabled: (viewer.gone && !viewer.kept) || viewer.busy,
+      title: SAVE_AS_TITLE,
+      onclick: async () => {
+        pictureUi.viewer = { ...pictureUi.viewer, busy: true, notice: "正在取原图…" };
+        renderPictureViewer();
+        let notice = "";
+        try {
+          notice = await savePictureAs(viewer.md5);
+        } catch (error) {
+          notice = `没有另存：${error.message}`;
+        }
+        if (pictureUi.viewer?.md5 === viewer.md5) {
+          pictureUi.viewer = { ...pictureUi.viewer, busy: false, notice };
+          renderPictureViewer();
+        }
+      },
+    }, viewer.fileName ? "另存 QQ 的预览…" : "另存为…"),
     viewer.kept
-      ? el("span", { class: "tag" }, "原图已留存")
+      ? el("button", {
+        class: "btn small",
+        title: "原图已经存在本工具里。点这里去画廊看所有留存的原图",
+        onclick: openGalleryKept,
+      }, "已留存 · 看留存的原图")
       : viewer.fileName ? null : el("button", {
         class: "btn small",
-        disabled: viewer.gone || viewer.busy,
+        // Not disabled for a deleted picture: the prompt library may still
+        // hold its original, and if not the answer says so.
+        disabled: viewer.busy,
+        title: KEEP_LABEL_TITLE,
         onclick: async () => {
-          pictureUi.viewer = { ...pictureUi.viewer, busy: true, notice: "正在保存原图…" };
+          pictureUi.viewer = { ...pictureUi.viewer, busy: true, notice: "正在留存原图…" };
           renderPictureViewer();
           try {
             const kept = await keepOnePicture(viewer.md5);
@@ -248,7 +274,7 @@ const pictureViewerActions = (viewer) => {
           }
           renderPictureViewer();
         },
-      }, "保存原图"),
+      }, "留存原图"),
     viewer.probe === "ai"
       ? el("button", {
         class: "btn small",
@@ -268,9 +294,10 @@ const renderPictureViewer = () => {
   const meta = [
     viewer.width > 0 ? `${viewer.width}×${viewer.height}` : "",
     viewer.bytes > 0 ? formatByteSize(viewer.bytes) : "",
-    viewer.fileName ? `以文件发送：${viewer.fileName}，这里显示的是 QQ 的预览` : days === null ? "" : `腾讯还将保留约 ${days} 天`,
+    viewer.fileName ? `以文件发送：${viewer.fileName}，这里显示的是 QQ 的预览` : viewer.kept ? "原图已留存在本工具里" : days === null ? "" : `腾讯还将保留约 ${days} 天`,
   ].filter((part) => part.length > 0).join(" · ");
-  const image = viewer.gone
+  // A kept original still opens after Tencent deleted the picture.
+  const image = viewer.gone && !viewer.kept
     ? el("div", { class: "picture-viewer-missing" }, "腾讯服务器已经删除这张图。")
     : el("img", {
       src: pictureUrl(viewer.md5, viewer.size),
@@ -386,7 +413,7 @@ const renderPictureSettingsCard = () => {
   return el("div", { class: "card" },
     el("h2", {}, "群图片"),
     el("p", { class: "card-sub" },
-      "电脑 QQ 只有在你点开图片时才保存原图。开启后，工具会在腾讯还留着文件的 31 天里自动保存缩略图；你在消息里点开时再取大图。带生成参数的图会记下咒语、参数和完整工作流，并留一张较大的预览（腾讯给的尺寸，最宽 1280px，PNG 每张约 1–3 MB）。原图默认不留，除非点「保存原图」，或在下面勾选「每张都留原图」。空间到上限时，先清普通图的缩略图，再从最旧的 AI 图预览清起；已保存的原图不会被清。"),
+      "电脑 QQ 只有在你点开图片时才保存原图。开启后，工具会在腾讯还留着文件的 31 天里自动保存缩略图；你在消息里点开时再取大图。带生成参数的图会记下咒语、参数和完整工作流，并留一张较大的预览（腾讯给的尺寸，最宽 1280px，PNG 每张约 1–3 MB）。原图默认不留存，除非点「留存原图」，或在下面勾选「每张都留存原图」。空间到上限时，先清普通图的缩略图，再从最旧的 AI 图预览清起；留存的原图不会被清，在画廊「留存的原图」里看。"),
     el("p", { class: "card-sub" },
       `缩略图 ${usage.thumbs ?? 0} 张（${formatByteSize(usage.thumbBytes)}） · 预览 ${usage.previews ?? 0} 张（${formatByteSize(usage.previewBytes)}） · 临时原图 ${usage.cached ?? 0} 张 · 已留存原图 ${usage.kept ?? 0} 张（${formatByteSize(usage.keptBytes)}） · 上限 ${settings.budgetGB ?? 10} GB`),
     el("p", { class: "card-sub" },
@@ -416,7 +443,7 @@ const renderPictureSettingsCard = () => {
         onclick: () => runPicturePass(),
       }, "现在抓取"),
       notice),
-    el("p", { class: "card-sub", style: "margin:12px 0 6px" }, "每张都留原图的群（只列关注群）："),
+    el("p", { class: "card-sub", style: "margin:12px 0 6px" }, "每张都留存原图的群（只列关注群）："),
     watchlist.length === 0
       ? el("p", { class: "card-sub" }, "还没有关注群。")
       : el("div", { class: "picture-keeps" }, watchlist.map((group) => pictureKeepToggle(group, kept.has(String(group.groupId))))));

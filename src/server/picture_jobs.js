@@ -11,10 +11,12 @@ const service = require("./picture_service");
 const store = require("../picture_store");
 const pictureFetch = require("../picture_fetch");
 const pictureAi = require("../picture_ai");
+const knowledge = require("./knowledge_ops");
 const { persistMediaObject } = require("../media_object_store");
 
 const MD5 = /^[a-f0-9]{32}$/u;
 const SIZES = new Set(["thumb", "preview", "original"]);
+const SERVABLE = /\.(?:jpe?g|png|gif|webp|bmp)$/iu;
 const MAX_KEEP_PER_REQUEST = 500;
 
 const db = () => state.getStore();
@@ -59,6 +61,20 @@ const fileOnlyCopy = (md5) => {
   return service.anyLocalFile(store.fileRow(db(), md5), md5) ?? store.copyQqPreview(db(), service.storeDir, md5, { ntDataDir: qqDataDir() });
 };
 
+// The original the prompt library holds (copied from QQ's own files into
+// media-objects, or still in QQ's cache): Tencent is not asked for it again,
+// and it still opens after Tencent deleted the picture.
+const libraryOriginal = (md5) => {
+  let filePath = null;
+  try {
+    filePath = knowledge.imageFilePath(state.toolRoot, md5);
+  } catch (error) {
+    // No library, or it cannot be read right now: Tencent is asked as before.
+    console.error(`library original lookup failed md5=${md5}: ${error.message}`);
+  }
+  return filePath !== null && SERVABLE.test(filePath) ? filePath : null;
+};
+
 // { filePath } or { error: not-found | gone | no-rkey | unavailable, fallback? }
 // where fallback is the best smaller local copy to show instead.
 const resolvePicture = async (md5, size) => {
@@ -66,7 +82,10 @@ const resolvePicture = async (md5, size) => {
     return { error: "not-found" };
   }
   const row = store.fileRow(db(), md5);
-  const local = service.localFile(row, md5, size) ?? fileOnlyCopy(md5);
+  // The library's original also stands in for a preview this store does not
+  // have: it is on disk, so nothing waits on Tencent (5 s measured for a
+  // picture Tencent no longer has before the answer came back).
+  const local = service.localFile(row, md5, size) ?? fileOnlyCopy(md5) ?? (size === "thumb" ? null : libraryOriginal(md5));
   if (local !== null) {
     store.updateFile(db(), md5, { last_used: service.unix() });
     return { filePath: local };
@@ -92,7 +111,9 @@ const keepOne = async (md5) => {
   if (kept !== null) {
     return { md5, status: "kept", objectPath: kept };
   }
-  let source = service.variantPath(row, "cache");
+  // The prompt library's copy first: nothing to download, and it is still
+  // there for a picture Tencent already deleted.
+  let source = service.variantPath(row, "cache") ?? libraryOriginal(md5);
   let temporary = null;
   if (source === null) {
     const fetched = await fetchAndStoreTemp(md5);

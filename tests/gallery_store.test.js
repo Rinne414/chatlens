@@ -160,8 +160,8 @@ test("search matches the text sent with a picture, who posted it, a file name, a
       assert.deepEqual(found({ file: true }), [md5("e")]);
       assert.equal(gallery.listPictures(reader, { ...range, file: true }).items[0].fileName, "Moss_00008_.png");
       // A switch adds to the others: with 有咒语 on, file counts files that have a prompt.
-      assert.deepEqual(gallery.galleryFacets(reader, { ...range, prompt: true }).extras, { prompt: 1, asked: 1, file: 0 });
-      assert.deepEqual(gallery.galleryFacets(reader, range).extras, { prompt: 1, asked: 1, file: 1 });
+      assert.deepEqual(gallery.galleryFacets(reader, { ...range, prompt: true }).extras, { prompt: 1, asked: 1, file: 0, kept: 0 });
+      assert.deepEqual(gallery.galleryFacets(reader, range).extras, { prompt: 1, asked: 1, file: 1, kept: 1 });
     } finally {
       reader.close();
     }
@@ -183,5 +183,35 @@ test("shape and size buckets filter and count without their own selection", () =
     assert.deepEqual(facets.shapes, { wide: 0, square: 1, tall: 1, long: 1 });
     assert.deepEqual(facets.sizes, { large: 1, medium: 0, small: 0 });
     assert.throws(() => gallery.listPictures(db, { ...range, shape: "round" }), /未知的形状/u);
+  });
+});
+
+test("the kept switch shows only pictures whose original the picture service kept", () => {
+  withStore((db) => {
+    const page = gallery.listPictures(db, { ...range, kept: true });
+    assert.deepEqual(page.items.map((item) => item.md5), [B]);
+    assert.equal(page.items[0].kept, true);
+    assert.equal(gallery.galleryFacets(db, range).extras.kept, 1);
+    assert.equal(gallery.listPictures(db, range).items.find((item) => item.md5 === A).kept, false);
+  });
+});
+
+test("an original the prompt library copied in counts as kept too", () => {
+  withStore((db, dir) => {
+    const kbPath = path.join(dir, "knowledge.db");
+    const kb = knowledgeStore.openKnowledgeStore(kbPath);
+    kb.prepare(`INSERT INTO images (hash, generator, prompt, checkpoint, parsed_at, object_path)
+      VALUES (?, 'unknown', '', '', 1, 'media-objects/aa/a.png')`).run(A);
+    kb.close();
+    const reader = new Database(path.join(dir, "messages.db"), { readonly: true });
+    reader.prepare("ATTACH DATABASE ? AS kb").run(kbPath);
+    const page = gallery.listPictures(reader, { ...range, kept: true });
+    const facets = gallery.galleryFacets(reader, { ...range, kept: true });
+    const detail = gallery.pictureDetail(reader, A);
+    reader.close();
+    assert.deepEqual(page.items.map((item) => item.md5), [B, A]);
+    assert.equal(page.items[1].kept, true);
+    assert.equal(facets.extras.kept, 2);
+    assert.equal(detail.kept, true);
   });
 });

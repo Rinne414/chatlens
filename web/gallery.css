@@ -2,6 +2,7 @@
 
 .gallery-toolbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
 .gallery-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 600; cursor: pointer; }
+.gallery-kept-hint { margin: 8px 0 0; font-size: 13px; line-height: 1.6; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .gallery-check input { accent-color: var(--accent); width: 16px; height: 16px; }
 
 /* Stickers are small drawings on transparent backgrounds: show them whole. */

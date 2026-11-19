@@ -37,6 +37,30 @@ const SIZES = {
   small: `${KNOWN} AND max(p.width, p.height) < ${SMALL_SIDE}`,
 };
 
+// The prompt library copies QQ's own local originals into media-objects and
+// records where (images.object_path; a library from before that has no column).
+const libraryKeepsOriginals = (db) => hasKnowledge(db)
+  && db.prepare("SELECT 1 FROM kb.pragma_table_info('images') WHERE name = 'object_path'").get() !== undefined;
+
+// SQL for "this tool holds the picture's original" over pictures aliased `p`:
+// kept by the picture service, or copied in by the prompt library. The two
+// lists go into one temp table per connection (a read-only connection may
+// still write its own temp tables): asking both stores for every picture took
+// 10 s over all time on a real store, the table takes well under one.
+const keptCondition = (db) => {
+  if (db.prepare("SELECT 1 FROM temp.sqlite_master WHERE name = 'gallery_kept'").get() === undefined) {
+    db.exec("CREATE TEMP TABLE gallery_kept (md5 TEXT PRIMARY KEY) WITHOUT ROWID");
+    db.exec("INSERT OR IGNORE INTO temp.gallery_kept SELECT md5 FROM picture_files WHERE kept = 1");
+    if (libraryKeepsOriginals(db)) {
+      db.exec("INSERT OR IGNORE INTO temp.gallery_kept SELECT hash FROM kb.images WHERE object_path <> ''");
+    }
+  }
+  // "+": the temp table is looked up per picture, never used to drive the
+  // query (SQLite knows nothing about its size and picked it, which made a
+  // 7-day count 15 times slower than without the switch).
+  return "+p.md5 IN (SELECT md5 FROM temp.gallery_kept)";
+};
+
 // Opt-in switches; the two that need the prompt library match nothing
 // without it.
 const extraConditions = (db) => {
@@ -45,6 +69,10 @@ const extraConditions = (db) => {
     prompt: kb ? "EXISTS (SELECT 1 FROM kb.images ki WHERE ki.hash = p.md5 AND ki.prompt <> '')" : "0",
     asked: kb ? "EXISTS (SELECT 1 FROM kb.prompt_requests kr WHERE kr.image_hash = p.md5)" : "0",
     file: "p.file_name <> ''",
+    // Read only when asked for: it fills a temp table, which a plain list never needs.
+    get kept() {
+      return keptCondition(db);
+    },
   };
 };
 
@@ -108,10 +136,10 @@ const clampLimit = (limit) => {
 
 // Filters shared by the list and the facet counts. `sender` is a QQ number, or
 // a display name for rows stored before the number was recorded. `q` is the
-// search text, shape / size a bucket name, prompt / asked / file switches.
+// search text, shape / size a bucket name, prompt / asked / file / kept switches.
 const buildFilter = (db, {
   fromUnix, toUnix, groupId = "", sender = "", kind = "images", ai = false,
-  q = "", shape = "", size = "", prompt = false, asked = false, file = false,
+  q = "", shape = "", size = "", prompt = false, asked = false, file = false, kept = false,
 }) => {
   if (!Number.isFinite(fromUnix) || !Number.isFinite(toUnix) || fromUnix >= toUnix) {
     throw new Error("时间范围无效。");
@@ -144,7 +172,7 @@ const buildFilter = (db, {
     conditions.push(SIZES[size]);
   }
   const extras = extraConditions(db);
-  for (const [name, on] of [["prompt", prompt], ["asked", asked], ["file", file]]) {
+  for (const [name, on] of [["prompt", prompt], ["asked", asked], ["file", file], ["kept", kept]]) {
     if (on) {
       conditions.push(extras[name]);
     }
@@ -208,7 +236,7 @@ const knowledgeOf = (db, md5s) => {
     return new Map();
   }
   return new Map(db.prepare(`
-    SELECT i.hash, i.generator, i.checkpoint,
+    SELECT i.hash, i.generator, i.checkpoint, ${libraryKeepsOriginals(db) ? "i.object_path <> ''" : "0"} AS hasOriginal,
            (SELECT COUNT(*) FROM kb.image_loras l WHERE l.hash = i.hash) AS loras,
            (SELECT COUNT(*) FROM kb.prompt_requests r WHERE r.image_hash = i.hash) AS asks
     FROM kb.images i WHERE i.hash IN (SELECT value FROM json_each(@md5s))
@@ -253,7 +281,7 @@ const describe = (row, occurrences, file, knowledge, options) => {
     groups: new Set(occurrences.map((item) => item.groupId)).size,
     posts: occurrences.length,
     hasThumb: file?.hasThumb === 1,
-    kept: file?.kept === 1,
+    kept: file?.kept === 1 || knowledge?.hasOriginal === 1,
     // Tencent never had a picture sent only as a file, so it cannot be gone
     // there (an older picture pass may have asked anyway).
     gone: file?.gone === 1 && !row.fileName,
@@ -266,7 +294,7 @@ const describe = (row, occurrences, file, knowledge, options) => {
   };
 };
 
-const DEFAULT_OPTIONS = { groupId: "", sender: "", kind: "images", ai: false, q: "", shape: "", size: "", prompt: false, asked: false, file: false };
+const DEFAULT_OPTIONS = { groupId: "", sender: "", kind: "images", ai: false, q: "", shape: "", size: "", prompt: false, asked: false, file: false, kept: false };
 
 const listPictures = (db, options) => {
   const sort = SORTS.has(options.sort) ? options.sort : "recent";
@@ -375,7 +403,7 @@ const pictureDetail = (db, md5) => {
     md5,
     ...meta,
     sticker: meta.sticker === 1,
-    kept: file?.kept === 1,
+    kept: file?.kept === 1 || knowledge?.hasOriginal === 1,
     gone: file?.gone === 1 && !meta.fileName,
     probe: file?.probe ?? "",
     ai: file?.probe === "ai" || aiKnown,

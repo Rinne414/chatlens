@@ -156,8 +156,8 @@ const briefPictureSelectionBar = (data) => {
       type: "button",
       disabled: count === 0 || pictureExport.running,
       onclick: () => runPictureExport([...briefPictures.selected], BRIEF_PICTURE_OWNER),
-    }, `保存原图到文件夹（${briefNumber(count)}）`),
-    target === null ? null : el("span", { class: "brief-meta" }, "保存到：", el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), "（在「画廊 → 多选」可以改）"),
+    }, `另存到文件夹（${briefNumber(count)}）`),
+    target === null ? null : el("span", { class: "brief-meta" }, "另存到：", el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), "（在「画廊 → 多选」可以改）"),
     pictureExportStatus(BRIEF_PICTURE_OWNER));
 };
 
@@ -188,7 +188,7 @@ const briefImages = (data) => {
         el("button", {
           class: briefPictures.selecting ? "btn small active desktop-action" : "btn small primary desktop-action",
           type: "button",
-          title: briefPictures.selecting ? "退出多选，已选的会清空" : "选几张图，一起把原图保存到文件夹",
+          title: briefPictures.selecting ? "退出多选，已选的会清空" : "选几张图，一起把原图另存到文件夹",
           onclick: () => {
             briefPictures.selecting = !briefPictures.selecting;
             // The same as 画廊: leaving clears what was picked.

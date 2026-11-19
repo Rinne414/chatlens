@@ -54,6 +54,7 @@ const filterFrom = (params) => ({
   prompt: params.get("prompt") === "1",
   asked: params.get("asked") === "1",
   file: params.get("file") === "1",
+  kept: params.get("kept") === "1",
 });
 
 const list = (params) => withReadOnlyStore((db) => gallery.listPictures(db, {

@@ -938,7 +938,7 @@ const knowledgePictureActions = (item) => {
             alert(error.message);
           }
         },
-      }, "保存原图"));
+      }, "留存原图"));
 };
 
 /* ---------- view ---------- */

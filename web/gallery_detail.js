@@ -105,7 +105,7 @@ const galleryDetailMeta = (detail) => {
     item.size > 0 ? formatByteSize(item.size) : "",
     item.fileName
       ? `以文件发送：${item.fileName}，这里显示的是 QQ 的预览（最长边约 1280）`
-      : item.kept ? "原图已永久保存在本工具里" : days === null ? "" : `腾讯还保留约 ${days} 天`,
+      : item.kept ? "原图已留存在本工具里" : days === null ? "" : `腾讯还保留约 ${days} 天`,
   ].filter((part) => part !== "").join(" · ");
 };
 
@@ -114,33 +114,44 @@ const galleryDetailActions = (detail) => {
   const shown = item.shown ?? item.origin;
   const sender = shown === null ? "" : shown.speakerUin || shown.speaker;
   return el("div", { class: "row gallery-detail-actions" },
-    detail.size === "original" || item.gone || item.fileName
+    detail.size === "original" || (item.gone && !item.kept) || item.fileName
       ? null
-      : el("button", { class: "btn small primary", type: "button", onclick: () => galleryDetailPatch(item.md5, { size: "original", notice: "正在向腾讯取原图…" }) }, "看原图"),
-    item.gone
-      ? null
-      : el("a", {
-        class: "btn small primary",
-        href: pictureUrl(item.md5, "original"),
-        download: "",
-        title: "下载到浏览器的下载文件夹，文件名是「时间_群_发图人_编号」，不会和别的图重名",
-      }, item.fileName ? "下载 QQ 的预览" : "下载原图"),
-    item.kept || item.gone || item.fileName
+      : el("button", { class: "btn small primary", type: "button", onclick: () => galleryDetailPatch(item.md5, { size: "original", notice: item.kept ? "" : "正在向腾讯取原图…" }) }, "看原图"),
+    // A picture Tencent deleted can still be saved as when its original was kept.
+    item.gone && !item.kept
       ? null
       : el("button", {
-        class: "btn small",
+        class: "btn small primary",
         type: "button",
-        title: "把原图永久存在本工具里（store/media-objects），腾讯删掉之后也能看；不会出现在你的文件夹里",
+        title: SAVE_AS_TITLE,
         onclick: async () => {
-          galleryDetailPatch(item.md5, { notice: "正在保存原图…" });
+          galleryDetailPatch(item.md5, { notice: "正在取原图…" });
           try {
-            const kept = await keepOnePicture(item.md5);
-            galleryDetailPatch(item.md5, { notice: kept.text, item: { ...item, kept: kept.status === "kept" } });
+            galleryDetailPatch(item.md5, { notice: await savePictureAs(item.md5) });
           } catch (error) {
-            galleryDetailPatch(item.md5, { notice: error.message });
+            galleryDetailPatch(item.md5, { notice: `没有另存：${error.message}` });
           }
         },
-      }, "在工具里永久保存"),
+      }, item.fileName ? "另存 QQ 的预览…" : "另存为…"),
+    item.kept
+      ? el("span", { class: "tag", title: "原图已经存在本工具里，在画廊「留存的原图」里能找到" }, "已留存")
+      : item.gone || item.fileName
+        ? null
+        : el("button", {
+          class: "btn small",
+          type: "button",
+          title: KEEP_LABEL_TITLE,
+          onclick: async () => {
+            galleryDetailPatch(item.md5, { notice: "正在留存原图…" });
+            try {
+              const kept = await keepOnePicture(item.md5);
+              galleryDetailPatch(item.md5, { notice: kept.text, item: { ...item, kept: kept.status === "kept" } });
+              markGalleryKept(kept.status === "kept" ? [item.md5] : []);
+            } catch (error) {
+              galleryDetailPatch(item.md5, { notice: error.message });
+            }
+          },
+        }, "留存原图"),
     item.ai
       ? el("button", { class: "btn small", type: "button", onclick: () => downloadPictureWorkflow(item.md5).catch((error) => alert(error.message)) }, "下载工作流")
       : null,
@@ -227,7 +238,7 @@ const galleryContext = (detail) => {
 
 const galleryDetailImage = (detail) => {
   const item = detail.item;
-  if (item.gone) {
+  if (item.gone && !item.kept) {
     return el("div", { class: "picture-viewer-missing gallery-gone" }, "腾讯服务器已经删除这张图（超过 31 天）。");
   }
   return el("img", {

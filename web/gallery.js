@@ -26,6 +26,7 @@ const GALLERY_SWITCHES = [
   ["prompt", "有咒语", "咒语库里能读到生成参数的图"],
   ["asked", "有人求咒语", "群里有人问过这张图的咒语"],
   ["file", "以文件发的图", "当作文件发的图片，多是没压缩的原图；显示的是 QQ 的预览"],
+  ["kept", "原图已留存", "原图已经存在本工具里的图，腾讯删掉之后也能看"],
 ];
 const GALLERY_SEARCH_DELAY_MS = 450;
 const GIF_PICTURE_FORMAT = 2000;
@@ -43,7 +44,10 @@ app.gallery = {
   groupId: "",
   sender: "",
   senderLabel: "",
-  // Search words, a shape / size bucket and three switches (gallery_store.js).
+  // Search words, a shape / size bucket and four switches (gallery_store.js).
+  // kept is also 「留存的原图」 (gallery_kept.js); it remembers the time range it replaced.
+  kept: false,
+  timeBeforeKept: null,
   q: "",
   shape: "",
   size: "",
@@ -130,18 +134,21 @@ const loadGallery = async ({ append = false } = {}) => {
   const requestId = app.gallery.requestId + 1;
   const offset = append ? (app.gallery.results?.items.length ?? 0) : 0;
   replaceGallery({ requestId, loading: true, loadingMore: append, error: null });
+  const params = galleryFilterParams();
+  params.set("sort", app.gallery.sort);
+  params.set("limit", String(GALLERY_PAGE));
+  params.set("offset", String(offset));
+  // Asked for before the counts: both wait in one queue on the server, and
+  // over all time the counts take several seconds.
+  const request = api(`/api/gallery?${params.toString()}`);
   if (append) {
     updateGalleryTexts();
   } else {
     renderMediaView();
     loadGalleryFacets();
   }
-  const params = galleryFilterParams();
-  params.set("sort", app.gallery.sort);
-  params.set("limit", String(GALLERY_PAGE));
-  params.set("offset", String(offset));
   try {
-    const page = await api(`/api/gallery?${params.toString()}`);
+    const page = await request;
     if (app.gallery.requestId !== requestId) {
       return;
     }
@@ -265,9 +272,10 @@ const galleryBadges = (item) => {
     item.format === GIF_PICTURE_FORMAT ? { text: "GIF" } : null,
     item.fileName ? { text: "文件", tone: "file", title: `以文件发送：${item.fileName}（显示的是 QQ 的预览）` } : null,
     item.ai && !item.kept && !item.fileName && days !== null && days <= GALLERY_EXPIRY_WARN_DAYS
-      ? { text: days === 0 ? "今天过期" : `${days} 天后过期`, tone: "expiring", title: "腾讯过期后原图就找不回来了" }
+      ? { text: days === 0 ? "今天过期" : `${days} 天后过期`, tone: "expiring", title: "腾讯过期后原图就找不回来了，除非先留存" }
       : null,
-    item.ai && item.kept ? { text: "已存原图", tone: "kept" } : null,
+    // Inside 「留存的原图」 every tile is kept: the mark would say nothing.
+    item.kept && !app.gallery.kept ? { text: "已留存", tone: "kept", title: "原图已经存在本工具里，腾讯删掉之后也能看" } : null,
   ].filter((badge) => badge !== null);
 };
 
@@ -352,7 +360,14 @@ const gallerySelectionNodes = () => {
         disabled: count === 0 || pictureExport.running,
         title: "把原图复制到下面的文件夹；带咒语的 AI 图附同名 .txt",
         onclick: () => runPictureExport([...app.gallery.selected], "gallery"),
-      }, `保存原图到文件夹（${briefNumber(count)}）`),
+      }, `另存到文件夹（${briefNumber(count)}）`),
+      el("button", {
+        class: "btn small",
+        type: "button",
+        disabled: count === 0 || pictureKeep.running,
+        title: KEEP_LABEL_TITLE,
+        onclick: keepGallerySelection,
+      }, `留存原图（${briefNumber(count)}）`),
       el("button", { class: "btn small", type: "button", disabled: loaded.length === 0, onclick: () => selectGalleryItems(loaded) },
         `全选已加载的 ${briefNumber(loaded.length)} 张`),
       el("button", { class: "btn small", type: "button", disabled: count === 0, onclick: () => {
@@ -361,9 +376,10 @@ const gallerySelectionNodes = () => {
       } }, "清空"),
       el("span", { class: "kb-results-spacer" }),
       el("button", { class: "btn small", type: "button", title: "退出多选（Esc），已选的会清空", onclick: leaveGallerySelection }, "退出多选")),
-    el("span", { class: "kb-meta" }, "点图片就是选它；按住 Shift 点另一张可以连选。腾讯只保留 31 天，更早的图取不到原图。"),
+    el("span", { class: "kb-meta" }, "点图片就是选它；按住 Shift 点另一张可以连选。「另存到文件夹」把原图复制到下面的文件夹，「留存原图」存进本工具。腾讯只保留 31 天，更早的图只有留存过的还有原图。"),
     gallerySaveTargetRow(),
     pictureExportStatus("gallery"),
+    pictureKeepStatus("gallery"),
   ];
 };
 
@@ -376,7 +392,7 @@ const saveGalleryDir = async (dir) => {
   refreshGallerySelection();
 };
 
-// "保存到：…" with a way to pick a fixed folder (or go back to dated folders).
+// "另存到：…" with a way to pick a fixed folder (or go back to dated folders).
 const gallerySaveTargetRow = () => {
   const target = app.gallery.saveTarget;
   if (target === null) {
@@ -385,13 +401,13 @@ const gallerySaveTargetRow = () => {
   if (app.gallery.editingSaveDir) {
     const input = el("input", { type: "text", value: target.saveDir ?? "", placeholder: "例如 D:\\图片\\QQ好图", style: "width:320px" });
     return el("div", { class: "gallery-save-target" },
-      el("span", {}, "保存到："), input,
+      el("span", {}, "另存到："), input,
       el("button", { class: "btn small primary", type: "button", onclick: () => saveGalleryDir(input.value) }, "保存"),
       target.saveDir === null ? null : el("button", { class: "btn small", type: "button", onclick: () => saveGalleryDir("") }, "改回每次新建文件夹"),
       el("button", { class: "btn small", type: "button", onclick: () => { replaceGallery({ editingSaveDir: false }); refreshGallerySelection(); } }, "取消"));
   }
   return el("div", { class: "gallery-save-target" },
-    el("span", {}, "保存到："),
+    el("span", {}, "另存到："),
     el("code", {}, target.saveDir ?? `${target.fallbackRoot}\\picture-export-<时间>（每次新建一个文件夹）`),
     el("button", { class: "btn small", type: "button", onclick: () => { replaceGallery({ editingSaveDir: true }); refreshGallerySelection(); } },
       target.saveDir === null ? "改成固定文件夹" : "更改"));
@@ -527,6 +543,7 @@ el("input", {
 el("button", { class: "btn small", type: "submit" }, "搜索"));
 
 const galleryToolbar = () => el("div", { class: "gallery-toolbar" },
+  galleryScopeTabs(),
   gallerySearchBox(),
   el("div", { class: "wall-modes", role: "group", "aria-label": "时间范围" },
     galleryCalendarButtons(),
@@ -563,7 +580,8 @@ const galleryConditions = () => {
     tab.q === "" ? null : { text: `搜：${tab.q}`, remove: () => applyGalleryFilter({ q: "" }) },
     tab.shape === "" ? null : { text: `形状：${galleryLabel(GALLERY_SHAPES, tab.shape)}`, remove: () => applyGalleryFilter({ shape: "" }) },
     tab.size === "" ? null : { text: `大小：${galleryLabel(GALLERY_SIZES, tab.size)}`, remove: () => applyGalleryFilter({ size: "" }) },
-    ...GALLERY_SWITCHES.filter(([key]) => tab[key]).map(([key, label]) => ({ text: label, remove: () => applyGalleryFilter({ [key]: false }) })),
+    // kept has no chip: the 「留存的原图」 switch beside the search box shows it.
+    ...GALLERY_SWITCHES.filter(([key]) => tab[key] && key !== "kept").map(([key, label]) => ({ text: label, remove: () => applyGalleryFilter(gallerySwitchPatch(key, false)) })),
   ].filter((chip) => chip !== null);
   if (chips.length === 0) {
     return null;
@@ -623,7 +641,7 @@ const galleryFacetSections = () => {
         title,
         count: facets.extras?.[key] ?? null,
         active: tab[key],
-        onClick: () => applyGalleryFilter({ [key]: !tab[key] }),
+        onClick: () => applyGalleryFilter(gallerySwitchPatch(key, !tab[key])),
       })),
     ]),
     galleryFacetSection("shape", "形状", GALLERY_SHAPES.map(([shape, label, title]) => facetRow({
@@ -700,6 +718,9 @@ const galleryWall = () => {
     return el("div", { class: "wall-empty" }, "读取中…");
   }
   if (tab.results.items.length === 0) {
+    if (tab.kept) {
+      return el("div", { class: "wall-empty" }, galleryKeptEmptyText());
+    }
     return el("div", { class: "wall-empty" },
       "这个范围里没有图片。可以把时间放宽，或去掉上面的条件。",
       el("br"),
@@ -730,6 +751,7 @@ const renderMediaView = () => {
   const typed = focused?.id === "gallery-search" ? { value: focused.value, caret: focused.selectionStart } : null;
   setChildren(root, el("section", { class: tab.selecting ? "panel kb-page gallery-page selecting" : "panel kb-page gallery-page" },
     galleryToolbar(),
+    galleryKeptHint(),
     galleryConditions(),
     el("div", { class: "kb-layout" },
       el("details", { class: "kb-facets", open: window.innerWidth > KB_MOBILE_WIDTH },
@@ -745,7 +767,7 @@ const renderMediaView = () => {
             "aria-pressed": String(tab.selecting),
             title: tab.selecting
               ? "退出多选（Esc），已选的会清空"
-              : "选几张图，一起把原图保存到文件夹。也可以直接点图片右上角的方框，或按住 Ctrl 点图片",
+              : "选几张图，一起另存到文件夹，或留存在本工具里。也可以直接点图片右上角的方框，或按住 Ctrl 点图片",
             onclick: () => {
               if (tab.selecting) {
                 leaveGallerySelection();

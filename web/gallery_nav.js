@@ -50,7 +50,7 @@ const galleryTimeBounds = (tab) => {
 const galleryPositionSignature = (tab) => JSON.stringify({
   kind: tab.kind, ai: tab.ai, groupId: tab.groupId, sender: tab.sender, sort: tab.sort,
   // Added later: only when set, so spots saved before still match.
-  ...Object.fromEntries(["q", "shape", "size", "prompt", "asked", "file"].filter((key) => tab[key]).map((key) => [key, tab[key]])),
+  ...Object.fromEntries(["q", "shape", "size", "prompt", "asked", "file", "kept"].filter((key) => tab[key]).map((key) => [key, tab[key]])),
   time: tab.range === null ? `days:${tab.days}` : tab.range.preset ?? `${tab.range.fromUnix}-${tab.range.toUnix}`,
 });
 

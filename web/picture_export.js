@@ -24,20 +24,20 @@ const pictureExportFailedText = () => Object.entries(pictureExport.failed)
 const pictureExportText = () => {
   const job = pictureExport;
   if (job.error !== null) {
-    return `导出出错：${job.error}`;
+    return `另存出错：${job.error}`;
   }
   const failed = pictureExportFailedText();
   if (job.running) {
-    return `正在导出 ${job.done} / ${job.total}…`;
+    return `正在另存 ${job.done} / ${job.total}…`;
   }
   const originals = job.exported - job.previews;
   return [
-    originals > 0 || job.previews === 0 ? `导出了 ${originals} 张原图` : "",
+    originals > 0 || job.previews === 0 ? `另存了 ${originals} 张原图` : "",
     // Pictures sent as files whose original is nowhere on this computer.
     job.previews > 0 ? `${originals > 0 ? "；" : ""}${job.previews} 张以文件发的图本机没有原文件，存的是 QQ 的预览（最长边约 1280）` : "",
     job.prompts > 0 ? `（${job.prompts} 张附咒语 .txt）` : "",
     failed === "" ? "" : `；${failed}`,
-    job.stop && job.done < job.total ? `；已停下，还有 ${job.total - job.done} 张没导出` : "",
+    job.stop && job.done < job.total ? `；已停下，还有 ${job.total - job.done} 张没另存` : "",
   ].join("");
 };
 
