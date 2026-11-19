@@ -8,7 +8,7 @@
    until the next one (per browser: localStorage). */
 
 // v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
-const WHATS_NEW_RELEASE = "v0.0.28";
+const WHATS_NEW_RELEASE = "v0.0.29";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -17,10 +17,10 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
-  { title: "画廊不再漏图", detail: "QQ 有时过几十分钟甚至一两天才把一部分消息写进数据库，以前这些消息和图片就一直漏掉了。现在每次刷新都会回头再读最近两天；最近 31 天也会重新核对一遍，更新后马上做、之后每周一次，分在几次刷新里（每次多花几秒到半分钟）。", view: "media", selector: "#gallery-count" },
-  { title: "以文件发的图也在画廊里", detail: "当文件发的图片（多是没压缩的 AI 原图）以前画廊里看不到；现在会显示，标着「文件」，左边「以文件发的图」可以只看它们。显示的是 QQ 的预览，保存时本机有原文件就存原文件。", view: "media", selector: "#gallery-facets-body" },
-  { title: "搜图和更多筛选", detail: "画廊上方可以搜咒语、LoRA、模型、文件名、发图人和跟图一起发的话；左边新增形状（横图、竖图、方图、长图）、大小，以及「有咒语」「有人求咒语」。", view: "media", selector: "#gallery-search" },
-  { title: "多选不用拉回顶端", detail: "鼠标移到图上，右上角有勾选框，点一下就开始多选（也可以按住 Ctrl 点图）；张数和「多选」按钮跟着屏幕走，底部一栏保存，按 Esc 退出。", view: "media", selector: ".gallery-page .kb-results-head" },
+  { title: "画廊里有了「留存的原图」", detail: "搜索框左边可以在「全部群图」和「留存的原图」之间切换。留存的原图是原图已经存在本工具里的图，腾讯删掉之后也能看；这里列出全部时间的，照样可以搜索、按群和发图人筛选。以前工具从电脑里复制进来的那些原图也算在内。", view: "media", selector: ".gallery-scope" },
+  { title: "「留存」和「另存为」分开了", detail: "点开一张图：「留存原图」是把原图存进本工具，以后在「留存的原图」里找；「另存为…」是把原图存到你选的位置。以前的「保存原图」「下载原图」「在工具里永久保存」都改成了这两个说法。", view: "media", selector: ".gallery-scope" },
+  { title: "多选可以一起留存", detail: "画廊「多选」后，底部一栏有「另存到文件夹」和新的「留存原图」，可以一次留存选中的图，中途能停下。", view: "media", selector: ".gallery-page .kb-results-head" },
+  { title: "哪些图留存了，一眼能看到", detail: "留存过原图的图片，缩略图上都有「已留存」（以前只有 AI 图有）；左边筛选里的「原图已留存」可以在当前时间范围里只看它们。在消息里点开已留存的图，按「已留存 · 看留存的原图」直接去画廊。", view: "media", selector: "#gallery-facets-body" },
 ];
 
 const whatsNewState = { hidden: false };
