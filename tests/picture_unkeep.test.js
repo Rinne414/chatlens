@@ -372,3 +372,75 @@ test("everything removed is worked through in chunks", async () => {
     assert.deepEqual(unkeepCore.waitingMd5s(context.db), []);
   });
 });
+
+/* ---------- the records follow the kept folder (src/picture_reconcile.js) ---------- */
+
+const reconcileCore = require("../src/picture_reconcile");
+
+test("an original deleted straight from the folder leaves the kept library and is not copied in again", async () => {
+  await withLibrary(async ({ context, keep, libraryPath }) => {
+    const stays = keep("still there", { byStore: "group", inLibrary: true });
+    const deleted = keep("deleted by hand", { byStore: "group", inLibrary: true });
+    assert.deepEqual(await reconcileCore.reconcile(context), { available: true, dropped: 0, adopted: 0, unconfirmed: 0 });
+
+    fs.rmSync(deleted.objectPath);
+    assert.deepEqual(await reconcileCore.reconcile(context), { available: true, dropped: 1, adopted: 0, unconfirmed: 0 });
+    assert.deepEqual(stateOf(context, deleted.hash), { kept: 0, removed: 2, by: "group", inObjects: false, waiting: false });
+    assert.equal(libraryPath(deleted.hash), "");
+    assert.equal(persistMediaObject(deleted.source, context.objectDir, deleted.hash).status, "removed-by-user");
+    assert.deepEqual(stateOf(context, stays.hash), { kept: 1, removed: 0, by: "group", inObjects: true, waiting: false });
+    assert.equal(libraryPath(stays.hash), stays.objectPath);
+  });
+});
+
+test("putting the file back makes it kept again", async () => {
+  await withLibrary(async ({ context, keep, libraryPath, dir }) => {
+    const { hash, objectPath } = keep("comes back", { byStore: "group", inLibrary: true });
+    const aside = path.join(dir, "recycle-bin.png");
+    fs.renameSync(objectPath, aside);
+    await reconcileCore.reconcile(context);
+    assert.equal(stateOf(context, hash).kept, 0);
+
+    fs.renameSync(aside, objectPath);
+    assert.deepEqual(await reconcileCore.reconcile(context), { available: true, dropped: 0, adopted: 1, unconfirmed: 0 });
+    assert.deepEqual(stateOf(context, hash), { kept: 1, removed: 0, by: "manual", inObjects: true, waiting: false });
+    assert.equal(libraryPath(hash), objectPath);
+    assert.equal(removed.isRemoved(context.objectDir, hash), false);
+  });
+});
+
+test("a folder that is away changes nothing, and neither does most of it vanishing at once until confirmed", async () => {
+  await withLibrary(async ({ context, keep }) => {
+    const hashes = Array.from({ length: 120 }, (_, index) => keep(`original ${index}`, { byStore: "group" }).hash);
+    const away = `${context.objectDir}-away`;
+    fs.renameSync(context.objectDir, away);
+    assert.deepEqual(await reconcileCore.reconcile(context), { available: false, dropped: 0, adopted: 0, unconfirmed: 0 });
+    assert.equal(stateOf(context, hashes[0]).kept, 1);
+
+    fs.renameSync(away, context.objectDir);
+    for (const hash of hashes.slice(0, 110)) {
+      fs.rmSync(removed.findByName(context.objectDir, hash));
+    }
+    assert.deepEqual(await reconcileCore.reconcile(context), { available: true, dropped: 0, adopted: 0, unconfirmed: 110 });
+    assert.equal(stateOf(context, hashes[0]).kept, 1);
+    assert.deepEqual(await reconcileCore.reconcile(context, { confirmed: true }), { available: true, dropped: 110, adopted: 0, unconfirmed: 0 });
+    assert.equal(stateOf(context, hashes[0]).kept, 0);
+    assert.equal(stateOf(context, hashes[119]).kept, 1);
+  });
+});
+
+test("a harvest does not copy back an original the user deleted from the folder", () => {
+  withLibrary(({ context, keep, libraryPath }) => {
+    const { persistOriginalsForHashes } = require("../src/media_object_store");
+    const { hash, objectPath, source } = keep("deleted before the next harvest", { inLibrary: true });
+    fs.rmSync(objectPath);
+    const kb = knowledgeStore.openKnowledgeStore(context.knowledgeDbPath);
+    try {
+      persistOriginalsForHashes({ hashes: [hash], sourceByHash: new Map([[hash, source]]), objectDir: context.objectDir, db: kb });
+    } finally {
+      kb.close();
+    }
+    assert.equal(removed.findByName(context.objectDir, hash), null);
+    assert.equal(libraryPath(hash), objectPath);
+  });
+});

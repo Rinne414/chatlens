@@ -6,6 +6,7 @@
 const service = require("./picture_service");
 const state = require("./toolkit_state");
 const core = require("../picture_unkeep");
+const reconcileCore = require("../picture_reconcile");
 
 const MD5 = /^[a-f0-9]{32}$/u;
 const MAX_PER_REQUEST = 500;
@@ -44,4 +45,12 @@ const empty = async ({ md5s, all, expected }) => {
   return core.forAllWaiting(context(), core.empty, pause);
 };
 
-module.exports = { unkeep, restore, empty };
+// One at a time: the page, the start-up and each refresh may all ask.
+let reconciling = null;
+const reconcile = ({ confirmed } = {}) => {
+  reconciling = reconciling ?? reconcileCore.reconcile(context(), { pause, confirmed: confirmed === true })
+    .finally(() => { reconciling = null; });
+  return reconciling;
+};
+
+module.exports = { unkeep, restore, empty, reconcile };

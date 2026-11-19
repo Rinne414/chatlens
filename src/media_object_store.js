@@ -12,7 +12,7 @@ const {
   upsertImage,
 } = require("./knowledge_store");
 
-const { isRemoved } = require("./media_removed");
+const { isRemoved, findByName } = require("./media_removed");
 
 const HASH_PATTERN = /^[a-f0-9]{32}$/u;
 const IMAGE_EXTENSIONS = new Set([
@@ -199,6 +199,13 @@ const persistOriginalsForHashes = ({ hashes, sourceByHash, objectDir, db, onProg
       continue;
     }
     const already = existingPath.get(hash)?.objectPath ?? "";
+    // Recorded as kept and the file is nowhere in the folder: the user deleted
+    // it there. It is not copied in again; the records catch up on their own
+    // (picture_reconcile.js).
+    if (already !== "" && !fs.existsSync(already) && findByName(path.resolve(objectDir), hash) === null) {
+      stats.durableFailed += 1;
+      continue;
+    }
     if (already !== "" && fs.existsSync(already)) {
       stats.durableReused += 1;
       processed += 1;

@@ -20,6 +20,7 @@ const backupOps = require("./backup_ops");
 const update = require("./update_ops");
 const knowledge = require("./knowledge_ops");
 const readWorker = require("./read_worker");
+const pictureUnkeep = require("./picture_unkeep");
 const bookmarkOps = require("./bookmark_ops");
 const pictureRoutes = require("./picture_routes");
 const qqCollectionOps = require("./qq_collection_ops");
@@ -40,6 +41,11 @@ const { ensureInstanceId, acquireServerLock, releaseServerLock } = require("../i
 const packageInfo = require("../../package.json");
 
 const GALLERY_WARM_UP_DELAY_MS = 5000;
+
+// Originals deleted from, or put back into, the kept folder by hand.
+const followKeptFolder = () => {
+  pictureUnkeep.reconcile().catch((error) => console.error(`following the kept folder failed: ${error.message}`));
+};
 const BASE_PORT = 8321;
 // The phone's way in (手机连线), forwarded by `tailscale serve`. Fixed, since
 // the Tailscale side is configured with it.
@@ -1176,6 +1182,7 @@ const listen = (port, attempt) => {
     // after a start (measured 2026-11-20): the read worker does that once now,
     // in the background, before anyone opens the page.
     setTimeout(() => {
+      followKeptFolder();
       readWorker.call("gallery", "/api/gallery/facets", galleryOps.DEFAULT_VIEW_QUERY)
         .then(() => readWorker.call("gallery", "/api/gallery/facets", galleryOps.ALL_TIME_QUERY))
         .catch(() => {});
@@ -1186,6 +1193,7 @@ const listen = (port, attempt) => {
         await briefing.afterTick(tick);
         // Pictures after the refresh: its ingest is what adds new ones.
         picturePass.runPass({ reason: "tick" }).catch((error) => console.error(`picture pass failed: ${error.message}`));
+        followKeptFolder();
         // A full refresh re-merges group briefs and rewrites their topics:
         // 值得知道的事 is made anew now (same switches and limits as when the
         // page asks), so it is ready before the page is opened.

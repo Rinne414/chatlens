@@ -23,7 +23,7 @@ const KEPT_WHY_FACETS = [
 ];
 const UNKEEP_BATCH = 200;
 
-const keptUi = { summary: null, loading: false, reload: false, busy: false, confirmEmpty: false, notice: "", undo: [] };
+const keptUi = { summary: null, loading: false, reload: false, busy: false, confirmEmpty: false, notice: "", undo: [], folder: { available: true, unconfirmed: 0 } };
 
 const keptWhyText = (item) => (item.kept ? KEPT_WHY_TEXT[item.keptWhy] ?? "" : "");
 
@@ -44,6 +44,9 @@ const loadKeptSummary = async () => {
   }
   keptUi.loading = true;
   try {
+    // First let the records catch up with the folder: files deleted or put
+    // back there by hand since the last look.
+    await followKeptFolder();
     keptUi.summary = await api("/api/gallery/kept-summary");
   } catch {
     keptUi.summary = null;
@@ -57,6 +60,49 @@ const loadKeptSummary = async () => {
       loadKeptSummary();
     }
   }
+};
+
+const followKeptFolder = async ({ confirmed = false } = {}) => {
+  let found;
+  try {
+    found = await api("/api/pictures/reconcile", { method: "POST", body: JSON.stringify({ confirmed }) });
+  } catch {
+    return;
+  }
+  keptUi.folder = { available: found.available, unconfirmed: found.unconfirmed ?? 0 };
+  const parts = [
+    found.dropped > 0 ? `留存文件夹里有 ${briefNumber(found.dropped)} 张原图被直接删掉了，已经把它们从留存里去掉，以后不会自动留回来（把文件放回原处，它们就又算留存）。` : "",
+    found.adopted > 0 ? `留存文件夹里多了 ${briefNumber(found.adopted)} 张原图（放回来的），已经重新算作留存。` : "",
+  ].join("");
+  if (parts !== "") {
+    keptUi.notice = parts;
+    keptUi.undo = [];
+    replaceGallery({ facets: null, facetsKey: "" });
+  }
+};
+
+// The folder is away, or lost most of its files at once: say so, change nothing.
+const keptFolderLine = () => {
+  if (keptUi.folder.available === false) {
+    return el("p", { class: "notice warn" }, "现在读不到留存文件夹（它所在的磁盘可能没接上）。留存的记录都没有动，文件夹回来后就恢复正常。");
+  }
+  if (keptUi.folder.unconfirmed === 0) {
+    return null;
+  }
+  return el("p", { class: "notice warn gallery-kept-removed" },
+    `留存文件夹里少了 ${briefNumber(keptUi.folder.unconfirmed)} 张原图的文件，超过一半。如果是你自己删的，点右边确认，它们就从留存里去掉；如果不是（比如文件夹没复制全），先把文件放回去，记录都还在。`,
+    el("button", {
+      class: "btn small",
+      type: "button",
+      disabled: keptUi.busy,
+      onclick: async () => {
+        keptUi.busy = true;
+        renderKeptHead();
+        await followKeptFolder({ confirmed: true });
+        keptUi.busy = false;
+        afterKeptChange();
+      },
+    }, "是我删的，从留存里去掉"));
 };
 
 const openPictureKeepSettings = async () => {
@@ -129,7 +175,7 @@ const galleryKeptHeadNodes = () => {
       el("strong", {}, summary.outside.count > 0
         ? `留存文件夹里一共有 ${briefNumber(summary.kept.count + summary.outside.count)} 张原图，其中 ${briefNumber(summary.kept.count)} 张在画廊里（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`
         : `本工具里一共留存了 ${briefNumber(summary.kept.count)} 张原图（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`),
-      el("span", {}, `存在 ${summary.folder}（整个文件夹实际占多少，在「存储」页看）`),
+      el("span", {}, `存在 ${summary.folder}（整个文件夹实际占多少，在「存储」页看）。里面按图片编号的前两位分成小文件夹，文件名就是编号。也可以直接在文件夹里删：程序会发现，把它们从留存里去掉，不再自动留回来；从回收站放回原处就恢复。`),
       el("button", {
         class: "btn small desktop-action",
         type: "button",
@@ -140,6 +186,7 @@ const galleryKeptHeadNodes = () => {
     app.gallery.removed
       ? el("p", { class: "kb-meta" }, "下面是你取消留存的图。原图文件还在，点开一张按「放回留存」，或「多选」后一起放回。")
       : el("p", { class: "kb-meta" }, "腾讯删掉之后这些图也能看。要把图放进你自己的文件夹，点开图按「另存为」，或「多选」后「另存到文件夹」。不想留的，点开图按「取消留存」，或「多选」后一起取消。"),
+    keptFolderLine(),
     app.gallery.removed ? null : keptRulesLine(summary.rules),
     app.gallery.removed ? null : keptOutsideLine(summary.outside),
     keptRemovedLine(summary.removed),

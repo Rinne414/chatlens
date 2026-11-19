@@ -96,6 +96,9 @@ const handlePictureApi = async (request, response, url, { sendJson, sendError, r
     case "POST /api/pictures/unkeep":
       sendJson(response, 200, await unkeepOps.unkeep(await readBody(request)));
       return true;
+    case "POST /api/pictures/reconcile":
+      sendJson(response, 200, await unkeepOps.reconcile(await readBody(request)));
+      return true;
     case "POST /api/pictures/restore":
       sendJson(response, 200, await unkeepOps.restore(await readBody(request)));
       return true;
