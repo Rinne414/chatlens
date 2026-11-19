@@ -456,9 +456,9 @@ const groupTimeline = (timeline) => el("section", { class: "card gp-section" },
     el("h3", {}, "在聊什么", el("span", { class: "kb-meta" }, "　点一条看这段的全部消息")),
     timeline.length > 0 ? el("div", { class: "gp-section-tools" }, topicModeSwitch(), topicMode() === "time" ? topicOrderSwitch() : null) : null),
   timeline.length === 0
-    ? el("p", { class: "kb-meta" }, briefAutoSummaryOn(briefState.data)
+    ? el("p", { class: "kb-meta" }, linked(briefAutoSummaryOn(briefState.data)
       ? "这段时间还没有 AI 总结。后台攒够消息后会自动总结，也可以在「回顾」补齐某一天。"
-      : "这段时间还没有 AI 总结。后台刷新或自动 AI 总结关着，不会自动总结；可以在「回顾」补齐某一天。")
+      : "这段时间还没有 AI 总结。后台刷新或自动 AI 总结关着（在「设置 → 后台与通知」打开），不会自动总结；可以在「回顾」补齐某一天。"))
     : topicMode() === "things"
       ? thingsSection(timeline)
       : orderedTimeline(timeline).map((day) => el("div", { class: "gp-day" },

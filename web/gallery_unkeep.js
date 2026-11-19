@@ -129,7 +129,7 @@ const keptRulesLine = (rules) => el("p", { class: "kb-meta gallery-kept-rules" }
 // Originals the prompt library took in before the gallery recorded pictures:
 // no group and no time to list them by, so they are handled together.
 const keptOutsideLine = (outside) => (outside.count === 0 ? null : el("p", { class: "kb-meta gallery-kept-removed" },
-  `另外 ${briefNumber(outside.count)} 张不在画廊里：是咒语库更早收进来的原图，没有记下它们是哪个群、什么时候发的，所以下面列不出来，只能在咒语库里看。`,
+  linked(`另外 ${briefNumber(outside.count)} 张不在画廊里：是咒语库更早收进来的原图，没有记下它们是哪个群、什么时候发的，所以下面列不出来，只能在咒语库里看。`),
   el("button", {
     class: "btn small",
     type: "button",
@@ -190,7 +190,7 @@ const galleryKeptHeadNodes = () => {
       // Unfolded where there is room; on a phone the pictures come first.
       : el("details", { class: "gallery-kept-about", open: window.innerWidth > KB_MOBILE_WIDTH },
         el("summary", {}, "这些原图存在哪、怎么进来的、怎么去掉"),
-        el("p", { class: "kb-meta" }, `存在 ${summary.folder}（整个文件夹实际占多少，在「存储」页看）。里面按图片编号的前两位分成小文件夹，文件名就是编号。也可以直接在文件夹里删：程序会发现，把它们从留存里去掉，不再自动留回来；从回收站放回原处就恢复。`),
+        el("p", { class: "kb-meta" }, linked(`存在 ${summary.folder}（整个文件夹实际占多少，在「存储」页看）。里面按图片编号的前两位分成小文件夹，文件名就是编号。也可以直接在文件夹里删：程序会发现，把它们从留存里去掉，不再自动留回来；从回收站放回原处就恢复。`)),
         el("p", { class: "kb-meta" }, "腾讯删掉之后这些图也能看。要把图放进你自己的文件夹，点开图按「另存为」，或「多选」后「另存到文件夹」。不想留的，点开图按「取消留存」，或「多选」后一起取消。"),
         keptRulesLine(summary.rules),
         keptOutsideLine(summary.outside)),

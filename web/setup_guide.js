@@ -316,8 +316,8 @@ const aiStep = (status) => {
 const setupOnlineNote = () => el("details", { class: "setup-online" },
   el("summary", {}, "聊天记录只存在这台电脑上。联网时会发生什么？"),
   el("ul", {},
-    el("li", {}, "检查新版本：打开时和每 6 小时问一次 GitHub，只读版本信息。可以在「设置 → 版本与更新」关掉。"),
-    el("li", {}, "群头像和群图片：从腾讯的服务器读取。自动抓取群图片可以在「设置 → 群图片」关掉。"),
+    el("li", {}, linked("检查新版本：打开时和每 6 小时问一次 GitHub，只读版本信息。可以在「设置 → 版本与更新」关掉。")),
+    el("li", {}, linked("群头像和群图片：从腾讯的服务器读取。自动抓取群图片可以在「设置 → 群图片」关掉。")),
     el("li", {}, "AI 总结：只有你填了 AI 服务，消息文字才会发给它；不填就不发。")));
 
 // Once the three steps are done, the footer reports what the background

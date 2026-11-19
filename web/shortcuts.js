@@ -129,8 +129,8 @@ const shortcutPromptCard = () => {
     el("div", { class: "shortcut-prompt-text" },
       el("strong", {}, "要在桌面放一个快捷方式吗？"),
       el("span", {}, desktop.appShortcut
-        ? "开始菜单里已经有「ChatLens」（也可以按 Ctrl+Alt+U）。桌面上再放一个，双击就能打开。以后可在「设置 → 快捷方式」里改。"
-        : "双击就能打开，不用再去安装文件夹里找。以后可在「设置 → 快捷方式」里改。")),
+        ? linked("开始菜单里已经有「ChatLens」（也可以按 Ctrl+Alt+U）。桌面上再放一个，双击就能打开。以后可在「设置 → 快捷方式」里改。")
+        : linked("双击就能打开，不用再去安装文件夹里找。以后可在「设置 → 快捷方式」里改。"))),
     el("div", { class: "shortcut-prompt-actions" },
       el("button", { class: "btn small primary", type: "button", disabled: shortcutState.busy, onclick: () => answerShortcutPrompt(true) }, "放到桌面"),
       el("button", { class: "btn small ghost", type: "button", disabled: shortcutState.busy, onclick: () => answerShortcutPrompt(false) }, "不用了")));

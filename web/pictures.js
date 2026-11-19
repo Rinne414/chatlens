@@ -413,9 +413,10 @@ const renderPictureSettingsCard = () => {
   return el("div", { class: "card" },
     el("h2", {}, "群图片"),
     el("p", { class: "card-sub" },
-      "电脑 QQ 只有在你点开图片时才保存原图。开启后，工具会在腾讯还留着文件的 31 天里自动保存缩略图；你在消息里点开时再取大图。带生成参数的图会记下咒语、参数和完整工作流，并留一张较大的预览（腾讯给的尺寸，最宽 1280px，PNG 每张约 1–3 MB）。原图默认不留存，除非点「留存原图」，或在下面勾选「每张都留存原图」。空间到上限时，先清普通图的缩略图，再从最旧的 AI 图预览清起；留存的原图不会被清，在画廊「留存的原图」里看。"),
+      "电脑 QQ 只有在你点开图片时才保存原图。开启后，工具会在腾讯还留着文件的 31 天里自动保存缩略图；你在消息里点开时再取大图。带生成参数的图会记下咒语、参数和完整工作流，并留一张较大的预览（腾讯给的尺寸，最宽 1280px，PNG 每张约 1–3 MB）。原图默认不留存，除非点「留存原图」，或在下面勾选「每张都留存原图」。空间到上限时，先清普通图的缩略图，再从最旧的 AI 图预览清起；留存的原图不会被清。"),
+    el("p", { class: "card-sub" }, linked("留存的原图在画廊「留存的原图」里看和取消留存；各项实际占多少磁盘在「存储」页；一次留存所有快过期的 AI 原图在备份页。")),
     el("p", { class: "card-sub" },
-      `缩略图 ${usage.thumbs ?? 0} 张（${formatByteSize(usage.thumbBytes)}） · 预览 ${usage.previews ?? 0} 张（${formatByteSize(usage.previewBytes)}） · 临时原图 ${usage.cached ?? 0} 张 · 按规则和手动留存的原图 ${usage.kept ?? 0} 张（${formatByteSize(usage.keptBytes)}；加上咒语库从电脑复制的，总数在画廊「留存的原图」里） · 上限 ${settings.budgetGB ?? 10} GB`),
+      linked(`缩略图 ${usage.thumbs ?? 0} 张（${formatByteSize(usage.thumbBytes)}） · 预览 ${usage.previews ?? 0} 张（${formatByteSize(usage.previewBytes)}） · 临时原图 ${usage.cached ?? 0} 张 · 按规则和手动留存的原图 ${usage.kept ?? 0} 张（${formatByteSize(usage.keptBytes)}；加上咒语库从电脑复制的，总数在画廊「留存的原图」里） · 上限 ${settings.budgetGB ?? 10} GB`)),
     el("p", { class: "card-sub" },
       `${rkeySummary(status.rkey)} ${passSummary(status.pass)} 还缺缩略图 ${status.pending?.thumbs ?? 0} 张，还没检查是不是 AI 图 ${status.pending?.probes ?? 0} 张，AI 图还缺预览 ${status.pending?.previews ?? 0} 张。今天已下载 ${formatByteSize(status.trafficToday)}。`),
     status.pass?.note === "no-rkey"
@@ -446,7 +447,7 @@ const renderPictureSettingsCard = () => {
     el("p", { class: "card-sub" },
       "「现在抓取」：马上跑一轮平时每次刷新后自动做的事：向腾讯的图片服务器取缩略图、检查是不是 AI 图、取 AI 图的预览；下面勾了「每张都留存原图」的群，也会把原图留存下来。一轮最多 10 分钟，不改任何设置。"),
     el("p", { id: "picture-keep-groups", class: "card-sub", style: "margin:12px 0 6px" },
-      `每张都留存原图的群（只列关注群，现在勾了 ${kept.size} 个）：勾上的群，以后发的每张图都会自动把原图存进本工具，表情除外；每张约 1–3 MB，不受上面的空间上限管。取消勾选只是以后不再自动留，已经留下的不会删；不要的到画廊「留存的原图」里取消留存。`),
+      linked(`每张都留存原图的群（只列关注群，现在勾了 ${kept.size} 个）：勾上的群，以后发的每张图都会自动把原图存进本工具，表情除外；每张约 1–3 MB，不受上面的空间上限管。取消勾选只是以后不再自动留，已经留下的不会删；不要的到画廊「留存的原图」里取消留存。`)),
     watchlist.length === 0
       ? el("p", { class: "card-sub" }, "还没有关注群。")
       : el("div", { class: "picture-keeps" }, watchlist.map((group) => pictureKeepToggle(group, kept.has(String(group.groupId))))));

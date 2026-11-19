@@ -157,7 +157,7 @@ const briefPictureSelectionBar = (data) => {
       disabled: count === 0 || pictureExport.running,
       onclick: () => runPictureExport([...briefPictures.selected], BRIEF_PICTURE_OWNER),
     }, `另存到文件夹（${briefNumber(count)}）`),
-    target === null ? null : el("span", { class: "brief-meta" }, "另存到：", el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), "（在「画廊 → 多选」可以改）"),
+    target === null ? null : el("span", { class: "brief-meta" }, "另存到：", el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), linked("（在「画廊 → 多选」可以改）")),
     pictureExportStatus(BRIEF_PICTURE_OWNER));
 };
 

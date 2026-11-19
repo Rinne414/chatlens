@@ -47,7 +47,7 @@ const galleryScopeTabs = () => el("div", { class: "wall-modes gallery-scope", ro
 const galleryKeptEmptyText = () => [
   "这个范围里还没有留存的原图。",
   el("br"),
-  el("span", { class: "kb-meta" }, "点开一张图按「留存原图」，或「多选」后一起留存；在「设置 → 群图片」还可以让某些群每张都留。"),
+  el("span", { class: "kb-meta" }, linked("点开一张图按「留存原图」，或「多选」后一起留存；在「设置 → 群图片」还可以让某些群每张都留。备份页可以一次留存所有快过期的 AI 原图。")),
 ];
 
 // From another page (the chat's picture viewer): straight to the library.

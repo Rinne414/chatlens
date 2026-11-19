@@ -499,7 +499,7 @@ const renderBackgroundCard = () => {
   const desktop = background.desktop ?? {};
   const loginLabel = isWindowsHost() ? "开机后在后台运行" : "登录后在后台运行";
   return el("div", { class: "card" },
-    el("h2", {}, "后台与通知"),
+    el("h2", { id: "settings-background" }, "后台与通知"),
     el("p", { class: "card-sub" },
       "打开「自动刷新」后，ChatLens 开着时（窗口可以关掉）会每隔一段时间自动收新消息、攒够一段就交给 AI 总结，你打开「简报」时内容已经准备好。每条消息只总结一次；各群的总览最多每 2 小时重写一次。实际花了多少看上面的「AI 用量与费用」，也可以随时暂停或设每日预算。"),
     backgroundStatusLine(background),

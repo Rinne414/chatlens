@@ -254,7 +254,8 @@ const backupForm = () => {
       el("button", { class: "btn", disabled: running || !ready, onclick: () => startBackup("scan") }, "先扫描看看"),
       el("span", { class: "brief-meta" }, "扫描只统计有多少、电脑上缺哪些，不写入任何文件；可以跳过直接保存。")),
     el("p", { class: "brief-meta backup-dest" }, "「保存到电脑」存到：",
-      el("code", {}, backupState.targetDir.trim() || "（还没填，见第 4 步）")));
+      el("code", {}, backupState.targetDir.trim() || "（还没填，见第 4 步）"),
+      backupState.targetDir.trim() ? openBackupFolderButton() : null));
 };
 
 /* ---------- progress and report ---------- */
@@ -459,7 +460,9 @@ const backupStatusTiles = () => {
         (expiring.soon ?? 0) > 0 ? "warn" : "",
         () => document.getElementById("backup-rescue")?.scrollIntoView({ behavior: "smooth", block: "start" })),
     tile("上次备份", last.value, last.sub),
-    tile("保存到", backupState.targetDir.split(/[\\/]/u).filter(Boolean).pop() || "未设置", backupState.targetDir || "在下面第 4 步填写"));
+    tile("保存到", backupState.targetDir.split(/[\\/]/u).filter(Boolean).pop() || "未设置",
+      backupState.targetDir ? `${backupState.targetDir} · 点这里打开文件夹` : "在下面第 4 步填写", "",
+      backupState.targetDir ? () => api("/api/backup/open-folder", { method: "POST", body: "{}" }).catch((error) => alert(error.message)) : null));
 };
 
 /* ---------- rescue: AI originals about to disappear ---------- */
@@ -578,7 +581,8 @@ const backupRescueSelection = (items) => {
       onclick: () => runPictureExport([...backupState.picked], "backup"),
     }, `另存所选到文件夹（${briefNumber(count)}）`),
     target === null ? null : el("span", { class: "brief-meta backup-dest" }, "另存到：",
-      el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), "（在「画廊 → 多选」可以改）"),
+      el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), linked("（在「画廊 → 多选」可以改）"),
+      target.saveDir ? openSaveFolderButton() : null),
     pictureExportStatus("backup"));
 };
 
@@ -639,7 +643,10 @@ const backupRescue = () => {
       el("div", {},
         el("h2", {}, "先救快过期的 AI 原图"),
         el("p", { class: "card-sub" }, "咒语已经记下了，但原图还只在腾讯服务器上，腾讯删掉后就找不回来。点图可以先看一眼。"),
-        items.length === 0 ? null : el("p", { class: "card-sub backup-expiry-line" }, rescueExpiryLine(items))),
+        items.length === 0 ? null : el("p", { class: "card-sub backup-expiry-line" }, rescueExpiryLine(items)),
+        el("p", { class: "card-sub backup-rescue-where" },
+          linked("留存下来的原图存在本程序里，在画廊「留存的原图」里看、取消留存。"),
+          openKeptFolderButton())),
       rescueKeepAllButton(items)),
     rescueKeepAllConfirm(items),
     rescue === null ? null : el("p", { id: "backup-rescue-progress", class: "backup-rescue-progress", "aria-live": "polite" }, backupRescueProgressText()),

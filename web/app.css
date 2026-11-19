@@ -1082,3 +1082,7 @@ html[data-theme="dark"] .sel-bar { box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
 }
 .rail-quit { display: grid; gap: 2px; text-align: left; }
 .rail-quit-hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+/* A sentence that names another page links to it (places.js). */
+.place-link { text-decoration: underline; text-underline-offset: 2px; }
+.backup-rescue-where { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }

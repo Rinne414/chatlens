@@ -245,8 +245,8 @@ const storageRow = (item) => el("div", {
 },
 el("div", { class: "storage-item" },
   el("strong", {}, item.label),
-  el("span", {}, item.description),
-  el("small", {}, item.cleanupImpact)),
+  el("span", {}, linked(item.description)),
+  el("small", {}, linked(item.cleanupImpact))),
 el("div", { class: "storage-paths" },
   item.paths.length === 0
     ? el("code", {}, "尚未设置")

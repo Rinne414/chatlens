@@ -53,7 +53,7 @@ const pictureKeepStatusNodes = (owner) => {
     return [];
   }
   return [
-    el("span", {}, pictureKeepText()),
+    el("span", {}, linked(pictureKeepText())),
     pictureKeep.running
       ? el("button", { class: "btn small", type: "button", onclick: () => { pictureKeep.stop = true; } }, "停下")
       : null,

@@ -523,7 +523,7 @@ const reviewBackfillAction = (data) => {
     }
     return el("p", { class: "brief-meta" }, briefAutoSummaryOn(briefState.data)
       ? "今天剩下的新消息由后台简报自动总结。"
-      : "今天剩下的新消息不会自动总结：后台刷新或自动 AI 总结关着（在「设置 → 后台与通知」打开）。");
+      : linked("今天剩下的新消息不会自动总结：后台刷新或自动 AI 总结关着（在「设置 → 后台与通知」打开）。"));
   }
   if (!status.llmConfigured) {
     return el("p", { class: "brief-meta" }, `还有 ${briefNumber(totals.backfillable)} 条没有 AI 整理。配置 AI 服务后可以补齐。`);
