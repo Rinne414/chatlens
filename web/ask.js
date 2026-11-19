@@ -151,6 +151,8 @@ const askForm = () => {
       }, label)),
       el("button", { class: "btn primary", disabled: askRunning(), onclick: () => submitAsk(input.value) }, askRunning() ? "正在找…" : "问"),
       el("span", { class: "brief-meta ask-key-hint" }, "Ctrl + Enter 发送")),
+    // Each question is two AI calls (ask_history.js: a search plan, then the answer).
+    el("p", { class: "brief-meta ask-cost-note" }, "每问一次调用两次 AI：问题和找到的相关消息会发给你在设置里填的 AI 服务，用它的额度。"),
     askRunning()
       ? el("p", { class: "brief-meta ask-progress" }, `正在查「${askState.job.meta?.question ?? ""}」：先在聊天记录里找相关消息，再让 AI 整理回答…`)
       : null);

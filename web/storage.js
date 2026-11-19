@@ -7,14 +7,19 @@ const storageState = {
   errors: new Map(),
   notice: null,
   requestId: 0,
+  // The row whose 「删除」 waits for a second click.
+  confirming: null,
 };
 
 const STORAGE_SECTIONS = [
-  { id: "protected", title: "受保护的 QQ 与工具数据", description: "这些位置只能查看。控制台没有删除入口。" },
-  { id: "important", title: "重要数据库、媒体与续跑记录", description: "长期保存的索引、媒体副本和进度；各项占用会分别显示。" },
-  { id: "regenerable", title: "可重新生成", description: "任务结束后可以清理；需要时工具会重新创建。" },
-  { id: "history", title: "历史输出", description: "可以删除，但会失去对应报告、导出文件或媒体预览。" },
+  { id: "protected", title: "QQ 的数据和本程序的设置", description: "只能查看，这里没有删除按钮。" },
+  { id: "important", title: "本程序存下的消息、图片和进度", description: "长期保存；删掉就找不回，或者要重新整理。" },
+  { id: "regenerable", title: "可以重新生成", description: "删掉后，需要时程序会重新做一份。" },
+  { id: "history", title: "历史输出", description: "可以删除，但对应的报告、导出文件或图片预览会跟着没有。" },
 ];
+
+const STORAGE_QQ_IDS = new Set(["qq-account", "qq-databases", "qq-media-cache"]);
+const STORAGE_BIG_IDS = new Set(["qq-account", "qq-media-cache", "knowledge-media", "media-removed", "picture-cache"]);
 
 const storagePolicyClass = (policy) => {
   if (policy === "protected") {
@@ -34,13 +39,46 @@ const storageMeasuredBytes = (itemIds) => itemIds.reduce((total, itemId) => {
   return total + (measurement?.bytes ?? 0);
 }, 0);
 
+// A row's name without the bracketed note, for lists in one line.
+const storageShortLabel = (label) => label.replace(/（[^）]*）$/u, "");
+
+// This program's own rows (everything but QQ's folders): the bytes counted so
+// far and the rows not counted yet, so the headline never passes a partial sum
+// off as the total.
+const storageToolTotals = (items, measurements, measuring) => {
+  const tool = items.filter((item) => !STORAGE_QQ_IDS.has(item.id));
+  const missing = tool.filter((item) => !measurements.has(item.id));
+  return {
+    bytes: tool.reduce((total, item) => total + (measurements.get(item.id)?.bytes ?? 0), 0),
+    missing: missing.map((item) => ({ id: item.id, label: storageShortLabel(item.label) })),
+    busy: missing.some((item) => measuring.has(item.id)),
+  };
+};
+
+const storageToolHeadline = (totals) => {
+  if (totals.missing.length === 0) {
+    return { label: "本程序一共占用", note: "各项都已算好" };
+  }
+  const names = totals.missing.map((item) => item.label).join("、");
+  return {
+    label: "本程序至少占用",
+    note: totals.busy ? `正在计算，还差 ${totals.missing.length} 项：${names}` : `还有 ${totals.missing.length} 项没算：${names}`,
+  };
+};
+
+const STORAGE_PENDING_TEXT = {
+  manual: "QQ 的文件夹很大，点「计算大小」才算",
+  background: "稍后自动计算",
+  automatic: "等待计算",
+};
+
 const storageMeasurementCell = (item) => {
   const measurement = storageState.measurements.get(item.id);
   const error = storageState.errors.get(item.id);
   if (storageState.measuring.has(item.id)) {
     return el("div", { class: "storage-size measuring" },
       el("strong", {}, "正在计算…"),
-      el("span", {}, ["qq-media-cache", "knowledge-media"].includes(item.id) ? "大型目录可能需要较久" : "逐项读取文件元数据"));
+      el("span", {}, STORAGE_BIG_IDS.has(item.id) ? "文件很多，可能要一会儿；页面照常能用" : "逐个读取文件大小"));
   }
   if (error !== undefined) {
     return el("div", { class: "storage-size error" },
@@ -50,7 +88,7 @@ const storageMeasurementCell = (item) => {
   if (measurement === undefined) {
     return el("div", { class: "storage-size pending" },
       el("strong", {}, "未计算"),
-      el("span", {}, item.measurement === "manual" ? "按需计算，避免磁盘长时间繁忙" : "等待计算"));
+      el("span", {}, STORAGE_PENDING_TEXT[item.measurement] ?? STORAGE_PENDING_TEXT.automatic));
   }
   const detail = `${measurement.fileCount.toLocaleString()} 个文件` +
     (measurement.skippedSymlinkCount > 0 ? ` · 跳过 ${measurement.skippedSymlinkCount} 个链接` : "") +
@@ -80,14 +118,23 @@ const storageMeasureCategory = async (category) => {
   renderStorageView();
 };
 
-const storageRefreshAutomatic = async (requestId) => {
-  const items = storageState.overview?.items ?? [];
-  for (const item of items.filter((candidate) => candidate.measurement === "automatic")) {
+// One row after another, so the disk is never asked for two big walks at once.
+const storageMeasureIds = async (ids, requestId) => {
+  for (const id of ids) {
     if (requestId !== storageState.requestId) {
       return;
     }
-    await storageMeasureCategory(item.id);
+    await storageMeasureCategory(id);
   }
+};
+
+const storageItemIds = (filter) => (storageState.overview?.items ?? []).filter(filter).map((item) => item.id);
+
+// On open: the quick rows every time, then this program's big folders once
+// (they keep their size until 「重新计算」). QQ's folders wait for a click.
+const storageRefreshAutomatic = async (requestId) => {
+  await storageMeasureIds(storageItemIds((item) => item.measurement === "automatic"), requestId);
+  await storageMeasureIds(storageItemIds((item) => item.measurement === "background" && !storageState.measurements.has(item.id)), requestId);
 };
 
 const storageOpenCategory = async (category) => {
@@ -102,36 +149,21 @@ const storageOpenCategory = async (category) => {
   }
 };
 
-const storageCleanupPrompt = (item) => {
+// What the second click will delete, said before it happens. bytes: the
+// row's measured size, or undefined.
+const storageCleanupQuestion = (item, bytes) => {
+  const size = bytes === undefined ? "" : `（约 ${formatBytes(bytes)}）`;
   if (item.id === "temporary-files") {
-    return [
-      "确定清理所有临时数据库副本？",
-      "",
-      "不会删除消息库、报告、媒体副本或补扫检查点。",
-      "下次扫描可能需要重新复制 QQ 数据库。",
-    ].join("\n");
+    return `清理全部临时数据库副本${size}？消息库、补扫进度、报告和留存的原图都不受影响；下次扫描可能要重新复制一次数据库。`;
   }
   if (item.id === "run-files") {
-    return [
-      "确定删除所有运行产物与媒体副本？",
-      "",
-      "工具消息库和咒语库长期媒体副本仍会保留，但历史报告里的媒体预览、聊天内嵌媒体和运行详情可能失效。",
-      "此操作不可撤销。",
-    ].join("\n");
+    return `删除全部运行产物${size}？历史报告里的图片预览、聊天里嵌的媒体和运行详情可能打不开；消息库和留存的原图不受影响。删了不能恢复。`;
   }
-  return [
-    "确定删除所有报告与导出文件？",
-    "",
-    "HTML/Markdown 报告、媒体导出和咒语库导出都会消失。",
-    "消息库与运行产物不会同时删除。此操作不可撤销。",
-  ].join("\n");
+  return `删除全部报告和导出文件${size}？所有报告、导出的媒体和咒语库都会消失，包括存在这里的「另存到文件夹」的图片。删了不能恢复。`;
 };
 
-const storageCleanupCategory = async (item, button) => {
-  if (!window.confirm(storageCleanupPrompt(item))) {
-    return;
-  }
-  button.disabled = true;
+const storageCleanupCategory = async (item) => {
+  storageState.confirming = null;
   storageState.notice = { text: `正在清理「${item.label}」…`, tone: "warn" };
   renderStorageView();
   try {
@@ -159,34 +191,53 @@ const storageCleanupCategory = async (item, button) => {
   }
 };
 
+const storageSetConfirming = (itemId) => {
+  storageState.confirming = itemId;
+  renderStorageView();
+};
+
+const storageCleanupButton = (item) => {
+  if (item.cleanupCategory === null) {
+    return null;
+  }
+  return el("div", { class: "storage-danger" },
+    el("button", {
+      class: "btn small danger",
+      title: item.cleanupAllowed ? item.cleanupImpact : item.cleanupBlockedReason,
+      "data-testid": `storage-cleanup-${item.id}`,
+      disabled: !item.cleanupAllowed || storageState.confirming === item.id,
+      onclick: () => storageSetConfirming(item.id),
+    }, item.id === "temporary-files" ? "清理…" : "删除全部…"));
+};
+
 const storageActions = (item) => {
+  const isMeasured = storageState.measurements.has(item.id);
   const measureButton = el("button", {
-    class: "icon-btn storage-icon-button",
-    title: item.measurement === "manual" ? "计算此目录占用（可能较久）" : "重新计算占用",
-    "aria-label": item.measurement === "manual" ? "计算占用" : "重新计算占用",
+    class: "btn small",
+    title: item.measurement === "manual" ? "QQ 的文件夹文件很多，可能要几分钟" : "重新读一遍这里的文件大小",
     "data-testid": `storage-measure-${item.id}`,
     disabled: storageState.measuring.has(item.id),
     onclick: () => storageMeasureCategory(item.id),
-  }, "↻");
+  }, isMeasured ? "↻ 重新计算" : "↻ 计算大小");
   const openButton = el("button", {
-    class: "icon-btn storage-icon-button",
-    title: item.openable ? "在资源管理器中打开位置" : "路径当前不存在",
-    "aria-label": "打开位置",
+    class: "btn small",
+    title: item.openable ? "在文件管理器里打开" : "这个位置现在还不存在",
     "data-testid": `storage-open-${item.id}`,
     disabled: !item.openable,
     onclick: () => storageOpenCategory(item.id),
-  }, "📂");
-  const cleanupButton = item.cleanupCategory === null
-    ? null
-    : el("button", {
-        class: "btn small danger",
-        title: item.cleanupAllowed ? item.cleanupImpact : item.cleanupBlockedReason,
-        "data-testid": `storage-cleanup-${item.id}`,
-        disabled: !item.cleanupAllowed,
-        onclick: (event) => storageCleanupCategory(item, event.currentTarget),
-      }, item.id === "temporary-files" ? "清理" : "删除全部");
-  return el("div", { class: "storage-actions" }, measureButton, openButton, cleanupButton);
+  }, "打开文件夹");
+  return el("div", { class: "storage-actions" }, measureButton, openButton, storageCleanupButton(item));
 };
+
+const storageConfirmStrip = (item) => (storageState.confirming !== item.id ? null : el("div", {
+  class: "storage-confirm",
+  role: "alert",
+  "data-testid": `storage-confirm-${item.id}`,
+},
+el("span", {}, storageCleanupQuestion(item, storageState.measurements.get(item.id)?.bytes)),
+el("button", { class: "btn small danger", type: "button", onclick: () => storageCleanupCategory(item) },
+  item.id === "temporary-files" ? "确定清理" : "确定删除"),
+el("button", { class: "btn small", type: "button", onclick: () => storageSetConfirming(null) }, "不删")));
 
 const storageRow = (item) => el("div", {
   class: "storage-row",
@@ -198,7 +249,7 @@ el("div", { class: "storage-item" },
   el("small", {}, item.cleanupImpact)),
 el("div", { class: "storage-paths" },
   item.paths.length === 0
-    ? el("code", {}, "尚未配置")
+    ? el("code", {}, "尚未设置")
     : item.paths.map((itemPath) => el("code", { title: itemPath }, itemPath))),
 storageMeasurementCell(item),
 el("div", { class: "storage-policy" },
@@ -206,29 +257,32 @@ el("div", { class: "storage-policy" },
   item.cleanupBlockedReason !== null && item.cleanupCategory !== null
     ? el("small", {}, item.cleanupBlockedReason)
     : null),
-storageActions(item));
-
-const STORAGE_QQ_IDS = new Set(["qq-account", "qq-databases", "qq-media-cache"]);
-
-// Everything, one item after another (the QQ folders can take minutes).
-const storageMeasureAll = async (requestId) => {
-  for (const item of storageState.overview?.items ?? []) {
-    if (requestId !== storageState.requestId) {
-      return;
-    }
-    await storageMeasureCategory(item.id);
-  }
-};
+storageActions(item),
+storageConfirmStrip(item));
 
 // QQ's total: the whole account folder once it is measured, else its parts.
 const storageQqTotal = () => (storageState.measurements.has("qq-account")
   ? { bytes: storageMeasuredBytes(["qq-account"]), note: "整个 QQ 账号文件夹" }
-  : { bytes: storageMeasuredBytes(["qq-databases", "qq-media-cache"]), note: storageState.measurements.has("qq-media-cache") ? "数据库 + 媒体缓存（点「全部计算」看整个文件夹）" : "只算了数据库，点「全部计算」" });
+  : { bytes: storageMeasuredBytes(["qq-databases", "qq-media-cache"]), note: storageState.measurements.has("qq-media-cache") ? "聊天数据库 + 媒体缓存（点「全部计算」看整个文件夹）" : "只算了聊天数据库，点「全部计算」看全部" });
+
+const storageToolCell = (overview) => {
+  const totals = storageToolTotals(overview.items, storageState.measurements, storageState.measuring);
+  const headline = storageToolHeadline(totals);
+  return el("div", { class: "storage-summary-cell", "data-testid": "storage-tool-total" },
+    el("span", {}, headline.label),
+    el("strong", {}, formatBytes(totals.bytes)),
+    el("small", {}, headline.note),
+    totals.missing.length === 0 || totals.busy
+      ? null
+      : el("button", {
+          class: "btn small storage-summary-action",
+          "data-testid": "storage-measure-missing",
+          onclick: () => storageMeasureIds(totals.missing.map((item) => item.id), storageState.requestId),
+        }, `计算这 ${totals.missing.length} 项`));
+};
 
 const storageSummary = (overview) => {
-  const toolIds = overview.items.filter((item) => !STORAGE_QQ_IDS.has(item.id)).map((item) => item.id);
   const qq = storageQqTotal();
-  const measuredCount = overview.items.filter((item) => storageState.measurements.has(item.id)).length;
   const volumeNodes = overview.volumes.map((volume) =>
     volume.error === null
       ? el("div", { class: "storage-summary-cell" },
@@ -240,16 +294,55 @@ const storageSummary = (overview) => {
           el("strong", {}, "无法读取"),
           el("small", { title: volume.error }, volume.error)));
   return el("div", { class: "storage-summary", "data-testid": "storage-summary" },
-    el("div", { class: "storage-summary-cell" },
-      el("span", {}, "本工具已计算占用"),
-      el("strong", {}, formatBytes(storageMeasuredBytes(toolIds))),
-      el("small", {}, `${measuredCount}/${overview.items.length} 项已有结果`)),
+    storageToolCell(overview),
     el("div", { class: "storage-summary-cell" },
       el("span", {}, "QQ 占用"),
       el("strong", {}, formatBytes(qq.bytes)),
       el("small", {}, qq.note)),
     volumeNodes);
 };
+
+const storageSectionNode = (overview, section) => el("section", { class: "storage-section", "aria-labelledby": `storage-section-${section.id}` },
+  el("div", { class: "storage-section-head" },
+    el("div", {},
+      el("h2", { id: `storage-section-${section.id}` }, section.title),
+      el("p", {}, section.description))),
+  el("div", { class: "storage-table" },
+    el("div", { class: "storage-table-head", "aria-hidden": "true" },
+      el("span", {}, "数据"),
+      el("span", {}, "位置"),
+      el("span", {}, "占用"),
+      el("span", {}, "能不能删"),
+      el("span", {}, "操作")),
+    overview.items.filter((item) => item.section === section.id).map(storageRow)));
+
+const storageRemeasureTool = () => {
+  const ids = storageItemIds((item) => !STORAGE_QQ_IDS.has(item.id));
+  for (const id of ids) {
+    storageState.measurements.delete(id);
+    storageState.errors.delete(id);
+  }
+  renderStorageView();
+  storageMeasureIds(ids, storageState.requestId);
+};
+
+const storageToolbar = () => el("div", { class: "storage-toolbar", "data-testid": "storage-view" },
+  el("div", {},
+    el("strong", {}, "计算大小只读文件大小，不读文件内容。"),
+    el("span", {}, "本程序的文件夹在打开这页时自动计算；QQ 的文件夹文件太多，点「全部计算」或那一行的「计算大小」才算。")),
+  el("button", {
+    class: "btn small",
+    "data-testid": "storage-refresh",
+    disabled: storageState.measuring.size > 0,
+    onclick: storageRemeasureTool,
+  }, "↻ 重新计算本程序占用"),
+  el("button", {
+    class: "btn small primary",
+    "data-testid": "storage-measure-all",
+    disabled: storageState.measuring.size > 0,
+    title: "逐项计算包括 QQ 文件夹在内的全部占用，可能要几分钟",
+    onclick: () => storageMeasureIds(storageItemIds(() => true), storageState.requestId),
+  }, "全部计算（含 QQ）"));
 
 const renderStorageView = () => {
   const root = $("#view-storage");
@@ -261,48 +354,11 @@ const renderStorageView = () => {
   const notice = storageState.notice === null
     ? null
     : el("div", { class: `notice ${storageState.notice.tone}` }, storageState.notice.text);
-  const sections = STORAGE_SECTIONS.map((section) => {
-    const items = overview.items.filter((item) => item.section === section.id);
-    return el("section", { class: "storage-section", "aria-labelledby": `storage-section-${section.id}` },
-      el("div", { class: "storage-section-head" },
-        el("div", {},
-          el("h2", { id: `storage-section-${section.id}` }, section.title),
-          el("p", {}, section.description))),
-      el("div", { class: "storage-table" },
-        el("div", { class: "storage-table-head", "aria-hidden": "true" },
-          el("span", {}, "数据"),
-          el("span", {}, "位置"),
-          el("span", {}, "占用"),
-          el("span", {}, "删除规则"),
-          el("span", {}, "操作")),
-        items.map(storageRow)));
-  });
   setChildren(root,
-    el("div", { class: "storage-toolbar", "data-testid": "storage-view" },
-      el("div", {},
-        el("strong", {}, "容量计算不会读取文件内容，也不会跟随目录链接。"),
-        el("span", {}, "QQ 的文件夹、媒体缓存和图片可能有大量小文件，所以只在你点「全部计算」或该行的刷新按钮后计算。")),
-      el("button", {
-        class: "btn small",
-        "data-testid": "storage-refresh",
-        disabled: storageState.measuring.size > 0,
-        onclick: async () => {
-          storageState.measurements.clear();
-          storageState.errors.clear();
-          renderStorageView();
-          await storageRefreshAutomatic(storageState.requestId);
-        },
-      }, "↻ 刷新工具占用"),
-      el("button", {
-        class: "btn small primary",
-        "data-testid": "storage-measure-all",
-        disabled: storageState.measuring.size > 0,
-        title: "逐项计算包括 QQ 文件夹在内的全部占用，可能要几分钟",
-        onclick: () => storageMeasureAll(storageState.requestId),
-      }, "全部计算")),
+    storageToolbar(),
     notice,
     storageSummary(overview),
-    sections);
+    STORAGE_SECTIONS.map((section) => storageSectionNode(overview, section)));
 };
 
 const openStorageView = async () => {
@@ -310,6 +366,7 @@ const openStorageView = async () => {
   storageState.requestId += 1;
   const requestId = storageState.requestId;
   storageState.notice = null;
+  storageState.confirming = null;
   renderStorageView();
   try {
     storageState.overview = await api("/api/storage/overview");

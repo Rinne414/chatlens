@@ -640,7 +640,7 @@ test("closing the console says what stops, whether it comes back at login, and h
   assert.doesNotMatch(quiet, /中断|自己启动/u);
   assert.match(quiet, /应用菜单/u);
   // Status unknown (the request failed): still a clear question.
-  assert.match(question(null), /^关闭控制台？/u);
+  assert.match(question(null), /^退出 ChatLens？/u);
   assert.match(question(null), /启动脚本/u);
 });
 
@@ -665,6 +665,7 @@ test("Ctrl+K: pages, groups and words match every word typed, and any text can g
   assert.deepEqual(labels("ANIMA"), ["关注的词：anima", "在回顾里搜「ANIMA」", "问群聊：ANIMA", "在收藏里找「ANIMA」"]);
   // Every word must match.
   assert.deepEqual(labels("示例 mkii").slice(0, 1), ["示例画室MKII"]);
-  assert.deepEqual(labels("关闭").slice(0, 1), ["关闭控制台"]);
+  // The word people used for it before still finds the command.
+  assert.deepEqual(labels("关闭").slice(0, 1), ["退出 ChatLens"]);
   assert.equal(labels("完全不存在的词").length, 3);
 });

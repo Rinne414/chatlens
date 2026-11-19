@@ -213,6 +213,12 @@ const digestPeriodBody = (digest, keyPrefix) => {
   ];
 };
 
+// Generating calls the user's AI service: say what is sent and whose quota it uses.
+const DIGEST_COST_NOTES = {
+  day: "会把这天各群的 AI 摘要（不是原始消息）发给你设置的 AI 服务，用它的额度。",
+  period: "会把这段时间各群的 AI 摘要发给你设置的 AI 服务，用它的额度；缺的每日总览会先补上，可能要调用好几次。",
+};
+
 const digestActions = (kind, period, entry) => {
   const running = digestJobRunning(kind, period);
   const busyElsewhere = digestJobRunning() && !running;
@@ -227,6 +233,7 @@ const digestActions = (kind, period, entry) => {
     running ? el("span", { class: "brief-meta" }, digestState.job.logTail?.at(-1) ?? "AI 正在写，稍等一两分钟…") : null,
     busyElsewhere ? el("span", { class: "brief-meta" }, "另一份总览正在生成，稍后再试。") : null,
     entry?.llmConfigured === false ? el("span", { class: "brief-meta" }, "还没有配置 AI 服务。") : null,
+    !running && entry?.llmConfigured === true ? el("span", { class: "brief-meta" }, DIGEST_COST_NOTES[kind === "day" ? "day" : "period"]) : null,
     digestState.notice ? el("span", { class: "brief-meta", style: `color:var(${digestState.notice.isError ? "--risk" : "--ok"})` }, digestState.notice.text) : null);
 };
 
@@ -302,7 +309,9 @@ const digestHomeSection = () => {
     headerExtra: el("span", { class: "digest-switch" }, pick(today), pick(digestShiftDay(today, -1))),
     emptyText: day === today
       ? "今天的跨群总览还没写。点下面的按钮，AI 会把今天各群已整理的内容汇成一份。"
-      : "昨天的总览会在后台自动生成；也可以现在就生成。",
+      : briefAutoSummaryOn(briefState.data)
+        ? "昨天的总览会在后台自动生成；也可以现在就生成。"
+        : "昨天的总览还没生成。后台刷新或自动 AI 总结关着，不会自己生成；可以现在就生成。",
   });
 };
 

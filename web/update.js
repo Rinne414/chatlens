@@ -67,7 +67,7 @@ const runUpdateCheck = async () => {
 };
 
 const applyUpdateNow = async (info) => {
-  if (!window.confirm(`更新到 v${info.latestVersion}？\n控制台会自动退出并重启（约 10-30 秒）。配置、密钥和已生成的数据都会保留。`)) {
+  if (!window.confirm(`更新到 v${info.latestVersion}？\nChatLens 会自动退出并重启（约 10-30 秒）。配置、密钥和已生成的数据都会保留。`)) {
     return;
   }
   updateState.busy = true;
@@ -80,7 +80,7 @@ const applyUpdateNow = async (info) => {
       el("div", { class: "card" },
         el("h2", {}, "正在更新"),
         el("p", { class: "card-sub" },
-          "控制台正在退出并替换程序文件，完成后会自动重新启动并打开新页面。",
+          "ChatLens 正在退出并替换程序文件，完成后会自动重新启动并打开新页面。",
           el("br"),
           isWindowsHost()
             ? "如果 30 秒后没有自动打开，请手动双击 Start-ChatLens.cmd。"
@@ -107,11 +107,34 @@ const railVersionStatus = () => {
   if (updateState.notice?.isError) {
     return { text: "检查失败", tone: "error" };
   }
+  if (updateState.info?.skipped) {
+    return { text: "不自动检查更新", tone: "" };
+  }
   if (updateState.info !== null && !updateState.info.hasUpdate) {
     return { text: `已是最新 · ${railAgo(Math.floor(updateState.checkedAt / 1000))}检查`, tone: "ok" };
   }
   return null;
 };
+
+// On unless switched off; the 检查更新 button works either way.
+const updateAutoCheckOn = () => updateState.info?.autoCheck !== false;
+
+const setUpdateAutoCheck = async (enabled) => {
+  try {
+    await api("/api/update/auto-check", { method: "POST", body: JSON.stringify({ enabled }) });
+    updateState.nextAutoCheckAt = 0;
+    await checkForUpdate({ fresh: false });
+  } catch (error) {
+    updateState.notice = { text: `没有改成：${error.message}`, isError: true };
+  }
+  renderUpdateViews();
+};
+
+const updateAutoCheckSwitch = () => backgroundToggle(
+  "自动检查更新",
+  "打开时和之后每 6 小时向 GitHub 查一次最新版本，只读版本信息；有新版本只提醒，要你点「一键更新」才会装。关掉后只有你点「检查更新」才查。",
+  updateAutoCheckOn(),
+  setUpdateAutoCheck);
 
 const renderRailVersion = () => {
   const node = $("#rail-version");
@@ -163,20 +186,25 @@ const renderUpdateCard = () => {
     : null;
   const state = hasUpdate
     ? `，可以更新到 v${info.latestVersion}`
-    : info !== null ? "，已是最新" : "";
+    : info?.skipped ? "（没有检查过有没有新版本）" : info !== null ? "，已是最新" : "";
 
   return el("div", { class: `card update-card ${hasUpdate ? "has-update" : ""}`, id: "update-card" },
     el("h2", {}, "版本与更新"),
     el("p", { class: "update-version" }, el("strong", {}, `当前版本 v${version}`), state),
     el("div", { class: "row" }, applyButton, checkButton, msg),
+    hasUpdate
+      ? el("p", { class: "card-sub", style: "margin:6px 0 0" },
+          "「一键更新」会下载新版本、核对签名后重启 ChatLens，这个页面会断开一会儿；设置、密钥和数据都保留。程序里没有退回旧版本的按钮，要用回旧版得到 GitHub 发布页手动下载。")
+      : null,
     // Only while still behind: once on the latest version (updated by hand, or
     // a later try worked) the old failure no longer matters.
     info?.lastFailure && info.hasUpdate === true
-      ? el("p", { class: "notice risk" }, `上次自动更新没有成功（${info.lastFailure.at}）：${info.lastFailure.message}。控制台仍是当前版本；可以再试一次，或到 GitHub 发布页手动下载。详情在 dist/update/update.log。`)
+      ? el("p", { class: "notice risk" }, `上次自动更新没有成功（${info.lastFailure.at}）：${info.lastFailure.message}。ChatLens 仍是当前版本；可以再试一次，或到 GitHub 发布页手动下载。详情在 dist/update/update.log。`)
       : null,
     notesBlock,
+    updateAutoCheckSwitch(),
     el("p", { class: "card-sub update-footnote" },
-      "控制台打开时和之后每 6 小时会自动向 GitHub 查一次最新版本；一键更新会下载安装包、核对签名后自动重启控制台，你的配置、密钥和数据不受影响。",
+      "一键更新会下载安装包、核对签名后自动重启 ChatLens，你的配置、密钥和数据不受影响。",
       updateState.checkedAt > 0 ? `上次检查：${railAgo(Math.floor(updateState.checkedAt / 1000))}。` : "",
       " 项目主页：",
       el("a", { href: "https://github.com/Rinne414/chatlens", target: "_blank", rel: "noopener" }, "GitHub"),

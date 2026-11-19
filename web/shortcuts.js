@@ -59,7 +59,7 @@ const renderShortcutCard = () => {
   const loadingText = settingsState.backgroundError ? `读取失败：${settingsState.backgroundError}` : "正在读取…";
   return el("div", { class: "card", id: "settings-shortcuts" },
     el("h2", {}, "快捷方式"),
-    el("p", { class: "card-sub" }, "不用再去安装文件夹里找启动脚本：点快捷方式就打开简报，控制台没开时会先把它启动。"),
+    el("p", { class: "card-sub" }, "不用再去安装文件夹里找启动脚本：点快捷方式就打开简报，ChatLens 没开时会先把它启动。"),
     desktop === null
       ? el("p", { class: "card-sub" }, loadingText)
       : el("div", { class: "bg-grid" }, shortcutOptions(desktop).map((option) =>

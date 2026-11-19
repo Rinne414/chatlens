@@ -195,7 +195,7 @@ const writeHtml = (runs, config, outputHtml) => {
       </section>
       <section class="panel">
         <h2>清理建议</h2>
-        <p>运行产物和报告可以在控制台「设置 → 存储」页查看占用并清理。</p>
+        <p>运行产物和报告可以在 ChatLens「设置 → 存储」页查看占用并清理。</p>
       </section>
     </aside>
   </main>

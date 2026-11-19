@@ -61,7 +61,7 @@ const aiRedoTable = (rows) => {
     }
   }
   return el("table", { class: "ai-table ai-redo-table" },
-    el("thead", {}, el("tr", {}, ["日期 / 群", "详细段 / 待做", "消息", "token（含推理）", "订阅原价", "API 费用"].map((head) => el("th", {}, head)))),
+    el("thead", {}, el("tr", {}, ["日期 / 群", "详细段 / 待做", "消息", "token（含 AI 思考）", "订阅原价", "API 费用"].map((head) => el("th", {}, head)))),
     el("tbody", {}, body));
 };
 
@@ -81,7 +81,7 @@ const aiRedoReport = (report) => {
       el("div", { class: "ai-tile" },
         el("span", { class: "ai-tile-label" }, "已用"),
         el("strong", { class: "ai-tile-value" }, aiTokens(spentTokens)),
-        el("span", { class: "ai-tile-meta" }, `${spent.calls} 次 · 输入 ${aiTokens(spent.promptTokens)} · 输出 ${aiTokens(spent.completionTokens)} · 推理 ${aiTokens(spent.reasoningTokens)}`),
+        el("span", { class: "ai-tile-meta" }, `${spent.calls} 次 · 发给 AI ${aiTokens(spent.promptTokens)} · AI 写回 ${aiTokens(spent.completionTokens)} · AI 思考（推理） ${aiTokens(spent.reasoningTokens)}`),
         el("span", { class: "ai-tile-meta" }, `订阅原价约 ${aiUsd(spent.subscriptionListUsd)}${Object.keys(spent.cost).length > 0 ? ` · API ${aiMoney(spent.cost)}` : ""}`)),
       el("div", { class: "ai-tile emphasis" },
         el("span", { class: "ai-tile-label" }, "预计还需"),
@@ -90,8 +90,10 @@ const aiRedoReport = (report) => {
           ? "所有段都已是详细模式（Grok 拒绝总结的保留原摘要）"
           : `${remaining.chunks} 段 · ${briefNumber(remaining.messages)} 条消息 · 订阅原价约 ${aiUsd(remaining.listUsd)}`),
         remaining.chunks > 0 && Number.isFinite(remaining.etaMinutes)
-          ? el("span", { class: "ai-tile-meta" }, `照目前的速度，大约还要 ${aiDuration(remaining.etaMinutes)}（控制台开着才会继续）`)
+          ? el("span", { class: "ai-tile-meta" }, `照目前的速度，大约还要 ${aiDuration(remaining.etaMinutes)}（ChatLens 开着才会继续）`)
           : null,
         el("span", { class: "ai-tile-meta" }, perMessage.measured ? "按这次已完成部分的实测平均估算" : "按试跑实测（每条约 122 token）估算，跑一阵后会更准"))),
-    aiRedoTable(report.rows));
+    el("details", { class: "settings-fold" },
+      el("summary", {}, "展开：每天、每个群的进度"),
+      aiRedoTable(report.rows)));
 };

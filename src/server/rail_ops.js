@@ -35,6 +35,7 @@ const compute = () => {
       nextRunAt: isoToUnix(status.nextRunAt),
       lastError: status.lastError,
       readinessProblem: status.readinessProblem,
+      newestMessageAt: briefingOps.newestMessageAt(db),
     },
     pause: engine.pauseStatus(db, nowUnix),
   };

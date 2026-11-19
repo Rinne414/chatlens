@@ -81,6 +81,17 @@ const autoDetectFailure = ({ stdout, stderr, code }) => {
   return new Error(`扫描到 ${scanned} 个候选，但没有一个能解开数据库。请确认 QQ 已登录数据库路径对应的账号后重试。`);
 };
 
+const chatDatabaseBytes = (ntDbDir) => {
+  if (typeof ntDbDir !== "string" || ntDbDir.length === 0) {
+    return null;
+  }
+  try {
+    return fs.statSync(path.join(ntDbDir, "nt_msg.db")).size;
+  } catch {
+    return null;
+  }
+};
+
 const getSettingsStatus = () => {
   const config = state.loadConfig();
   return {
@@ -92,6 +103,8 @@ const getSettingsStatus = () => {
     ntDbDir: config.ntDbDir ?? "",
     ntDataDir: config.ntDataDir ?? "",
     ntDbDirExists: typeof config.ntDbDir === "string" && config.ntDbDir.length > 0 && fs.existsSync(config.ntDbDir),
+    // The setup guide says how much disk the program's copy will take.
+    ntMsgDbBytes: chatDatabaseBytes(config.ntDbDir),
     ntDataDirExists: typeof config.ntDataDir === "string" && config.ntDataDir.length > 0 && fs.existsSync(config.ntDataDir),
     llm: {
       baseUrl: config.llm?.baseUrl ?? "",

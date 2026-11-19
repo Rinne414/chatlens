@@ -2,6 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { removedDirFor } = require("../media_removed");
 
 const STORAGE_CATEGORIES = new Set([
   "qq-account",
@@ -12,6 +13,7 @@ const STORAGE_CATEGORIES = new Set([
   "message-store",
   "knowledge-store",
   "knowledge-media",
+  "media-removed",
   "picture-cache",
   "coverage-checkpoints",
   "database-mirror",
@@ -84,14 +86,17 @@ const isPathInside = (rootPath, targetPath, allowRoot) => {
   return !relative.startsWith("..") && !path.isAbsolute(relative);
 };
 
-const cleanableRootError = (context, targetPath, label) => {
+const ROOT_LABELS = { runsDir: "运行产物文件夹", reportsDir: "报告文件夹" };
+
+const cleanableRootError = (context, targetPath, key) => {
+  const label = ROOT_LABELS[key] ?? key;
   const relative = path.relative(context.toolRoot, targetPath);
   if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) {
-    return `${label} 不在工具目录内，控制台不会删除这里的数据。path=${targetPath}`;
+    return `${label}不在本程序的文件夹里，为了安全这里不删除（位置：${targetPath}）。`;
   }
   const topLevel = relative.split(path.sep)[0].toLowerCase();
   if (PROTECTED_TOOL_DIRECTORIES.has(topLevel)) {
-    return `${label} 位于受保护的工具目录内，控制台拒绝清理。path=${targetPath}`;
+    return `${label}设在了本程序自己要用的文件夹里，为了安全这里不删除（位置：${targetPath}）。`;
   }
   return null;
 };
@@ -142,6 +147,7 @@ const storageCatalog = (context) => {
   const knowledgePaths = ["knowledge.db", "knowledge.db-wal", "knowledge.db-shm", "export-ledger.json"]
     .map((name) => path.join(storeDir, name));
   const knowledgeMediaDir = path.join(storeDir, "media-objects");
+  const removedMediaDir = removedDirFor(knowledgeMediaDir);
   const pictureCacheDir = path.join(storeDir, "pictures");
   const mirrorDir = path.join(storeDir, "db-mirror");
   const accountDir = qqAccountDir(context);
@@ -167,158 +173,173 @@ const storageCatalog = (context) => {
     {
       id: "qq-databases",
       section: "protected",
-      label: "QQ 原始数据库",
-      description: "QQ 的加密消息数据库。工具只复制读取，不会修改。",
+      label: "QQ 的聊天数据库",
+      description: "QQ 存聊天记录的文件（加密的）。本程序只复制一份来读，从不修改原文件。",
       paths: context.config.ntDbDir.length === 0 ? [] : [context.config.ntDbDir],
       exists: pathExists(context.config.ntDbDir),
       openPath: context.config.ntDbDir,
       policy: "protected",
       policyLabel: "绝不由本工具删除",
       cleanupCategory: null,
-      cleanupImpact: "删除会破坏 QQ 本地聊天数据，只能由 QQ 自己管理。",
-      cleanupBlockedReason: "QQ 原始数据库受永久保护。",
+      cleanupImpact: "删掉会毁掉 QQ 在这台电脑上的聊天记录，只能由 QQ 自己管理。",
+      cleanupBlockedReason: "QQ 的聊天数据库永远不会被本程序删除。",
       measurement: "automatic",
     },
     {
       id: "qq-media-cache",
       section: "protected",
       label: "QQ 媒体缓存",
-      description: "QQ 下载的图片、视频、语音和文件。本工具只读取或复制需要的文件。",
+      description: "QQ 下载的图片、视频、语音和文件。本程序只读取或复制需要的文件。",
       paths: context.config.ntDataDir.length === 0 ? [] : [context.config.ntDataDir],
       exists: pathExists(context.config.ntDataDir),
       openPath: context.config.ntDataDir,
       policy: "protected",
       policyLabel: "请在 QQ 内管理",
       cleanupCategory: null,
-      cleanupImpact: "清理后旧媒体可能无法预览或导出；本工具不会代替 QQ 删除缓存。",
-      cleanupBlockedReason: "QQ 媒体缓存只能查看，控制台不提供删除。",
+      cleanupImpact: "在 QQ 里清理后，旧图片和视频可能无法预览或导出；本程序不会替 QQ 删除。",
+      cleanupBlockedReason: "QQ 媒体缓存只能查看，这里不能删除。",
       measurement: "manual",
     },
     {
       id: "tool-config",
       section: "protected",
-      label: "工具配置",
-      description: "QQ 路径、关注群、模型和运行选项。",
+      label: "本程序的设置",
+      description: "QQ 的位置、关注的群、AI 服务和各项选项。",
       paths: [configPath],
       exists: pathExists(configPath),
       openPath: path.dirname(configPath),
       policy: "protected",
       policyLabel: "应保留",
       cleanupCategory: null,
-      cleanupImpact: "删除会丢失设置并需要重新配置。",
-      cleanupBlockedReason: "配置文件不属于可清理数据。",
+      cleanupImpact: "删掉会丢失全部设置，要重新设置一遍。",
+      cleanupBlockedReason: "设置文件不能在这里删除。",
       measurement: "automatic",
     },
     {
       id: "tool-secrets",
       section: "protected",
-      label: "加密密钥",
-      description: "QQ 数据库密钥和 LLM API key（Windows 用 DPAPI 加密；Linux 存系统钥匙圈或权限 0600 的文件）。",
+      label: "密钥（加密保存）",
+      description: "QQ 数据库密钥和 AI 服务的 API Key。只存在这台电脑上，别的电脑账户读不到（Windows 用系统自带的加密 DPAPI；Linux 存进系统钥匙圈，没有钥匙圈时存成只有你能读的文件）。",
       paths: [context.secretDir],
       exists: pathExists(context.secretDir),
       openPath: context.secretDir,
       policy: "protected",
       policyLabel: "应保留",
       cleanupCategory: null,
-      cleanupImpact: "删除后需要重新获取 QQ 密钥并重新保存 LLM key。",
-      cleanupBlockedReason: "密钥目录不属于可清理数据。",
+      cleanupImpact: "删掉后要重新获取 QQ 密钥、重新填 AI 服务的 API Key。",
+      cleanupBlockedReason: "密钥不能在这里删除。",
       measurement: "automatic",
     },
     {
       id: "message-store",
       section: "important",
-      label: "工具消息库",
-      description: "已扫描消息、覆盖范围和本工具查看进度；长期增量保存。",
+      label: "本程序的消息库",
+      description: "已经从 QQ 读进来的群消息、读到了哪里、你看到了哪里；会随新消息一直增加。",
       paths: [path.join(storeDir, "messages.db")],
       exists: messagePaths.some(pathExists),
       openPath: storeDir,
       policy: "keep",
       policyLabel: "重要，不应删除",
       cleanupCategory: null,
-      cleanupImpact: "删除会永久丢失工具内消息、覆盖记录和查看进度，必须重新补扫。",
-      cleanupBlockedReason: "运行中的 SQLite 消息库不提供在线删除。",
+      cleanupImpact: "删掉会丢失本程序里的全部消息和阅读进度，只能从 QQ 现有的记录重新读一遍。",
+      cleanupBlockedReason: "程序运行时一直在用它，不能在这里删除。",
       measurement: "automatic",
     },
     {
       id: "knowledge-store",
       section: "important",
-      label: "咒语库与导出记录",
-      description: "图片生成参数索引、媒体位置和已导出记录。",
+      label: "咒语库和导出记录",
+      description: "AI 图的生成参数（咒语）索引、图片在哪里，以及哪些已经导出过。",
       paths: [path.join(storeDir, "knowledge.db"), path.join(storeDir, "export-ledger.json")],
       exists: knowledgePaths.some(pathExists),
       openPath: storeDir,
       policy: "keep",
       policyLabel: "重要，不应删除",
       cleanupCategory: null,
-      cleanupImpact: "删除会丢失已建立的咒语索引和增量导出记录。",
-      cleanupBlockedReason: "咒语库不提供在线删除。",
+      cleanupImpact: "删掉会丢失整理好的咒语索引和导出记录。",
+      cleanupBlockedReason: "程序运行时在用它，不能在这里删除。",
       measurement: "automatic",
     },
     {
       id: "knowledge-media",
       section: "important",
-      label: "咒语库媒体副本",
-      description: "按 MD5 去重保存的长期图片副本，留存的原图都在这里；QQ 缓存或运行历史被清理后仍可预览。",
+      label: "留存的原图（咒语库的图片也在这里）",
+      description: "你留存的群图片原图，和咒语库从这台电脑复制来的图片；同一张图只存一份。QQ 清理缓存、腾讯删掉过期的图以后，这里的图照样能看。",
       paths: [knowledgeMediaDir],
       exists: pathExists(knowledgeMediaDir),
       openPath: knowledgeMediaDir,
       policy: "keep",
       policyLabel: "重要，不应删除",
       cleanupCategory: null,
-      cleanupImpact: "删除会让已经保住的咒语库图片再次失去预览，且远程文件可能无法重新下载。",
-      cleanupBlockedReason: "持久媒体副本不提供在线删除。",
-      measurement: "manual",
+      cleanupImpact: "不想留的图：在 画廊 →「留存的原图」里点开或多选，按「取消留存」。取消后文件先移到下面的「取消留存的原图」，不会马上删。",
+      cleanupBlockedReason: "这里不能整批删除，请在 画廊 →「留存的原图」里取消留存。",
+      measurement: "background",
+    },
+    {
+      id: "media-removed",
+      section: "important",
+      label: "取消留存的原图",
+      description: "你在画廊取消留存的原图先放在这里，还没有删除，所以还占着空间。",
+      paths: [removedMediaDir],
+      exists: pathExists(removedMediaDir),
+      openPath: removedMediaDir,
+      policy: "keep",
+      policyLabel: "在画廊里处理",
+      cleanupCategory: null,
+      cleanupImpact: "到 画廊 →「取消留存的」可以放回留存，或彻底删除、腾出空间；彻底删除后拿不回来。",
+      cleanupBlockedReason: "请在 画廊 →「取消留存的」里放回或彻底删除。",
+      measurement: "background",
     },
     {
       id: "picture-cache",
       section: "important",
       label: "群图片缓存",
-      description: "后台自动取的群图片缩略图、AI 图预览和看过的大图。有上限（设置页「群图片」可调），到上限自动从最旧的清起；留存的原图不在这里，在上面的媒体副本里。",
+      description: "后台自动取的群图片缩略图、AI 图预览和你看过的大图。有上限（设置 →「群图片」可调），到上限自动从最旧的清起。留存的原图不在这里，在上面的「留存的原图」里。",
       paths: [pictureCacheDir],
       exists: pathExists(pictureCacheDir),
       openPath: pictureCacheDir,
       policy: "keep",
       policyLabel: "自动管理",
       cleanupCategory: null,
-      cleanupImpact: "由图片上限自动清理；想少占一些，在设置页调低上限。",
+      cleanupImpact: "到上限会自动清理；想少占一些，在 设置 →「群图片」调低上限。",
       cleanupBlockedReason: "群图片缓存按上限自动清理，不在这里删除。",
-      measurement: "manual",
+      measurement: "background",
     },
     {
       id: "coverage-checkpoints",
       section: "important",
-      label: "补扫检查点",
-      description: "记录长时间补扫已经完成和失败的分块，体积通常很小。",
+      label: "补扫进度记录",
+      description: "补扫（把漏掉的旧消息从 QQ 再读一遍）时，记下哪些部分已经读完、哪些失败了，中断后可以接着读。通常很小。",
       paths: [coverageDir],
       exists: pathExists(coverageDir),
       openPath: coverageDir,
       policy: "keep",
       policyLabel: "建议保留",
       cleanupCategory: null,
-      cleanupImpact: "删除后续跑进度会丢失，同一范围可能需要从头补扫。",
-      cleanupBlockedReason: "检查点用于可靠续跑，不作为常规清理项。",
+      cleanupImpact: "删掉后，中断的补扫要从头再来。",
+      cleanupBlockedReason: "补扫要靠它接着读，不在这里删除。",
       measurement: "automatic",
     },
     {
       id: "database-mirror",
       section: "regenerable",
-      label: "数据库镜像",
-      description: "QQ 消息数据库的持久只读副本。后台刷新只重写有变化的部分，所以每次只需几秒；体积与 QQ 数据库相当。",
+      label: "QQ 聊天数据库的副本",
+      description: "本程序从这份副本读消息，不碰 QQ 的原文件。每次刷新只复制有变化的部分，几秒就完成；大小和 QQ 的聊天数据库差不多（也叫数据库镜像）。",
       paths: [mirrorDir],
       exists: pathExists(mirrorDir),
       openPath: mirrorDir,
       policy: "keep",
       policyLabel: "可重建",
       cleanupCategory: null,
-      cleanupImpact: "删除后下一次刷新会重新完整复制一次 QQ 数据库（首次较慢），之后恢复为增量同步。",
-      cleanupBlockedReason: "后台刷新随时可能在读写镜像；如需释放空间，请先在设置页停止后台服务再手动删除该目录。",
+      cleanupImpact: "删掉后，下次刷新会重新完整复制一次（这次较慢），之后又只复制有变化的部分。",
+      cleanupBlockedReason: "后台刷新随时可能在用它。要腾出空间：先在 设置 →「后台与通知」按「停止后台服务」，再手动删除这个文件夹。",
       measurement: "automatic",
     },
     {
       id: "temporary-files",
       section: "regenerable",
       label: "临时数据库副本",
-      description: "扫描产生的 clean-db、补扫 .work 和短期临时文件；需要时会重新生成。",
+      description: "扫描和补扫时临时复制的数据库，以及其它临时文件（clean-db、.work、tmp）；需要时会重新生成。",
       paths: [
         path.join(context.config.runsDir, "*", "clean-db"),
         path.join(coverageDir, "*.work"),
@@ -329,37 +350,37 @@ const storageCatalog = (context) => {
       policy: "cleanup",
       policyLabel: "可安全清理",
       cleanupCategory: "temporary-files",
-      cleanupImpact: "不会删除消息库、检查点或报告；下次扫描可能需要重新复制数据库。",
+      cleanupImpact: "不会删除消息库、补扫进度、报告或留存的原图；下次扫描可能要重新复制一次数据库。",
       cleanupBlockedReason: null,
       measurement: "automatic",
     },
     {
       id: "run-files",
       section: "history",
-      label: "运行产物与媒体副本",
-      description: "每次运行的导出消息、分析数据和复制出的图片、视频等。",
+      label: "每次运行的产物",
+      description: "每次总结运行导出的消息、分析数据，以及复制出来的图片、视频等。",
       paths: [context.config.runsDir],
       exists: pathExists(context.config.runsDir),
       openPath: context.config.runsDir,
       policy: "deletable",
       policyLabel: "可删除，但会影响历史",
       cleanupCategory: "run-files",
-      cleanupImpact: "删除后历史报告的媒体预览、聊天内嵌媒体和运行详情可能失效；消息库及咒语库长期媒体副本仍保留。",
+      cleanupImpact: "删掉后，历史报告里的图片预览、聊天里嵌的媒体和运行详情可能打不开；消息库和留存的原图不受影响。",
       cleanupBlockedReason: runCleanupError,
       measurement: "automatic",
     },
     {
       id: "reports-exports",
       section: "history",
-      label: "报告与导出文件",
-      description: "HTML/Markdown 报告、媒体导出和咒语库导出。",
+      label: "报告和导出文件",
+      description: "生成的报告（网页和 Markdown）、导出的媒体和咒语库。在画廊或备份页「另存到文件夹」又没选自己的文件夹时，图片也存在这里。",
       paths: [context.config.reportsDir],
       exists: pathExists(context.config.reportsDir),
       openPath: context.config.reportsDir,
       policy: "deletable",
       policyLabel: "可删除，但不可恢复",
       cleanupCategory: "reports-exports",
-      cleanupImpact: "删除后已生成报告和导出文件消失；消息库与运行产物不会同时删除。",
+      cleanupImpact: "删掉后这些报告和导出的文件全部消失，不能恢复；消息库和每次运行的产物不受影响。",
       cleanupBlockedReason: reportCleanupError,
       measurement: "automatic",
     },
@@ -462,6 +483,9 @@ const categoryMeasurePaths = (context, category) => {
   }
   if (category === "knowledge-media") {
     return [path.join(storeDir, "media-objects")];
+  }
+  if (category === "media-removed") {
+    return [removedDirFor(path.join(storeDir, "media-objects"))];
   }
   if (category === "coverage-checkpoints") {
     return [path.join(storeDir, "coverage-repairs")];

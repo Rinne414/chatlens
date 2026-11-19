@@ -43,6 +43,10 @@ const backupState = {
   timer: null,
   rescue: null,
   picked: new Set(),
+  // 「全部留存」 waits for a second click that has seen the count and size.
+  confirmKeepAll: false,
+  // Where 「另存所选到文件夹」 writes: GET /api/pictures/save-dir.
+  saveTarget: null,
 };
 
 const backupToday = () => unixToHkt(Math.floor(Date.now() / 1000)).slice(0, 10);
@@ -74,6 +78,12 @@ const openBackupView = async () => {
     backupState.error = error.message;
   }
   renderBackupView();
+  api("/api/pictures/save-dir").then((target) => {
+    backupState.saveTarget = target;
+    document.getElementById("backup-rescue-select")?.replaceWith(backupRescueSelection(pictureUi.expiring?.items ?? []));
+  }).catch(() => {
+    backupState.saveTarget = null;
+  });
   loadExpiringPictures().then(() => {
     if (app.view === "backup") {
       renderBackupView();
@@ -242,7 +252,9 @@ const backupForm = () => {
     el("div", { class: "backup-actions" },
       el("button", { class: "btn primary", disabled: running || !ready, onclick: () => startBackup("save") }, "保存到电脑"),
       el("button", { class: "btn", disabled: running || !ready, onclick: () => startBackup("scan") }, "先扫描看看"),
-      el("span", { class: "brief-meta" }, "扫描只统计有多少、电脑上缺哪些，不写入任何文件；可以跳过直接保存。")));
+      el("span", { class: "brief-meta" }, "扫描只统计有多少、电脑上缺哪些，不写入任何文件；可以跳过直接保存。")),
+    el("p", { class: "brief-meta backup-dest" }, "「保存到电脑」存到：",
+      el("code", {}, backupState.targetDir.trim() || "（还没填，见第 4 步）")));
 };
 
 /* ---------- progress and report ---------- */
@@ -427,6 +439,11 @@ const backupLastRun = () => {
     : { value: when, sub: `只扫描过，还没保存（${briefNumber(report.totals.total)} 个文件）` };
 };
 
+// The rail's 「快过期」 count is the 7-day part of this tile's total.
+const backupExpiringSub = (expiring) => ((expiring.soon ?? 0) > 0
+  ? `腾讯那边还在；其中 ${briefNumber(expiring.soon)} 张 7 天内删除（左栏提醒的就是这些）`
+  : "腾讯那边还在；7 天内没有要删除的");
+
 const backupStatusTiles = () => {
   const expiring = pictureUi.expiring;
   const last = backupLastRun();
@@ -437,9 +454,8 @@ const backupStatusTiles = () => {
   }, el("span", {}, label), el("strong", {}, value), el("small", {}, sub));
   return el("div", { class: "backup-status-row" },
     expiring === undefined
-      ? tile("快过期的 AI 原图", "…", "正在读取")
-      : tile("快过期的 AI 原图", briefNumber(expiring.total ?? 0),
-        (expiring.soon ?? 0) > 0 ? `其中 ${briefNumber(expiring.soon)} 张 7 天内被腾讯删除` : "7 天内没有要过期的",
+      ? tile("还没留存的 AI 原图", "…", "正在读取")
+      : tile("还没留存的 AI 原图", briefNumber(expiring.total ?? 0), backupExpiringSub(expiring),
         (expiring.soon ?? 0) > 0 ? "warn" : "",
         () => document.getElementById("backup-rescue")?.scrollIntoView({ behavior: "smooth", block: "start" })),
     tile("上次备份", last.value, last.sub),
@@ -447,6 +463,27 @@ const backupStatusTiles = () => {
 };
 
 /* ---------- rescue: AI originals about to disappear ---------- */
+
+// How the strip splits by time left. daysLeft is whole days until Tencent
+// deletes the original (0 = less than 24 hours), as the server counts it.
+const rescueExpiryBuckets = (items) => items.reduce((buckets, item) => {
+  if (item.daysLeft === 0) {
+    return { ...buckets, day: buckets.day + 1 };
+  }
+  return item.daysLeft < 7 ? { ...buckets, week: buckets.week + 1 } : { ...buckets, later: buckets.later + 1 };
+}, { day: 0, week: 0, later: 0 });
+
+const rescueExpiryLine = (items) => {
+  const buckets = rescueExpiryBuckets(items);
+  const parts = [
+    buckets.day > 0 ? `不到 1 天就删除 ${briefNumber(buckets.day)} 张` : null,
+    buckets.week > 0 ? `7 天内删除 ${briefNumber(buckets.week)} 张` : null,
+    buckets.later > 0 ? `更晚 ${briefNumber(buckets.later)} 张` : null,
+  ].filter((part) => part !== null);
+  return `共 ${briefNumber(items.length)} 张，按删除先后从左到右排：${parts.join("，")}。`;
+};
+
+const rescueBadgeText = (daysLeft) => (daysLeft === 0 ? "不到 1 天" : `${daysLeft} 天`);
 
 const backupRescueProgressText = () => {
   const rescue = backupState.rescue;
@@ -520,14 +557,16 @@ const backupRescueTile = (item) => {
       title: `${pictureGroupName(item.groupId)} · ${formatByteSize(item.size)}`,
       onclick: () => openPictureViewer({ ...item, probe: "ai" }),
     }, el("img", { src: pictureUrl(item.md5, "thumb"), alt: "", loading: "lazy", decoding: "async" })),
-    el("span", { class: item.daysLeft <= 7 ? "wall-badge expiring" : "wall-badge" }, item.daysLeft === 0 ? "今天过期" : `${item.daysLeft} 天`),
+    el("span", { class: item.daysLeft < 7 ? "wall-badge expiring" : "wall-badge", title: "离腾讯删除原图还有多久" }, rescueBadgeText(item.daysLeft)),
     el("label", { class: picked ? "wall-pick picked" : "wall-pick", title: "选中以便另存到文件夹", onclick: (event) => event.stopPropagation() },
       el("input", { type: "checkbox", checked: picked, "aria-label": "选中这张图", onchange: (event) => toggleRescuePick(item.md5, event.target.closest(".backup-rescue-tile")) })));
 };
 
 const backupRescueSelection = (items) => {
   const count = backupState.picked.size;
+  const target = backupState.saveTarget;
   return el("div", { class: "backup-rescue-select", id: "backup-rescue-select" },
+    el("span", { class: "card-sub backup-select-label" }, "挑几张另存一份到文件夹："),
     el("button", { class: "btn small", type: "button", onclick: () => setRescuePicked(new Set(items.map((item) => item.md5))) },
       `全选（${briefNumber(items.length)} 张）`),
     count === 0 ? null : el("button", { class: "btn small", type: "button", onclick: () => setRescuePicked(new Set()) }, "清除"),
@@ -535,9 +574,11 @@ const backupRescueSelection = (items) => {
       class: "btn small primary",
       type: "button",
       disabled: count === 0 || pictureExport.running,
-      title: "把原图复制到 reports 下的新文件夹，附咒语 .txt",
+      title: "复制原图，附上咒语 .txt",
       onclick: () => runPictureExport([...backupState.picked], "backup"),
     }, `另存所选到文件夹（${briefNumber(count)}）`),
+    target === null ? null : el("span", { class: "brief-meta backup-dest" }, "另存到：",
+      el("code", {}, target.saveDir ?? `${target.fallbackRoot} 下新建的文件夹`), "（在「画廊 → 多选」可以改）"),
     pictureExportStatus("backup"));
 };
 
@@ -560,6 +601,32 @@ const backupAutoKeep = (expiring, items) => {
           : ` 后台每次刷新后按过期先后慢慢留存到本工具里，不用守着页面。${items.length > 0 ? `现在待留存 ${briefNumber(items.length)} 张，约 ${formatByteSize(bytes)}；` : ""}之后每张约 1.5 MB，不占图片缓存上限。`)));
 };
 
+const rescueKeepAllQuestion = (items) => {
+  const bytes = items.reduce((total, item) => total + (Number(item.size) || 0), 0);
+  return `留存全部 ${briefNumber(items.length)} 张：从腾讯服务器下载原图，存进本程序（不是下面的备份文件夹），约 ${formatByteSize(bytes)}，之后在画廊「留存的原图」里看。每次下载 5 张，随时可以停下；不想要的以后可以在画廊里取消留存。`;
+};
+
+const setConfirmKeepAll = (on) => {
+  backupState.confirmKeepAll = on;
+  rerenderRescue();
+};
+
+const rescueKeepAllButton = (items) => {
+  if (items.length === 0) {
+    return null;
+  }
+  if (backupState.rescue?.running) {
+    return el("button", { class: "btn", type: "button", onclick: () => { backupState.rescue = { ...backupState.rescue, stop: true }; } }, "停下");
+  }
+  return el("button", { class: "btn primary", type: "button", disabled: backupState.confirmKeepAll, onclick: () => setConfirmKeepAll(true) },
+    `全部留存到本程序…（${briefNumber(items.length)} 张）`);
+};
+
+const rescueKeepAllConfirm = (items) => (!backupState.confirmKeepAll || items.length === 0 ? null : el("div", { class: "backup-keep-confirm", role: "alert" },
+  el("span", {}, rescueKeepAllQuestion(items)),
+  el("button", { class: "btn small primary", type: "button", onclick: () => { backupState.confirmKeepAll = false; rescueAllExpiring(); } }, "开始留存"),
+  el("button", { class: "btn small", type: "button", onclick: () => setConfirmKeepAll(false) }, "先不")));
+
 const backupRescue = () => {
   const expiring = pictureUi.expiring;
   if (expiring === undefined) {
@@ -571,13 +638,10 @@ const backupRescue = () => {
     el("div", { class: "backup-rescue-head" },
       el("div", {},
         el("h2", {}, "先救快过期的 AI 原图"),
-        el("p", { class: "card-sub" }, "咒语已经记下了，但原图还只在腾讯服务器上。过期顺序从左到右，点图可以先看一眼。")),
-      items.length === 0
-        ? null
-        : rescue?.running
-          ? el("button", { class: "btn", type: "button", onclick: () => { backupState.rescue = { ...backupState.rescue, stop: true }; } }, "停下")
-          : el("button", { class: "btn primary", type: "button", onclick: rescueAllExpiring },
-            `全部留存（${briefNumber(items.length)} 张）`)),
+        el("p", { class: "card-sub" }, "咒语已经记下了，但原图还只在腾讯服务器上，腾讯删掉后就找不回来。点图可以先看一眼。"),
+        items.length === 0 ? null : el("p", { class: "card-sub backup-expiry-line" }, rescueExpiryLine(items))),
+      rescueKeepAllButton(items)),
+    rescueKeepAllConfirm(items),
     rescue === null ? null : el("p", { id: "backup-rescue-progress", class: "backup-rescue-progress", "aria-live": "polite" }, backupRescueProgressText()),
     backupAutoKeep(expiring, items),
     items.length === 0 ? null : backupRescueSelection(items),

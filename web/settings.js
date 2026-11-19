@@ -42,12 +42,12 @@ const isWindowsHost = () => settingsState.status?.platform === "win32";
 const secretStorageText = () => {
   const backend = settingsState.status?.secretBackend;
   if (backend === "dpapi") {
-    return "用 Windows DPAPI 加密存在本机 %APPDATA%\\QQSummaryTools\\，只有当前 Windows 用户能解密";
+    return "用 Windows 自带的加密保存在这台电脑上，只有你这个 Windows 账户能解开（Windows DPAPI，位置 %APPDATA%\\QQSummaryTools\\）";
   }
   if (backend === "secret-tool") {
-    return "存进系统钥匙圈（GNOME Keyring / KWallet，经 secret-tool）";
+    return "存进系统的密码保管处（钥匙圈：GNOME Keyring / KWallet，经 secret-tool）";
   }
-  return "存在 ~/.config/QQSummaryTools/，文件权限 0600，只有你自己能读";
+  return "存成只有你这个账户能读的文件（~/.config/QQSummaryTools/，权限 0600）";
 };
 
 const savedTag = (isSaved) =>
@@ -69,13 +69,19 @@ const saveDetectedQqPath = async (candidate) => {
   return { ntDbDirExists: result.ntDbDirExists };
 };
 
+// What an API-key provider still lacks, in the words the card uses.
+const aiMissing = (status) => [
+  status.llmKeySaved ? null : "API Key",
+  status.llm.model.length > 0 ? null : "模型名",
+].filter((part) => part !== null);
+
 // Grok (signed in and selected) or a complete API-key provider.
 const aiReadiness = (status) => {
   if (status.grok?.selected && status.grok.loggedIn) {
     return { label: "AI 总结", ok: true, detail: `Grok 订阅 · ${status.grok.model}` };
   }
-  const apiReady = status.llmKeySaved && status.llm.model.length > 0;
-  return { label: "AI 总结", ok: apiReady, detail: apiReady ? status.llm.model : "未配置完整" };
+  const missing = aiMissing(status);
+  return { label: "AI 总结", ok: missing.length === 0, detail: missing.length === 0 ? status.llm.model : `还没填 ${missing.join(" 和 ")}` };
 };
 
 const renderSettingsView = () => {
@@ -116,7 +122,7 @@ const renderSettingsView = () => {
     placeholder: isWindowsHost() ? "例如 C:\\Users\\你\\Documents\\Tencent Files\\你的QQ号\\nt_qq\\nt_db" : "例如 /home/你/.config/QQ/nt_qq_xxxx/nt_db",
     style: "width:100%",
   });
-  const dataInput = el("input", { type: "text", value: status.ntDataDir, placeholder: "nt_data 目录（媒体导出用，可留空）", style: "width:100%" });
+  const dataInput = el("input", { type: "text", value: status.ntDataDir, placeholder: "QQ 存图片和文件的文件夹 nt_data（备份和导出图片用，可留空）", style: "width:100%" });
   const pathMsg = el("span", { style: "font-size:13px" });
   if (settingsState.pathNotice !== null) {
     settingsFeedback(pathMsg, settingsState.pathNotice.text, settingsState.pathNotice.isError);
@@ -144,8 +150,8 @@ const renderSettingsView = () => {
           }, `QQ ${candidate.qq}`)))
     : null;
   const pathsCard = el("div", { class: "card" },
-    el("h2", {}, "QQ 数据库路径"),
-    el("p", { class: "card-sub" }, "QQNT 的本地数据库目录。工具只会复制这里的文件做只读分析，绝不修改原文件。"),
+    el("h2", { id: "settings-paths" }, "QQ 数据库路径"),
+    el("p", { class: "card-sub" }, "电脑版 QQ 存聊天记录的文件夹（nt_db）。本程序只复制里面的文件来读，从不修改原文件。"),
     el("div", { style: "display:grid;gap:8px;margin-bottom:10px" }, dbInput, dataInput),
     accountRow,
     el("div", { class: "row" },
@@ -239,7 +245,9 @@ const renderSettingsView = () => {
   }
   const ntqqKeyHint = el("div", { style: "margin:0 0 8px" },
     el("p", { class: "card-sub", style: "margin:0 0 8px" },
-      "推荐「自动获取」：打开并登录 QQ 后点下面的按钮，工具会从本机 QQ 进程内存里读出数据库密钥、验证并保存，全程在本机完成，不联网、不改动 QQ 的任何文件。"),
+      "QQ 的聊天记录是加密的，要有密钥才能读。推荐「自动获取密钥」：先打开并登录电脑版 QQ，再点下面的按钮。程序会在正在运行的 QQ 里找到它打开聊天记录用的密钥（读取 QQ 的进程内存），试着打开一次确认无误后保存。"),
+    el("p", { class: "card-sub", style: "margin:0 0 8px" },
+      "只读不改：不改动 QQ 的任何文件和设置，全程在这台电脑上完成，不联网。"),
     el("div", { class: "row" },
       el("button", {
         class: "btn small primary",
@@ -267,18 +275,20 @@ const renderSettingsView = () => {
         },
       }, autoKeyState.busy ? "扫描中…" : "🔑 自动获取密钥"),
       autoKeyMsg),
-    el("p", { class: "card-sub", style: "margin:8px 0 0" },
-      "手动方式（自动获取失败时）：参考开源教程 ",
-      el("a", { href: "https://github.com/QQBackup/qq-win-db-key", target: "_blank", rel: "noopener" }, "QQBackup/qq-win-db-key"),
-      " 拿到 16 位 key 后，粘贴到下面并保存。"));
+    el("details", { class: "settings-fold" },
+      el("summary", {}, "自动获取失败时：手动方式"),
+      el("p", { class: "card-sub", style: "margin:8px 0 0" },
+        "参考开源教程 ",
+        el("a", { href: "https://github.com/QQBackup/qq-win-db-key", target: "_blank", rel: "noopener" }, "QQBackup/qq-win-db-key"),
+        " 拿到 16 个字符的密钥后，粘贴到下面并保存。")));
 
   const keysCard = el("div", { class: "card", id: "settings-keys" },
     el("h2", {}, "密钥"),
-    el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}，不进项目目录，不进 Git。`),
-    keyRow("NTQQ_DB_KEY（QQ 数据库解密密钥）", "ntqqKey", status.ntqqKeySaved, ntqqKeyHint),
-    keyRow("LLM API Key（AI 总结用，可选）", "llmKey", status.llmKeySaved,
+    el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}，不会放进程序文件夹。`),
+    keyRow("QQ 数据库密钥（NTQQ_DB_KEY）", "ntqqKey", status.ntqqKeySaved, ntqqKeyHint),
+    keyRow("AI 服务的 API Key（AI 总结用，可选）", "llmKey", status.llmKeySaved,
       el("p", { class: "card-sub", style: "margin:0 0 8px" },
-        "任何 OpenAI 兼容服务的 key 都行（DeepSeek / OpenAI / 本地 Ollama 等）。不保存则只用本地统计，不做 AI 总结。")));
+        "API Key 是 AI 服务商给你的一串密码，用它调用 AI 并按用量付费。DeepSeek、OpenAI 等大多数服务都能用（要求「OpenAI 兼容」接口；在自己电脑上跑模型的 Ollama 也行）。不填就只做本地统计，不做 AI 总结。")));
 
   /* --- LLM config --- */
   // Inputs read from a draft so re-renders (model chips, schedule refresh)
@@ -319,14 +329,15 @@ const renderSettingsView = () => {
     draftPatch({ baseUrl: preset.baseUrl, model: preset.models[0] ?? "" });
     settingsState.models = preset.models;
     settingsState.llmNotice = {
-      text: `已填入 ${preset.name}。${preset.models.length === 0 ? "保存 key 后点「获取模型列表」选一个模型，" : ""}确认无误后点「保存 LLM 配置」。`,
+      text: `已填入 ${preset.name}。${preset.models.length === 0 ? "保存 API Key 后点「查看可用模型」选一个，" : ""}确认无误后点「保存 AI 服务设置」。`,
       isError: false,
     };
     renderSettingsView();
   };
 
   const llmCard = el("div", { class: "card", id: "settings-llm" },
-    el("h2", {}, "AI 总结（LLM）"),
+    el("h2", {}, "AI 总结用哪家服务"),
+    el("p", { class: "card-sub" }, "填服务地址和模型名（模型是这家服务里具体用哪一个 AI）。不确定就点「常用服务」自动填。"),
     renderProviderPresets(pickPreset),
     el("div", { class: "row" },
       urlInput,
@@ -355,7 +366,8 @@ const renderSettingsView = () => {
           }
           button.disabled = false;
         },
-      }, "获取模型列表"),
+        title: "向这家服务查询有哪些模型（需要先保存 API Key）",
+      }, "查看可用模型"),
       el("button", {
         class: "btn small primary",
         onclick: async () => {
@@ -372,7 +384,7 @@ const renderSettingsView = () => {
             settingsFeedback(llmMsg, error.message, true);
           }
         },
-      }, "保存 LLM 配置"),
+      }, "保存 AI 服务设置"),
       llmMsg),
     settingsState.models.length > 0 ? modelChips : null);
 
@@ -384,8 +396,8 @@ const renderSettingsView = () => {
     el("h2", {}, "安全说明"),
     el("ul", { style: "margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9" },
       el("li", {}, "只读：工具复制数据库文件后离线解析，从不写 QQ 的任何文件，也不使用 QQ 登录协议。"),
-      el("li", {}, "本地：控制台只监听 127.0.0.1，带每次启动随机生成的访问令牌。开启「手机连线」后，只有经 Tailscale 进来、并在这里配对过的手机能访问，而且只能阅读，不能改设置。"),
-      el("li", {}, "外部流量：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图按 md5 校验，图片钥匙只留在内存里）；开启 AI 总结时消息文本会发送到你配置的 LLM 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本信息。"),
+      el("li", {}, "只在这台电脑上：ChatLens 只接受这台电脑自己的访问（127.0.0.1），每次启动还会换一个随机口令（访问令牌）。开启「手机连线」后，只有通过 Tailscale（把你自己的设备连成私人网络的软件）进来、并在这里配对过的手机能访问，而且只能看，不能改设置。"),
+      el("li", {}, "会联网的地方：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图会核对是否完整，下载用的临时凭证只留在内存里）；开启 AI 总结时，消息文字会发给你设置的 AI 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本号，自动的那部分可以在上面「版本与更新」关掉。"),
       el("li", {}, "Obsidian 笔记库：只在你选的文件夹里写本地文件，不联网；那个文件夹如果被 Obsidian Sync、网盘或 Git 同步，内容会跟着上传。")));
 
   setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderShortcutCard(), renderMoreLinks(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, renderRemoteCard(), renderNotesCard(), aboutCard);
@@ -402,6 +414,28 @@ const renderMoreLinks = () =>
     el("button", { class: "chip", onclick: () => openView("storage") }, "💾 存储"));
 
 /* --- background refresh, notifications, desktop integration --- */
+
+const stopBackgroundService = async () => {
+  if (!window.confirm("停止后台服务？\n\n和「退出 ChatLens」一样：ChatLens 完全退出，不再自动收消息和总结，这个页面会断开。数据和设置都不会丢，之后从开始菜单 / 应用菜单或桌面上的「ChatLens」重新打开即可。")) {
+    return;
+  }
+  try {
+    await api("/api/shutdown", { method: "POST", body: "{}" });
+  } catch {
+    // The server is going away; a dropped connection is expected.
+  }
+  setChildren($("#view-settings"), el("div", { class: "card" }, el("h2", {}, "后台服务已停止"),
+    el("p", { class: "card-sub" }, "需要时从开始菜单 / 应用菜单或桌面上的「ChatLens」重新打开。")));
+};
+
+// Both buttons end the same process (POST /api/shutdown); the line says so,
+// so nobody hunts for a difference that is not there.
+const renderStopRow = () => el("div", { class: "settings-stop" },
+  el("div", { class: "row" },
+    el("button", { class: "btn small", type: "button", onclick: quitConsole }, "⏻ 退出 ChatLens"),
+    el("button", { class: "btn small danger", type: "button", onclick: stopBackgroundService }, "停止后台服务")),
+  el("p", { class: "card-sub", style: "margin:6px 0 0" },
+    `这两个按钮做的是同一件事：ChatLens 完全退出，不再自动收消息和总结，直到你再打开它。数据和设置都不会丢。${quitReopenHint(settingsState.background?.desktop)}`));
 
 const backgroundToggle = (label, hint, checked, onChange) =>
   el("label", { class: "bg-toggle" },
@@ -429,6 +463,10 @@ const desktopAction = async (path, body, okText) => {
 };
 
 const backgroundStatusLine = (background) => {
+  if (!background.settings.enabled) {
+    return el("div", { class: "notice warn" }, "「自动刷新」关着：不会自动收新消息，也不会自动总结。",
+      background.readinessProblem ? `要打开它，还得先解决：${background.readinessProblem}。` : "");
+  }
   if (background.readinessProblem) {
     return el("div", { class: "notice warn" }, `后台刷新暂停：${background.readinessProblem}。`);
   }
@@ -463,7 +501,7 @@ const renderBackgroundCard = () => {
   return el("div", { class: "card" },
     el("h2", {}, "后台与通知"),
     el("p", { class: "card-sub" },
-      "控制台开着时（窗口可以关掉），会每隔一段时间自动收新消息、攒够一段就交给 AI 总结。你打开「简报」时内容已经准备好。每条消息只总结一次；各群的总览最多每 2 小时重写一次。实际花了多少看下面的「AI 用量与费用」，也可以随时暂停或设每日预算。"),
+      "打开「自动刷新」后，ChatLens 开着时（窗口可以关掉）会每隔一段时间自动收新消息、攒够一段就交给 AI 总结，你打开「简报」时内容已经准备好。每条消息只总结一次；各群的总览最多每 2 小时重写一次。实际花了多少看上面的「AI 用量与费用」，也可以随时暂停或设每日预算。"),
     backgroundStatusLine(background),
     el("div", { class: "bg-grid" },
       backgroundToggle("自动刷新", "关闭后只有手动总结", current.enabled, (value) => saveBackgroundSetting({ enabled: value })),
@@ -473,9 +511,6 @@ const renderBackgroundCard = () => {
       backgroundToggle("关注的词出现时通知", "在首页「关注的词」里设要关注的词", current.notifyWatchWords === true, (value) => saveBackgroundSetting({ notifyWatchWords: value })),
       backgroundToggle(loginLabel, "不弹窗口，打开简报时秒开", desktop.autostart === true, (value) =>
         desktopAction("/api/desktop/autostart", { enabled: value }, value ? "已开启：下次登录会自动在后台运行。" : "已关闭开机后台运行。"))),
-    el("div", { class: "row", style: "margin-top:12px" },
-      el("button", { class: "btn small", type: "button", onclick: quitConsole }, "⏻ 关闭控制台"),
-      el("span", { class: "card-sub", style: "margin:0" }, "控制台在后台运行、没有窗口；关掉后不再自动刷新，从开始菜单可以再打开。")),
     el("div", { class: "row", style: "margin-top:12px" },
       el("span", { style: "font-size:13px" }, "刷新间隔"),
       el("select", {
@@ -489,22 +524,10 @@ const renderBackgroundCard = () => {
           await desktopAction("/api/background/run-now", { force: true }, "已开始刷新，并会把攒着的新消息一起总结。");
         },
       }, "立即刷新"),
-      el("button", {
-        class: "btn small danger",
-        onclick: async () => {
-          if (!window.confirm("停止后台服务？\n页面会断开；之后从开始菜单或启动器重新打开即可。")) {
-            return;
-          }
-          try {
-            await api("/api/shutdown", { method: "POST", body: "{}" });
-          } catch {
-            // The server is going away; a dropped connection is expected.
-          }
-          setChildren($("#view-settings"), el("div", { class: "card" }, el("h2", {}, "后台服务已停止"),
-            el("p", { class: "card-sub" }, "需要时从开始菜单 / 应用菜单或桌面上的「ChatLens」重新打开。")));
-        },
-      }, "停止后台服务"),
       msg),
+    el("p", { class: "card-sub", style: "margin:4px 0 0" },
+      "「立即刷新」：马上收一次新消息，并把还没攒够一段的新消息也交给 AI 总结（开着 AI 总结时会产生费用）；不改任何设置。"),
+    renderStopRow(),
     el("p", { class: "card-sub", style: "margin:12px 0 0" },
-      "想要像 App 一样的独立窗口：在 Chrome / Edge 地址栏右侧点「安装」图标，之后从开始菜单直接打开，任务栏图标还会显示 @ 你的数量。"));
+      "想要独立的程序窗口：在 Chrome / Edge 地址栏右侧点「安装」图标，之后从开始菜单直接打开，任务栏图标还会显示 @ 你的数量。"));
 };

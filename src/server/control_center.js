@@ -39,6 +39,7 @@ const { parseAutostart, withAutostart } = require("../autostart");
 const { ensureInstanceId, acquireServerLock, releaseServerLock } = require("../instance");
 const packageInfo = require("../../package.json");
 
+const GALLERY_WARM_UP_DELAY_MS = 5000;
 const BASE_PORT = 8321;
 // The phone's way in (手机连线), forwarded by `tailscale serve`. Fixed, since
 // the Tailscale side is configured with it.
@@ -785,7 +786,21 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
 
     if (request.method === "GET" && url.pathname === "/api/update/check") {
       const cached = url.searchParams.get("cached") === "1";
-      sendJson(response, 200, { ...(await update.checkUpdate({ maxAgeMs: cached ? update.AUTO_CHECK_MAX_AGE_MS : 0 })), lastFailure: update.lastUpdateFailure() });
+      // cached=1 is the check the page makes by itself.
+      if (cached && !update.autoCheckEnabled()) {
+        sendJson(response, 200, update.skippedCheck());
+        return;
+      }
+      sendJson(response, 200, {
+        ...(await update.checkUpdate({ maxAgeMs: cached ? update.AUTO_CHECK_MAX_AGE_MS : 0 })),
+        autoCheck: update.autoCheckEnabled(),
+        lastFailure: update.lastUpdateFailure(),
+      });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/update/auto-check") {
+      sendJson(response, 200, update.setAutoCheck(await readBody(request)));
       return;
     }
 
@@ -832,7 +847,10 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/background") {
-      sendJson(response, 200, { settings: background.saveSettings(await readBody(request)) });
+      const saved = background.saveSettings(await readBody(request));
+      // The rail shows whether refresh is on; it must not lag a toggle by its cache.
+      railOps.invalidateRail();
+      sendJson(response, 200, { settings: saved });
       return;
     }
 
@@ -1154,6 +1172,14 @@ const listen = (port, attempt) => {
     } catch (error) {
       console.error(`labelling earlier kept originals failed: ${error.message}`);
     }
+    // Reading the store from a cold disk took 6-7 s on the first gallery open
+    // after a start (measured 2026-11-20): the read worker does that once now,
+    // in the background, before anyone opens the page.
+    setTimeout(() => {
+      readWorker.call("gallery", "/api/gallery/facets", galleryOps.DEFAULT_VIEW_QUERY)
+        .then(() => readWorker.call("gallery", "/api/gallery/facets", galleryOps.ALL_TIME_QUERY))
+        .catch(() => {});
+    }, GALLERY_WARM_UP_DELAY_MS).unref();
     background.start({
       url,
       afterTick: async (tick) => {

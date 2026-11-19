@@ -52,9 +52,14 @@ const saveWatchWords = ({ words }) => {
   return { words: normalized };
 };
 
+// The newest stored message: "the data goes up to here" on the home page and
+// the rail. idx_messages_time makes it one index step.
+const newestMessageAt = (db) => db.prepare("SELECT MAX(sent_at) AS last FROM messages").get().last ?? null;
+
 const statusOf = (db, config, nowUnix) => ({
   llmConfigured: llmConfigured(config),
   background: background.getStatus(),
+  newestMessageAt: newestMessageAt(db),
   budget: engine.budgetStatus(db, nowUnix, profileFor(detailLevel(config)).engine.dailyLlmCallLimit),
   pause: engine.pauseStatus(db, nowUnix),
   spendToday: summarizeUsage(db, { nowUnix, days: 1, prices: priceTable(config) }).today.cost,
@@ -151,4 +156,4 @@ const afterTick = async ({ ok, result }) => {
   });
 };
 
-module.exports = { getBriefing, markSeen, retryFailed, saveWatchWords, afterTick, watchlistOf, watchWordsOf, uinFromPath };
+module.exports = { getBriefing, markSeen, retryFailed, saveWatchWords, afterTick, watchlistOf, watchWordsOf, uinFromPath, newestMessageAt };

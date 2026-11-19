@@ -228,7 +228,7 @@ const loadBriefing = async ({ fresh = false } = {}) => {
     if (payload?.unchanged === true) {
       changed = hadError;
     } else if (payload?.totals === undefined || !Array.isArray(payload.groups) || payload.highlights === undefined) {
-      throw new Error("简报数据不完整（控制台版本与页面不一致？请刷新页面）");
+      throw new Error("简报数据不完整（程序版本与页面不一致？请刷新页面）");
     } else {
       briefState.data = payload;
     }
@@ -294,36 +294,76 @@ const briefMarkSeen = async () => {
 
 /* ---------- sections ---------- */
 
+// New messages are summarized by themselves only while refresh runs, setup is
+// done, an AI service is set and 自动 AI 总结 is on. Empty states that promise
+// "会自动…" check this first.
+const briefAutoSummaryOn = (data) => {
+  const background = data?.status?.background ?? {};
+  return data?.status?.llmConfigured === true && background.settings?.enabled !== false
+    && !background.readinessProblem && background.settings?.autoSummarize !== false;
+};
+
+// A round started by hand summarizes with AI whenever a service is set and
+// 自动 AI 总结 is on, also while background refresh itself is off.
+const briefWillSummarize = (data) =>
+  data?.status?.llmConfigured === true && data.status.background?.settings?.autoSummarize !== false;
+
+const briefIsoUnix = (iso) => {
+  const ms = Date.parse(String(iso ?? ""));
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+};
+
+// Is the data up to date, and will it update by itself? The first part of the
+// status line. Setup problems come before lastError: a refresh that could not
+// start because setup is unfinished also records that as its error.
+const briefRefreshPieces = (data) => {
+  const background = data.status?.background ?? {};
+  const isOff = background.settings?.enabled === false;
+  const freshness = dataFreshnessText({ newestAt: data.status?.newestMessageAt, nextRunAt: isOff ? null : briefIsoUnix(background.nextRunAt) });
+  const tail = freshness ? ` · ${freshness}` : "";
+  if (background.running) {
+    // A long AI round no longer holds up new messages (background.js).
+    const synced = background.lastSync?.ok && Date.parse(background.lastSync.at) > Date.parse(background.lastStartedAt ?? "");
+    return { tone: "busy", pieces: [el("span", { class: "brief-pulse" }), "正在整理新消息…", synced ? ` · 新消息${briefAgo(background.lastSync.at)}收过` : ""] };
+  }
+  if (background.readinessProblem) {
+    return { tone: "warn", pieces: [`还没设置好（${background.readinessProblem}），消息不会更新；先完成「开始使用」`] };
+  }
+  if (isOff) {
+    return { tone: "warn", pieces: [
+      `后台刷新关着，消息不会自己更新${tail} · `,
+      el("button", { class: "linklike desktop-action", type: "button", onclick: turnOnBackgroundRefresh }, "打开后台刷新"),
+      " · ",
+      // A forced round also summarizes what is waiting when AI summaries are on: the button says so.
+      el("button", {
+        class: "linklike desktop-action",
+        type: "button",
+        disabled: briefState.busy,
+        title: briefWillSummarize(data)
+          ? "马上收一次新消息，并把还没总结的新消息交给 AI 总结（会用 AI 服务的额度）"
+          : "马上收一次新消息；现在不会调用 AI",
+        onclick: briefRunNow,
+      }, briefWillSummarize(data) ? "现在收一次并总结（会用 AI 额度）" : "现在收一次"),
+    ] };
+  }
+  if (background.lastError) {
+    return { tone: "risk", pieces: [`上次刷新出错：${background.lastError}${tail}`] };
+  }
+  return { tone: "ok", pieces: [background.lastFinishedAt ? `${briefAgo(background.lastFinishedAt)}刷新过${tail}` : `等待第一次后台刷新${tail}`] };
+};
+
 const briefStatusLine = (data) => {
   const background = data.status?.background ?? {};
-  const pieces = [];
-  let tone = "ok";
-  if (background.running) {
-    pieces.push(el("span", { class: "brief-pulse" }), "正在整理新消息…");
-    // A long AI round no longer holds up new messages (background.js).
-    if (background.lastSync?.ok && Date.parse(background.lastSync.at) > Date.parse(background.lastStartedAt ?? "")) {
-      pieces.push(` · 新消息${briefAgo(background.lastSync.at)}收过`);
-    }
-    tone = "busy";
-  } else if (background.lastError) {
-    pieces.push(`上次刷新出错：${background.lastError}`);
-    tone = "risk";
-  } else if (background.lastFinishedAt) {
-    pieces.push(`${briefAgo(background.lastFinishedAt)}更新`);
-  } else if (background.readinessProblem) {
-    pieces.push(`还没设置好（${background.readinessProblem}），数据不会更新；先完成「开始使用」`);
-    tone = "warn";
-  } else if (background.settings?.enabled === false) {
-    pieces.push("后台刷新关着，数据不会自己更新；在「设置 → 后台与通知」打开，或按右上的「刷新」");
-    tone = "warn";
-  } else {
-    pieces.push("等待第一次后台刷新");
-  }
+  const refresh = briefRefreshPieces(data);
+  const pieces = [...refresh.pieces];
+  let tone = refresh.tone;
   if (!data.status?.llmConfigured) {
     pieces.push(" · 还没配置 AI 总结，下面只有统计");
     tone = tone === "ok" ? "warn" : tone;
   } else if (data.totals.unsummarized > 0 && !background.running) {
-    pieces.push(` · 还有 ${briefNumber(data.totals.unsummarized)} 条新消息等凑够一段再总结`);
+    pieces.push(briefAutoSummaryOn(data)
+      ? ` · 还有 ${briefNumber(data.totals.unsummarized)} 条新消息等凑够一段再总结`
+      : ` · 还有 ${briefNumber(data.totals.unsummarized)} 条新消息没总结（不会自动总结）`);
   } else if (data.totals.textMessages > 0 && !background.running) {
     pieces.push(" · 已全部总结");
   }
@@ -807,7 +847,7 @@ const briefGroupRow = (group) =>
           : null,
         group.summary
           ? el("p", { class: "brief-group-summary", title: group.summary }, briefDropDatePreamble(group.summary))
-          : el("p", { class: "brief-group-summary pending" }, group.unsummarized > 0 ? `${briefNumber(group.unsummarized)} 条新消息，攒够一段后自动总结` : "还没有总结"),
+          : el("p", { class: "brief-group-summary pending" }, group.unsummarized > 0 ? `${briefNumber(group.unsummarized)} 条新消息，${briefAutoSummaryOn(briefState.data) ? "攒够一段后自动总结" : "还没总结"}` : "还没有总结"),
         group.topics.length > 0
           ? el("div", { class: "brief-group-topics" },
             group.topics.slice(0, BRIEF_GROUP_TOPICS).map((topic) => el("span", { class: "tag plain" }, topic)),

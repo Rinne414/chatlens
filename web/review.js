@@ -514,9 +514,16 @@ const reviewBackfill = async (data, estimate) => {
 const reviewBackfillAction = (data) => {
   const { totals, status } = data;
   if (totals.backfillable === 0) {
-    return totals.uncovered > 0 && data.day === reviewToday()
-      ? el("p", { class: "brief-meta" }, "今天剩下的新消息由后台简报自动总结。")
-      : null;
+    if (totals.uncovered === 0 || data.day !== reviewToday()) {
+      return null;
+    }
+    // 简报 knows whether refresh and 自动 AI 总结 are on; before it loaded, say nothing.
+    if (briefState.data === null) {
+      return null;
+    }
+    return el("p", { class: "brief-meta" }, briefAutoSummaryOn(briefState.data)
+      ? "今天剩下的新消息由后台简报自动总结。"
+      : "今天剩下的新消息不会自动总结：后台刷新或自动 AI 总结关着（在「设置 → 后台与通知」打开）。");
   }
   if (!status.llmConfigured) {
     return el("p", { class: "brief-meta" }, `还有 ${briefNumber(totals.backfillable)} 条没有 AI 整理。配置 AI 服务后可以补齐。`);

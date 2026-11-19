@@ -106,3 +106,54 @@ test("raw refresh errors are said in plain words, unknown ones are kept as they 
   assert.match(plain("找不到源数据库: C:/x/nt_msg.db（请在设置页检查 QQ 数据库路径）"), /找不到 QQ 的数据库文件/u);
   assert.equal(plain("网络断了"), "网络断了");
 });
+
+test("steps still waiting show what they do, how long, the disk they use and the fallback", () => {
+  const run = loadPage();
+  setScene(run, { status: { ...NO_PATH, ntMsgDbBytes: 15 * 1024 ** 3 } });
+
+  const text = run("textOfNode(setupGuideCard())");
+
+  assert.match(text, /找不到？手动指定/u);
+  assert.match(text, /QQ 的内存里读出密钥/u);
+  assert.match(text, /到设置页手动填密钥/u);
+  assert.match(text, /大约 1-2 分钟.*和 QQ 的数据库一样大（现在约 15/u);
+  assert.match(text, /联网时会发生什么/u);
+  assert.match(text, /GitHub/u);
+});
+
+// setupGuide.status too: the boot's leftover async renders read it.
+const briefScene = (run, { background = {}, llmConfigured = true, newestMessageAt = null }) => {
+  run(`setupGuide.status = ${JSON.stringify(READY)}`);
+  run(`briefState.data = ${JSON.stringify({ status: { background, llmConfigured, newestMessageAt }, totals: { textMessages: 0, unsummarized: 0 } })}`);
+};
+
+test("the 简报 status line says how fresh the data is, and offers the switch when refresh is off", () => {
+  const run = loadPage();
+  const line = () => run("textOfNode(briefStatusLine(briefState.data))");
+  const newest = Math.floor(Date.now() / 1000) - 3600;
+
+  briefScene(run, { background: { settings: { enabled: false } }, newestMessageAt: newest });
+  assert.match(line(), /后台刷新关着.*消息到 .*打开后台刷新.*现在收一次/u);
+
+  briefScene(run, { background: { settings: { enabled: true }, lastFinishedAt: new Date().toISOString(), nextRunAt: new Date(Date.now() + 600000).toISOString() }, newestMessageAt: newest });
+  assert.match(line(), /刷新过 · 消息到 .* · 下次刷新 /u);
+
+  // Unfinished setup is not shown as a failed refresh, though the refresh records it as its error.
+  briefScene(run, { background: { settings: { enabled: true }, readinessProblem: "还没有保存 QQ 数据库密钥", lastError: "还没有保存 QQ 数据库密钥" } });
+  assert.match(line(), /还没设置好/u);
+  assert.doesNotMatch(line(), /出错/u);
+});
+
+test("nothing promises an automatic summary while refresh, setup, AI or 自动 AI 总结 is missing", () => {
+  const run = loadPage();
+  const on = (scene) => {
+    briefScene(run, scene);
+    return run("briefAutoSummaryOn(briefState.data)");
+  };
+
+  assert.equal(on({ background: { settings: { enabled: true, autoSummarize: true } } }), true);
+  assert.equal(on({ background: { settings: { enabled: false } } }), false);
+  assert.equal(on({ background: { settings: { enabled: true, autoSummarize: false } } }), false);
+  assert.equal(on({ background: { settings: { enabled: true }, readinessProblem: "关注群列表为空" } }), false);
+  assert.equal(on({ background: { settings: { enabled: true } }, llmConfigured: false }), false);
+});

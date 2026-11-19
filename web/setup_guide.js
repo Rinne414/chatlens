@@ -153,14 +153,32 @@ const setupButton = (step, label, busyLabel, onclick, { primary = true } = {}) =
     onclick,
   }, setupGuide.busy === step ? busyLabel : label);
 
+// What a step does, how long it takes and what it costs in disk, and what to
+// do if it fails: visible (no hovering) until the step is done, also while a
+// step before it is still open.
+const setupFacts = (lines) => el("ul", { class: "setup-facts" }, lines.filter(Boolean).map((line) => el("li", {}, line)));
+
 // state: "done" | "now" | "later" (a step before it is not done yet).
 // `body` shows while the step is the current one, `after` once it is done.
-const setupStep = (number, state, title, doneText, body, after = null) =>
+const setupStep = (number, state, title, doneText, body, after = null, facts = null) =>
   el("li", { class: `setup-step ${state}` },
     el("span", { class: "setup-mark", "aria-hidden": "true" }, state === "done" ? "✓" : String(number)),
     el("div", { class: "setup-body" },
       el("h3", {}, title, state === "done" && doneText ? el("span", { class: "setup-done" }, doneText) : null),
+      state === "done" ? null : facts,
       state === "now" ? body : state === "done" ? after : null));
+
+// The manual fallbacks live in 设置; land on the card itself, not the page top.
+const openSettingsCard = async (find) => {
+  await openSettingsView();
+  find()?.scrollIntoView({ block: "start" });
+};
+
+const settingsPathCard = () => [...document.querySelectorAll("#view-settings .card")]
+  .find((card) => card.querySelector("#settings-paths") !== null) ?? null;
+
+const manualLink = (label, find) =>
+  el("button", { class: "linklike", type: "button", onclick: () => openSettingsCard(find) }, label);
 
 const pathStep = (status) => {
   const done = status.ntDbDirExists === true;
@@ -176,19 +194,31 @@ const pathStep = (status) => {
   const qq = /[\\/](\d{5,})[\\/]nt_qq/u.exec(status.ntDbDir ?? "")?.[1];
   return setupStep(1, done ? "done" : "now", "找到 QQ 的聊天数据库", qq ? `QQ ${qq}` : "已找到",
     el("div", {},
-      el("p", {}, "在这台电脑上找 QQ 存聊天记录的文件夹。只会复制一份来读，不改 QQ 的任何文件。"),
       setupButton("path", "自动查找", "正在找…", findQqDatabase),
+      " ",
+      manualLink("找不到？手动指定", settingsPathCard),
       setupNotice("path")),
-    chips === null && setupGuide.notice?.step !== "path" ? null : el("div", {}, chips, setupNotice("path")));
+    chips === null && setupGuide.notice?.step !== "path" ? null : el("div", {}, chips, setupNotice("path")),
+    setupFacts([
+      "在这台电脑上找 QQ 存聊天记录的文件夹。只读，不改 QQ 的任何文件。",
+      "几秒钟，这一步不占磁盘。",
+      "找不到：QQ 的设置里能查到聊天文件存在哪个文件夹，点「找不到？手动指定」填进去。",
+    ]));
 };
 
 const keyStep = (status, ready) => setupStep(2, !ready ? "later" : status.ntqqKeySaved ? "done" : "now",
   "读取数据库密钥", "已保存",
   el("div", {},
-    el("p", {}, "QQ 的数据库是加密的。先打开并登录电脑版 QQ，再点下面的按钮：工具从正在运行的 QQ 里读出密钥，验证后加密保存在本机。不联网。"),
     setupButton("key", "自动获取密钥", "正在读取，可能要一两分钟…", readQqKey),
     setupNotice("key")),
-  setupNotice("key"));
+  setupNotice("key"),
+  setupFacts([
+    "QQ 的聊天数据库是加密的，钥匙只在运行中的 QQ 里。所以要先打开并登录电脑版 QQ，工具从 QQ 的内存里读出密钥，验证后加密存在本机。只读，不改 QQ，不联网。",
+    status.platform === "linux" ? "会弹出系统的密码框：读别的程序的内存需要授权。" : null,
+    "一般一两分钟，慢的电脑要几分钟；不占磁盘。",
+    ["失败：确认 QQ 开着、登录的是第 1 步那个账号，再点一次。还不行就",
+      manualLink("到设置页手动填密钥", () => $("#settings-keys")), "。"],
+  ]));
 
 const groupRows = (knownGroups, followed) => {
   const query = setupGuide.search.trim().toLowerCase();
@@ -243,22 +273,22 @@ const groupPicker = () => {
     el("p", { class: "setup-hint" }, groupHintText(followed.size)));
 };
 
-const groupStep = (ready) => {
+// "（现在约 15.1 GB）" once the database is found.
+const mirrorSizeText = (status) => (Number.isFinite(status.ntMsgDbBytes) && status.ntMsgDbBytes > 0 ? `（现在约 ${formatBytes(status.ntMsgDbBytes)}）` : "");
+
+const groupStep = (status, ready) => {
   const count = (app.state?.watchlist ?? []).length;
   const body = el("div", {},
-    el("p", {}, "只读你选的群。工具会在后台定时收这些群的新消息、整理成简报。"),
     groupPicker(),
     setupNotice("groups"));
   // The picker stays open once a group is ticked, so more can be added.
-  const step = setupStep(3, !ready ? "later" : count > 0 ? "done" : "now", "选要看的群", `${count} 个`, body, body);
+  const step = setupStep(3, !ready ? "later" : count > 0 ? "done" : "now", "选要看的群", `${count} 个`, body, body, setupFacts([
+    "读出你加入的群，勾选要看的。只读你选的群，工具会在后台定时收这些群的新消息、整理成简报。",
+    `第一次要复制一份 QQ 聊天数据库，大约 1-2 分钟。这份副本一直留着，和 QQ 的数据库一样大${mirrorSizeText(status)}；以后每次只更新变了的部分。`,
+    "没读到时这里会写原因，点「再试一次」。",
+  ]));
   step.classList.add("groups-step");
   return step;
-};
-
-// Lands on the AI card itself, not the top of a long settings page.
-const openAiSettings = async () => {
-  await openSettingsView();
-  $("#settings-llm")?.scrollIntoView({ block: "start" });
 };
 
 // Background errors arrive as raw messages (SQLite, file paths). Say what it
@@ -277,15 +307,24 @@ const aiStep = (status) => {
   const ai = aiReadiness(status);
   return setupStep(4, ai.ok ? "done" : "now", "AI 总结（可选）", ai.detail,
     el("div", {},
-      el("p", {}, "填一个 AI 服务（DeepSeek、OpenAI 兼容服务或 Grok 订阅），简报里就会有每个群在聊什么的总结。不填也能用：消息、图片、热点、搜索都照常有。开启后消息文字会发给你选的 AI 服务。"),
-      el("button", { class: "btn small", type: "button", onclick: openAiSettings }, "去设置 AI 服务")));
+      el("p", {}, "填一个 AI 服务（DeepSeek、OpenAI 兼容服务或 Grok 订阅），简报里就会有每个群在聊什么的总结。不填也能用：消息、图片、热点、搜索都照常有。开启后消息文字会发给你选的 AI 服务，用你自己账号的额度。"),
+      el("button", { class: "btn small", type: "button", onclick: () => openSettingsCard(() => $("#settings-llm")) }, "去设置 AI 服务")));
 };
+
+// The footer used to say everything stays on this computer; these do go
+// online (settings.js 安全说明 lists the same). The update check has no switch.
+const setupOnlineNote = () => el("details", { class: "setup-online" },
+  el("summary", {}, "聊天记录只存在这台电脑上。联网时会发生什么？"),
+  el("ul", {},
+    el("li", {}, "检查新版本：打开时和每 6 小时问一次 GitHub，只读版本信息。可以在「设置 → 版本与更新」关掉。"),
+    el("li", {}, "群头像和群图片：从腾讯的服务器读取。自动抓取群图片可以在「设置 → 群图片」关掉。"),
+    el("li", {}, "AI 总结：只有你填了 AI 服务，消息文字才会发给它；不填就不发。")));
 
 // Once the three steps are done, the footer reports what the background
 // refresh is really doing; a failed first refresh shows its reason.
 const setupFooter = (coreReady) => {
   if (!coreReady) {
-    return el("p", { class: "setup-foot" }, "全程在这台电脑上完成，聊天记录只存在本机。");
+    return null;
   }
   const background = briefState.data?.status?.background ?? {};
   if (background.running) {
@@ -331,7 +370,8 @@ const setupGuideCard = () => {
     el("ol", { class: "setup-steps" },
       pathStep(status),
       keyStep(status, pathReady),
-      groupStep(keyReady),
+      groupStep(status, keyReady),
       aiStep(status)),
-    setupFooter(coreReady));
+    setupFooter(coreReady),
+    setupOnlineNote());
 };

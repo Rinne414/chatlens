@@ -134,6 +134,22 @@ const lastUpdateFailure = () => {
   return { at: match?.[1] ?? "", message: (match?.[2] ?? last).slice(0, 300) };
 };
 
+// The check that runs by itself can be switched off (config update.autoCheck);
+// the 检查更新 button and the update itself still ask GitHub.
+const autoCheckEnabled = () => state.loadRawConfig().update?.autoCheck !== false;
+
+const setAutoCheck = ({ enabled }) => {
+  if (typeof enabled !== "boolean") {
+    throw new Error("enabled 必须是 true 或 false。");
+  }
+  const raw = state.loadRawConfig();
+  state.writeConfig({ ...raw, update: { ...raw.update, autoCheck: enabled } });
+  return { autoCheck: enabled };
+};
+
+// What an automatic check answers while it is switched off: nothing is asked.
+const skippedCheck = () => ({ currentVersion: packageInfo.version, hasUpdate: false, autoCheck: false, skipped: true });
+
 // maxAgeMs 0 (the 检查更新 button, applyUpdate) always asks GitHub.
 const checkUpdate = async ({ maxAgeMs = 0, now = Date.now() } = {}) => {
   const age = lastCheck === null ? Infinity : now - lastCheck.at;
@@ -411,4 +427,4 @@ const applyUpdate = async () => {
   return { updating: true, targetVersion: info.latestVersion };
 };
 
-module.exports = { AUTO_CHECK_MAX_AGE_MS, checkUpdate, applyUpdate, lastUpdateFailure, pickAssetFor, isNewerVersion, windowsUpdaterArgs };
+module.exports = { AUTO_CHECK_MAX_AGE_MS, autoCheckEnabled, setAutoCheck, skippedCheck, checkUpdate, applyUpdate, lastUpdateFailure, pickAssetFor, isNewerVersion, windowsUpdaterArgs };

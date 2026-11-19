@@ -110,6 +110,12 @@ button.backup-status:hover { border-color: var(--accent); }
 .backup-rescue-tile .wall-pick { position: absolute; top: 5px; right: 5px; }
 .backup-rescue-tile:hover .wall-pick { opacity: 1; }
 .backup-rescue-select { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.backup-select-label { margin: 0; }
+.backup-rescue-head .backup-expiry-line { margin-top: 4px; }
+.backup-dest { margin: 8px 0 0; overflow-wrap: anywhere; }
+.backup-dest code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+.backup-keep-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; padding: 10px 12px; border-radius: 6px; background: var(--accent-soft); font-size: 13px; }
+.backup-keep-confirm > span { flex: 1 1 360px; }
 .backup-rescue-tile .wall-badge { position: absolute; left: 5px; bottom: 5px; }
 
 .backup-step { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 8px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; }

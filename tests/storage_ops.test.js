@@ -75,7 +75,7 @@ test("storage overview exposes deletion policy without arbitrary path actions", 
   assert.equal(items.get("qq-media-cache").measurement, "manual");
   assert.equal(items.get("message-store").policy, "keep");
   assert.equal(items.get("knowledge-media").cleanupAllowed, false);
-  assert.equal(items.get("knowledge-media").measurement, "manual");
+  assert.equal(items.get("knowledge-media").measurement, "background");
   assert.equal(items.get("temporary-files").cleanupAllowed, true);
   assert.equal(items.get("run-files").cleanupAllowed, true);
   assert.equal(items.get("reports-exports").cleanupAllowed, true);
@@ -179,10 +179,10 @@ test("cleanup refuses configured output roots outside the toolkit", async (t) =>
   const overview = getStorageOverview(externalContext);
   const reports = overview.items.find((item) => item.id === "reports-exports");
   assert.equal(reports.cleanupAllowed, false);
-  assert.match(reports.cleanupBlockedReason, /不在工具目录内/u);
+  assert.match(reports.cleanupBlockedReason, /不在本程序的文件夹里/u);
   await assert.rejects(
     cleanupStorageCategory(externalContext, "reports-exports", "reports-exports"),
-    /不在工具目录内/u,
+    /不在本程序的文件夹里/u,
   );
   assert.equal(fs.existsSync(path.join(externalRoot, "keep.txt")), true);
 });
@@ -202,4 +202,37 @@ test("run and report cleanup preserve their configured roots", async (t) => {
   assert.equal(fs.existsSync(fixture.paths.reportsDir), true);
   assert.equal(fs.readdirSync(fixture.paths.reportsDir).length, 0);
   assert.equal(fs.existsSync(path.join(fixture.paths.storeDir, "messages.db")), true);
+});
+
+test("kept originals lead with their name and point to 画廊 for removing them", (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.paths.toolRoot, { recursive: true, force: true }));
+  populateFixture(fixture.paths);
+
+  const items = new Map(getStorageOverview(fixture.context).items.map((item) => [item.id, item]));
+  const kept = items.get("knowledge-media");
+  const removed = items.get("media-removed");
+
+  assert.match(kept.label, /^留存的原图/u);
+  assert.match(kept.cleanupBlockedReason, /画廊 →「留存的原图」/u);
+  assert.doesNotMatch(kept.cleanupImpact, /不提供/u);
+  assert.equal(removed.section, "important");
+  assert.equal(removed.cleanupCategory, null);
+  assert.equal(removed.measurement, "background");
+  assert.deepEqual(removed.paths, [path.join(fixture.paths.storeDir, "media-removed")]);
+  assert.match(removed.cleanupImpact, /画廊 →「取消留存的」/u);
+});
+
+test("originals the user took out are measured apart from the kept ones", async (t) => {
+  const fixture = createFixture();
+  t.after(() => fs.rmSync(fixture.paths.toolRoot, { recursive: true, force: true }));
+  populateFixture(fixture.paths);
+  writeSizedFile(path.join(fixture.paths.storeDir, "media-removed", "bb", `${"b".repeat(32)}.png`), 59);
+
+  assert.equal((await measureStorageCategory(fixture.context, "media-removed")).bytes, 59);
+  assert.equal((await measureStorageCategory(fixture.context, "knowledge-media")).bytes, 21);
+  await assert.rejects(
+    cleanupStorageCategory(fixture.context, "media-removed", "media-removed"),
+    /protected and cannot be cleaned/u,
+  );
 });

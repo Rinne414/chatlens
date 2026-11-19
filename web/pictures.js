@@ -443,6 +443,8 @@ const renderPictureSettingsCard = () => {
         onclick: () => runPicturePass(),
       }, "现在抓取"),
       notice),
+    el("p", { class: "card-sub" },
+      "「现在抓取」：马上跑一轮平时每次刷新后自动做的事：向腾讯的图片服务器取缩略图、检查是不是 AI 图、取 AI 图的预览；下面勾了「每张都留存原图」的群，也会把原图留存下来。一轮最多 10 分钟，不改任何设置。"),
     el("p", { id: "picture-keep-groups", class: "card-sub", style: "margin:12px 0 6px" },
       `每张都留存原图的群（只列关注群，现在勾了 ${kept.size} 个）：勾上的群，以后发的每张图都会自动把原图存进本工具，表情除外；每张约 1–3 MB，不受上面的空间上限管。取消勾选只是以后不再自动留，已经留下的不会删；不要的到画廊「留存的原图」里取消留存。`),
     watchlist.length === 0

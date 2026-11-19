@@ -512,3 +512,9 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .brief-thing-source ul { margin: 0; padding-left: 18px; line-height: 1.65; }
 .brief-thing-quotes { display: flex; flex-wrap: wrap; gap: 6px; }
 .brief-thing-quotes q { padding: 2px 8px; border-radius: 6px; background: var(--bg); color: var(--muted); font-size: 13px; quotes: none; }
+.setup-facts { margin: 0 0 10px; padding-left: 18px; color: var(--muted); font-size: 13.5px; line-height: 1.7; }
+.setup-facts li + li { margin-top: 2px; }
+.setup-online { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--paper-rule); color: var(--muted); font-size: 13.5px; }
+.setup-online summary { cursor: pointer; }
+.setup-online ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.7; }
+.ask-cost-note { margin: 0; }

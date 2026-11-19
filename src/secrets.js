@@ -113,7 +113,7 @@ const hasSecret = (name) => {
 };
 
 const missingSecretError = (name) =>
-  new Error(`没有找到已保存的${specFor(name).label}。请先在控制台「设置」页保存。`);
+  new Error(`没有找到已保存的${specFor(name).label}。请先在 ChatLens「设置」页保存。`);
 
 // Synchronous read for pipeline child processes (they need the key before any
 // other work and have nothing else to do meanwhile).

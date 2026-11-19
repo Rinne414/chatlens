@@ -544,7 +544,7 @@ details.topic summary:hover { color: var(--accent); }
 .storage-table { border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
 .storage-table-head, .storage-row {
   display: grid;
-  grid-template-columns: minmax(240px, 1.35fr) minmax(210px, 1.2fr) minmax(130px, .65fr) minmax(170px, .8fr) minmax(118px, auto);
+  grid-template-columns: minmax(240px, 1.35fr) minmax(210px, 1.2fr) minmax(130px, .65fr) minmax(170px, .8fr) minmax(170px, auto);
   gap: 14px;
   align-items: center;
 }
@@ -584,18 +584,30 @@ details.topic summary:hover { color: var(--accent); }
 .storage-policy-badge.keep { background: var(--warn-soft); color: var(--warn); }
 .storage-policy-badge.cleanup { background: var(--ok-soft); color: var(--ok); }
 .storage-policy-badge.deletable { background: var(--accent-soft); color: var(--accent); }
-.storage-actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; min-width: 0; }
-.storage-icon-button {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--ink);
-  cursor: pointer;
+.storage-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; min-width: 0; }
+/* Deleting sits on its own line under the harmless buttons, in the risk colour. */
+.storage-danger { display: flex; flex-basis: 100%; justify-content: flex-end; padding-top: 6px; border-top: 1px dashed var(--line); }
+.storage-danger .btn.danger, .storage-confirm .btn.danger { border-color: var(--risk); color: var(--risk); }
+.storage-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: var(--risk-soft);
+  color: var(--risk);
+  font-size: 12.5px;
 }
-.storage-icon-button:hover { border-color: var(--accent); color: var(--accent); }
+.storage-confirm > span { flex: 1 1 320px; }
+.storage-summary-action { justify-self: start; margin-top: 4px; }
+
+/* ---- settings: folds and the stop buttons ---- */
+.settings-fold { margin-top: 8px; }
+.settings-fold summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; }
+.settings-stop { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.settings-stop .btn.danger { border-color: var(--risk); color: var(--risk); }
 
 @media (max-width: 900px) {
   .system-readiness { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1068,3 +1080,5 @@ html[data-theme="dark"] .sel-bar { box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
   .rail-version { margin: 0; padding: 0; border-top: 0; }
   .rail-version-row, .rail-version-status { display: none; }
 }
+.rail-quit { display: grid; gap: 2px; text-align: left; }
+.rail-quit-hint { color: var(--muted); font-size: 11px; line-height: 1.5; }

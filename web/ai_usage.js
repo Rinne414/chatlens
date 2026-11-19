@@ -6,7 +6,25 @@
 
 const aiUsageState = { usage: null, providers: null, error: null, notice: null, hoverDay: null, showPrices: false, priceDraft: null };
 
-const AI_PURPOSE_LABELS = { map: "简报：单段摘要", reduce: "简报：合并", manual: "自定义总结", quick: "选段总结", things: "群：重要的事", digest: "总览 / 周报 / 月报", ask: "问群聊", redo: "详细模式重做", probe: "连通检查", other: "其他" };
+// What the user got for each kind of call (llm_usage.purpose), in the words
+// of the page that shows it.
+const AI_PURPOSE_LABELS = {
+  map: "简报：把每段新消息写成摘要",
+  reduce: "简报：把各段摘要合成群总览",
+  manual: "自定义时间范围总结",
+  quick: "选中消息的总结",
+  things: "「值得知道的事」和群里的「重要的事」",
+  digest: "日报、周报和月报",
+  ask: "问群聊的回答",
+  redo: "用详细模式重做过去的摘要",
+  probe: "检查 AI 服务能不能连上",
+  "notes-aliases": "笔记库：认出不同写法的同一个东西",
+  "notes-topics": "笔记库：把东西归到主题",
+  "notes-consensus": "笔记库：整理群里对一个东西的共识",
+  other: "其他",
+};
+
+const aiPurposeLabel = (purpose) => AI_PURPOSE_LABELS[purpose] ?? `其他用途（${purpose}）`;
 const AI_CURRENCY_SIGNS = { CNY: "¥", USD: "$" };
 
 const aiMoney = (costs) => {
@@ -99,6 +117,8 @@ const aiRedoRow = (usage) => {
         class: "btn small",
         onclick: () => aiAction("/api/llm/redo", { days: Number(daysSelect.value) }, "已排队，后台会用详细模式处理这些日子。"),
       }, "用详细模式重做")),
+    el("p", { class: "card-sub", style: "margin:4px 0 0" },
+      "会重新调用 AI，把选中日子的摘要换成详细版，用量按这些日子的消息多少算，排队后这里会显示已用和预计还需。排队后不能取消，只能用上面的「暂停 AI 整理」先停下。"),
     report);
 };
 
@@ -162,9 +182,9 @@ const aiPurposeTable = (usage) => {
     return null;
   }
   return el("table", { class: "ai-table" },
-    el("thead", {}, el("tr", {}, ["用途", "次数", "输入 token", "输出 token", "费用（30 天）"].map((head) => el("th", {}, head)))),
+    el("thead", {}, el("tr", {}, ["花在哪了", "次数", "发给 AI（token）", "AI 写回（token）", "费用（30 天）"].map((head) => el("th", {}, head)))),
     el("tbody", {}, rows.map(([purpose, bucket]) => el("tr", {},
-      el("td", {}, AI_PURPOSE_LABELS[purpose] ?? purpose),
+      el("td", {}, aiPurposeLabel(purpose)),
       el("td", {}, bucket.calls),
       el("td", {}, aiTokens(bucket.promptTokens)),
       el("td", {}, aiTokens(bucket.completionTokens)),
@@ -216,7 +236,7 @@ const aiPriceEditor = () => {
     el("summary", {}, "价格表（每百万 token）"),
     el("p", { class: "card-sub" }, `内置价格抄自官网（${providers.priceSourceDate}），会过时。你的服务商或模型不在表里，就在下面加一行：模型名只要包含这里填的文字就算匹配，排在内置价格前面。`),
     el("table", { class: "ai-table" },
-      el("thead", {}, el("tr", {}, ["模型名包含", "币种", "输入", "缓存命中", "输出", "离峰半价", ""].map((head) => el("th", {}, head)))),
+      el("thead", {}, el("tr", {}, ["模型名包含", "币种", "发给 AI", "发给 AI（缓存命中）", "AI 写回", "离峰半价", ""].map((head) => el("th", {}, head)))),
       el("tbody", {},
         rows.map((row, index) => el("tr", {},
           el("td", {}, el("input", { type: "text", value: row.match, style: "width:170px", oninput: (event) => update(index, { match: event.target.value }) })),
@@ -274,7 +294,7 @@ const renderAiUsageCard = () => {
   const perThousand = usage.perThousandMessages;
   return el("div", { class: "card" },
     el("h2", {}, "AI 用量与费用"),
-    el("p", { class: "card-sub" }, "按 AI 服务每次返回的实际 token 数统计，费用按下方价格表估算，以服务商账单为准。每 15 分钟的刷新本身不调用 AI：群里攒够一段新消息才总结一次（按消息量计费），各群总览再按「简报合并」的间隔重写，所以费用主要看群有多热闹。"),
+    el("p", { class: "card-sub" }, "token 是 AI 服务算用量和收费的单位，文字越多 token 越多：「发给 AI」是送去总结的消息，「AI 写回」是它写的总结。这里按 AI 服务每次报回的实际 token 数统计，费用按下方价格表估算，以服务商账单为准。后台刷新只收新消息，本身不调用 AI：群里攒够一段新消息才总结一次，各群总览再按「简报合并」的间隔重写，所以费用主要看群有多热闹。"),
     aiPauseRow(usage),
     aiDetailRow(usage),
     el("div", { class: "ai-tiles" },
@@ -286,7 +306,7 @@ const renderAiUsageCard = () => {
         el("strong", { class: "ai-tile-value" }, aiMoney(usage.projectedMonth)),
         el("span", { class: "ai-tile-meta" }, perThousand === null
           ? "还没有足够的记录"
-          : `你的群每 1000 条消息约 ${aiMoney(perThousand.cost)}（${aiTokens(perThousand.promptTokens)} 输入 token）`),
+          : `你的群每 1000 条消息约 ${aiMoney(perThousand.cost)}（${aiTokens(perThousand.promptTokens)} token 发给 AI）`),
         usage.observedDays > 0 && usage.observedDays < 3
           ? el("span", { class: "ai-tile-meta" }, `才 ${usage.observedDays} 天的记录，跑满一周后更准`)
           : null)),

@@ -26,6 +26,9 @@ const railAgo = (unix) => {
   return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`;
 };
 
+// Said wherever a group shows a count, as on 消息.
+const RAIL_UNREAD_MEANING = "数字是本工具还没看过的消息，不是 QQ 未读";
+
 // The server counts up to its cap (maxCounted, 999); below it the real number.
 const railUnreadText = (count) => (count >= (railState.data?.maxCounted ?? 999) ? `${count}+` : String(count));
 
@@ -39,7 +42,7 @@ const railGroupRow = (group, cap) =>
   avatarEl(group.name, group.groupId, "sm", groupAvatarUrl(group.groupId)),
   el("span", { class: "rail-group-name" }, group.name),
   group.mentions > 0 ? el("span", { class: "rail-at", "aria-label": `${group.mentions} 条 @你` }, "@") : null,
-  group.unread > 0 ? el("span", { class: "rail-unread", title: `${group.unread >= cap ? `${cap}+` : group.unread} 条本工具还没看过` }, railUnreadText(group.unread)) : null);
+  group.unread > 0 ? el("span", { class: "rail-unread", title: `${group.unread >= cap ? `${cap}+` : group.unread} 条：${RAIL_UNREAD_MEANING}` }, railUnreadText(group.unread)) : null);
 
 const renderRailGroups = () => {
   const node = $("#rail-groups");
@@ -69,6 +72,7 @@ const renderRailGroups = () => {
           wallWritePref(RAIL_GROUP_KEY, railState.groupsOpen ? "1" : "0");
           renderRailGroups();
         },
+        title: `点开或收起。${RAIL_UNREAD_MEANING}`,
       }, el("span", {}, "关注的群"), el("span", { class: "rail-caret" }, railState.groupsOpen ? "▾" : "▸")),
       manageButton("管理")),
     railState.groupsOpen
@@ -86,7 +90,7 @@ const railBackgroundLine = (data) => {
     return { tone: "paused", text: `还没设置好：${background.readinessProblem}` };
   }
   if (!background.enabled) {
-    return { tone: "paused", text: "后台刷新已关闭" };
+    return { tone: "paused", text: "后台刷新已关闭，消息不会自己更新" };
   }
   if (background.running) {
     return { tone: "running", text: "正在更新…" };
@@ -96,6 +100,42 @@ const railBackgroundLine = (data) => {
     return { tone: "error", text: when ? `上次更新出错（${when}）` : "上次更新出错" };
   }
   return { tone: "ok", text: background.lastFinishedAt ? `${railAgo(background.lastFinishedAt)}更新` : "还没更新过" };
+};
+
+// "消息到 今天 14:05 · 下次刷新 今天 14:30": how fresh the data is, without
+// opening 设置. Shared with the 简报 status line (unix seconds; missing parts left out).
+const dataFreshnessText = ({ newestAt, nextRunAt }) => [
+  Number.isFinite(newestAt) && newestAt > 0 ? `消息到 ${briefWhen(newestAt)}` : null,
+  Number.isFinite(nextRunAt) && nextRunAt > 0 ? `下次刷新 ${briefWhen(nextRunAt)}` : null,
+].filter((part) => part !== null).join(" · ");
+
+// One click from wherever it says refresh is off (rail, 简报).
+const turnOnBackgroundRefresh = async () => {
+  try {
+    await api("/api/background", { method: "POST", body: JSON.stringify({ enabled: true }) });
+  } catch (error) {
+    alert(`没能打开后台刷新：${error.message}`);
+    return;
+  }
+  loadRail();
+  if (app.view === "brief") {
+    await loadBriefing({ fresh: true }).catch(() => {});
+    renderBriefView();
+  }
+};
+
+// Refresh switched off by the user (setup itself is finished): say so and offer the switch.
+const railRefreshOff = (background) => !background.enabled && !background.readinessProblem;
+
+const railFreshnessLine = (background) => {
+  const text = dataFreshnessText({ newestAt: background.newestMessageAt, nextRunAt: background.enabled && !background.readinessProblem ? background.nextRunAt : null });
+  const isOff = railRefreshOff(background);
+  if (text === "" && !isOff) {
+    return null;
+  }
+  return el("p", { class: "rail-today" },
+    text,
+    isOff ? [text ? " · " : null, el("button", { class: "linklike desktop-action", type: "button", onclick: turnOnBackgroundRefresh }, "打开后台刷新")] : null);
 };
 
 const renderRailStatus = () => {
@@ -113,9 +153,11 @@ const renderRailStatus = () => {
     el("button", {
       class: `rail-status-line ${line.tone}`,
       type: "button",
-      title: "后台刷新与通知设置",
-      onclick: () => openView("settings"),
+      // Unfinished setup is done in 简报's 「开始使用」, not in 设置.
+      title: data.background.readinessProblem ? "去简报页的「开始使用」把设置做完" : "后台刷新与通知设置",
+      onclick: () => openView(data.background.readinessProblem ? "brief" : "settings"),
     }, el("span", { class: "rail-dot" }), line.text),
+    railFreshnessLine(data.background),
     el("p", { class: "rail-today" },
       `今天 ${briefNumber(data.today.messages)} 条消息 · ${briefNumber(data.today.pictures)} 张图`,
       data.today.aiPictures > 0 ? `（${briefNumber(data.today.aiPictures)} 张 AI）` : ""),

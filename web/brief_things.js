@@ -285,7 +285,8 @@ const briefThingsHeadLine = (data) => {
 const briefThingsBody = (data) => {
   if (data.things === null) {
     if (data.topicCount === 0) {
-      return el("p", { class: "brief-empty-line" }, data.auto === "on"
+      // Topics come from the background summaries: no promise while those are off.
+      return el("p", { class: "brief-empty-line" }, data.auto === "on" && briefAutoSummaryOn(briefState.data)
         ? "这段时间各群还没有整理好的话题。后台总结出来、攒到几个话题后，这里会自动整理。"
         : "这段时间各群还没有整理好的话题。");
     }
