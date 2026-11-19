@@ -48,6 +48,10 @@ app.gallery = {
   // kept is also 「留存的原图」 (gallery_kept.js); it remembers the time range it replaced.
   kept: false,
   timeBeforeKept: null,
+  // Inside the kept library: one reason it was kept; removed = the pictures
+  // the user took out of it (gallery_unkeep.js).
+  why: "",
+  removed: false,
   q: "",
   shape: "",
   size: "",
@@ -99,6 +103,12 @@ const galleryFilterParams = () => {
     if (tab[key]) {
       params.set(key, "1");
     }
+  }
+  if (tab.kept && tab.why !== "") {
+    params.set("why", tab.why);
+  }
+  if (tab.removed) {
+    params.set("removed", "1");
   }
   const bounds = galleryTimeBounds(tab);
   if (bounds.days === undefined) {
@@ -368,12 +378,13 @@ const gallerySelectionNodes = () => {
         title: KEEP_LABEL_TITLE,
         onclick: keepGallerySelection,
       }, `留存原图（${briefNumber(count)}）`),
+      gallerySelectionKeptButtons(count),
       el("button", { class: "btn small", type: "button", disabled: loaded.length === 0, onclick: () => selectGalleryItems(loaded) },
         `全选已加载的 ${briefNumber(loaded.length)} 张`),
       el("button", { class: "btn small", type: "button", disabled: count === 0, onclick: () => {
         replaceGallery({ selected: new Set(), lastPicked: null });
         refreshGallerySelection();
-      } }, "清空"),
+      } }, "取消选择"),
       el("span", { class: "kb-results-spacer" }),
       el("button", { class: "btn small", type: "button", title: "退出多选（Esc），已选的会清空", onclick: leaveGallerySelection }, "退出多选")),
     el("span", { class: "kb-meta" }, "点图片就是选它；按住 Shift 点另一张可以连选。「另存到文件夹」把原图复制到下面的文件夹，「留存原图」存进本工具。腾讯只保留 31 天，更早的图只有留存过的还有原图。"),
@@ -580,6 +591,7 @@ const galleryConditions = () => {
     tab.q === "" ? null : { text: `搜：${tab.q}`, remove: () => applyGalleryFilter({ q: "" }) },
     tab.shape === "" ? null : { text: `形状：${galleryLabel(GALLERY_SHAPES, tab.shape)}`, remove: () => applyGalleryFilter({ shape: "" }) },
     tab.size === "" ? null : { text: `大小：${galleryLabel(GALLERY_SIZES, tab.size)}`, remove: () => applyGalleryFilter({ size: "" }) },
+    !tab.kept || tab.why === "" ? null : { text: `留存原因：${galleryLabel(KEPT_WHY_FACETS, tab.why)}`, remove: () => applyGalleryFilter({ why: "" }) },
     // kept has no chip: the 「留存的原图」 switch beside the search box shows it.
     ...GALLERY_SWITCHES.filter(([key]) => tab[key] && key !== "kept").map(([key, label]) => ({ text: label, remove: () => applyGalleryFilter(gallerySwitchPatch(key, false)) })),
   ].filter((chip) => chip !== null);
@@ -636,7 +648,8 @@ const galleryFacetSections = () => {
       facetRow({ label: "图片", count: facets.kinds.images, active: tab.kind === "images", onClick: () => applyGalleryFilter({ kind: "images" }) }),
       facetRow({ label: "表情包", count: facets.kinds.stickers, active: tab.kind === "stickers", onClick: () => applyGalleryFilter({ kind: "stickers" }) }),
       facetRow({ label: "只看 AI 图", count: facets.ai, active: tab.ai, onClick: () => applyGalleryFilter({ ai: !tab.ai }) }),
-      ...GALLERY_SWITCHES.map(([key, label, title]) => facetRow({
+      // Inside 「留存的原图」 every picture is kept: that row would only repeat the total.
+      ...GALLERY_SWITCHES.filter(([key]) => !(key === "kept" && tab.kept)).map(([key, label, title]) => facetRow({
         label,
         title,
         count: facets.extras?.[key] ?? null,
@@ -644,6 +657,7 @@ const galleryFacetSections = () => {
         onClick: () => applyGalleryFilter(gallerySwitchPatch(key, !tab[key])),
       })),
     ]),
+    galleryWhyFacetRows() === null ? null : galleryFacetSection("why", "为什么留存", galleryWhyFacetRows()),
     galleryFacetSection("shape", "形状", GALLERY_SHAPES.map(([shape, label, title]) => facetRow({
       label,
       title: title ?? label,
@@ -751,7 +765,7 @@ const renderMediaView = () => {
   const typed = focused?.id === "gallery-search" ? { value: focused.value, caret: focused.selectionStart } : null;
   setChildren(root, el("section", { class: tab.selecting ? "panel kb-page gallery-page selecting" : "panel kb-page gallery-page" },
     galleryToolbar(),
-    galleryKeptHint(),
+    galleryKeptHead(),
     galleryConditions(),
     el("div", { class: "kb-layout" },
       el("details", { class: "kb-facets", open: window.innerWidth > KB_MOBILE_WIDTH },

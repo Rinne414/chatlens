@@ -49,14 +49,33 @@ const libraryKeepsOriginals = (db) => hasKnowledge(db)
 // lists go into one temp table per connection (a read-only connection may
 // still write its own temp tables): asking both stores for every picture took
 // 10 s over all time on a real store, the table takes well under one.
-const keptCondition = (db) => {
+// why: what kept it. 'manual', 'group', 'ai' are recorded when it happens;
+// 'group_guess' / 'early' label originals kept before that was recorded;
+// 'local' is the prompt library's copy of an original already on this computer.
+const hasKeptBy = (db) => db.prepare("SELECT 1 FROM pragma_table_info('picture_files') WHERE name = 'kept_by'").get() !== undefined;
+
+const ensureKeptTable = (db) => {
   if (db.prepare("SELECT 1 FROM temp.sqlite_master WHERE name = 'gallery_kept'").get() === undefined) {
-    db.exec("CREATE TEMP TABLE gallery_kept (md5 TEXT PRIMARY KEY) WITHOUT ROWID");
-    db.exec("INSERT OR IGNORE INTO temp.gallery_kept SELECT md5 FROM picture_files WHERE kept = 1");
+    db.exec("CREATE TEMP TABLE gallery_kept (md5 TEXT PRIMARY KEY, why TEXT NOT NULL) WITHOUT ROWID");
+    const why = hasKeptBy(db) ? "CASE kept_by WHEN '' THEN 'early' ELSE kept_by END" : "'early'";
+    db.exec(`INSERT OR IGNORE INTO temp.gallery_kept SELECT md5, ${why} FROM picture_files WHERE kept = 1`);
     if (libraryKeepsOriginals(db)) {
-      db.exec("INSERT OR IGNORE INTO temp.gallery_kept SELECT hash FROM kb.images WHERE object_path <> ''");
+      db.exec("INSERT OR IGNORE INTO temp.gallery_kept SELECT hash, 'local' FROM kb.images WHERE object_path <> ''");
     }
   }
+};
+
+// One row in the sidebar per reason a user can tell apart.
+const WHY_BUCKETS = {
+  manual: "'manual'",
+  group: "'group', 'group_guess'",
+  ai: "'ai'",
+  local: "'local'",
+  early: "'early'",
+};
+
+const keptCondition = (db) => {
+  ensureKeptTable(db);
   // "+": the temp table is looked up per picture, never used to drive the
   // query (SQLite knows nothing about its size and picked it, which made a
   // 7-day count 15 times slower than without the switch).
@@ -77,6 +96,9 @@ const extraConditions = (db) => {
     },
   };
 };
+
+// Taken out of the kept library by the user and not emptied yet.
+const removedCondition = (db) => (hasKeptBy(db) ? "p.md5 IN (SELECT md5 FROM picture_files WHERE removed = 1)" : "0");
 
 const escapeLike = (text) => text.replace(/[\\%_]/gu, (character) => `\\${character}`);
 
@@ -141,7 +163,7 @@ const clampLimit = (limit) => {
 // search text, shape / size a bucket name, prompt / asked / file / kept switches.
 const buildFilter = (db, {
   fromUnix, toUnix, groupId = "", sender = "", kind = "images", ai = false,
-  q = "", shape = "", size = "", prompt = false, asked = false, file = false, kept = false,
+  q = "", shape = "", size = "", prompt = false, asked = false, file = false, kept = false, why = "", removed = false,
 }) => {
   if (!Number.isFinite(fromUnix) || !Number.isFinite(toUnix) || fromUnix >= toUnix) {
     throw new Error("时间范围无效。");
@@ -154,6 +176,9 @@ const buildFilter = (db, {
   }
   if (size !== "" && SIZES[size] === undefined) {
     throw new Error(`未知的大小：${size}`);
+  }
+  if (why !== "" && WHY_BUCKETS[why] === undefined) {
+    throw new Error(`未知的留存原因：${why}`);
   }
   const conditions = ["p.sent_at >= @fromUnix", "p.sent_at < @toUnix"];
   const args = { fromUnix, toUnix };
@@ -178,6 +203,13 @@ const buildFilter = (db, {
     if (on) {
       conditions.push(extras[name]);
     }
+  }
+  if (why !== "") {
+    ensureKeptTable(db);
+    conditions.push(`+p.md5 IN (SELECT md5 FROM temp.gallery_kept WHERE why IN (${WHY_BUCKETS[why]}))`);
+  }
+  if (removed) {
+    conditions.push(removedCondition(db));
   }
   const words = searchWords(q);
   if (words.length > 0) {
@@ -229,7 +261,8 @@ const occurrencesOf = (db, md5s) => db.prepare(`
 `).all({ md5s: JSON.stringify(md5s) });
 
 const filesOf = (db, md5s) => new Map(db.prepare(`
-  SELECT md5, COALESCE(thumb, '') <> '' AS hasThumb, kept, probe, gone
+  SELECT md5, COALESCE(thumb, '') <> '' AS hasThumb, kept, probe, gone,
+         ${hasKeptBy(db) ? "kept_by AS keptBy, removed" : "'' AS keptBy, 0 AS removed"}
   FROM picture_files WHERE md5 IN (SELECT value FROM json_each(@md5s))
 `).all({ md5s: JSON.stringify(md5s) }).map((row) => [row.md5, row]));
 
@@ -243,6 +276,14 @@ const knowledgeOf = (db, md5s) => {
            (SELECT COUNT(*) FROM kb.prompt_requests r WHERE r.image_hash = i.hash) AS asks
     FROM kb.images i WHERE i.hash IN (SELECT value FROM json_each(@md5s))
   `).all({ md5s: JSON.stringify(md5s) }).map((row) => [row.hash, row]));
+};
+
+// Why this tool holds the original ('' when it does not).
+const keptWhy = (file, knowledge) => {
+  if (file?.kept === 1) {
+    return file.keptBy || "early";
+  }
+  return knowledge?.hasOriginal === 1 ? "local" : "";
 };
 
 // Worth opening in the 咒语库 only when it has a prompt or an ask to show.
@@ -284,6 +325,8 @@ const describe = (row, occurrences, file, knowledge, options) => {
     posts: occurrences.length,
     hasThumb: file?.hasThumb === 1,
     kept: file?.kept === 1 || knowledge?.hasOriginal === 1,
+    keptWhy: keptWhy(file, knowledge),
+    removed: file?.removed === 1,
     // Tencent never had a picture sent only as a file, so it cannot be gone
     // there (an older picture pass may have asked anyway).
     gone: file?.gone === 1 && !row.fileName,
@@ -296,7 +339,7 @@ const describe = (row, occurrences, file, knowledge, options) => {
   };
 };
 
-const DEFAULT_OPTIONS = { groupId: "", sender: "", kind: "images", ai: false, q: "", shape: "", size: "", prompt: false, asked: false, file: false, kept: false };
+const DEFAULT_OPTIONS = { groupId: "", sender: "", kind: "images", ai: false, q: "", shape: "", size: "", prompt: false, asked: false, file: false, kept: false, why: "", removed: false };
 
 const listPictures = (db, options) => {
   const sort = SORTS.has(options.sort) ? options.sort : "recent";
@@ -380,7 +423,38 @@ const galleryFacets = (db, options) => {
     WHERE ${bySender.where} AND m.speaker <> ''
     GROUP BY value ORDER BY count DESC
   `).all(bySender.args);
-  return { kinds, ai, spread, groups, senders, ...bucketFacets(db, normalized) };
+  return { kinds, ai, spread, groups, senders, whys: whyFacets(db, normalized), ...bucketFacets(db, normalized) };
+};
+
+// Inside the kept library: how many pictures each reason kept, counted
+// without the reason's own selection.
+const whyFacets = (db, normalized) => {
+  if (!normalized.kept) {
+    return null;
+  }
+  const filter = buildFilter(db, { ...normalized, why: "" });
+  const rows = db.prepare(`
+    SELECT k.why, COUNT(DISTINCT p.md5) AS n FROM pictures p ${filter.join}
+    JOIN temp.gallery_kept k ON k.md5 = p.md5 WHERE ${filter.where} GROUP BY k.why
+  `).all(filter.args);
+  const byWhy = new Map(rows.map((row) => [row.why, row.n]));
+  return Object.fromEntries(Object.keys(WHY_BUCKETS).map((bucket) => [bucket,
+    WHY_BUCKETS[bucket].split(",").reduce((sum, name) => sum + (byWhy.get(name.trim().slice(1, -1)) ?? 0), 0)]));
+};
+
+// The whole kept library in three numbers, stickers included: what the page
+// header, the settings and the storage page all quote.
+const ORIGINAL_BYTES = "(SELECT MAX(q.size) FROM pictures q WHERE q.md5 = k.md5)";
+const keptSummary = (db) => {
+  ensureKeptTable(db);
+  const kept = db.prepare(`
+    SELECT COUNT(*) AS count, COALESCE(SUM(${ORIGINAL_BYTES}), 0) AS bytes
+    FROM temp.gallery_kept k WHERE EXISTS (SELECT 1 FROM pictures q WHERE q.md5 = k.md5)
+  `).get();
+  const removed = hasKeptBy(db)
+    ? db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${ORIGINAL_BYTES}), 0) AS bytes FROM picture_files k WHERE k.removed = 1`).get()
+    : { count: 0, bytes: 0 };
+  return { kept, removed };
 };
 
 // Everything the detail view needs about one picture.
@@ -406,6 +480,8 @@ const pictureDetail = (db, md5) => {
     ...meta,
     sticker: meta.sticker === 1,
     kept: file?.kept === 1 || knowledge?.hasOriginal === 1,
+    keptWhy: keptWhy(file, knowledge),
+    removed: file?.removed === 1,
     gone: file?.gone === 1 && !meta.fileName,
     probe: file?.probe ?? "",
     ai: file?.probe === "ai" || aiKnown,
@@ -443,4 +519,4 @@ const spreadPictures = (db, { fromUnix, toUnix }) => db.prepare(`
 
 const rangeForDays = (days, nowUnix) => ({ fromUnix: nowUnix - days * DAY_SECONDS, toUnix: nowUnix + 60 });
 
-module.exports = { listPictures, galleryFacets, pictureDetail, messageContext, spreadPictures, rangeForDays, hasKnowledge };
+module.exports = { listPictures, galleryFacets, pictureDetail, messageContext, spreadPictures, rangeForDays, hasKnowledge, keptSummary };

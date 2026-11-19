@@ -11,6 +11,7 @@ const jobs = require("./picture_jobs");
 const picturePass = require("./picture_pass");
 const service = require("./picture_service");
 const exportOps = require("./picture_export_ops");
+const unkeepOps = require("./picture_unkeep");
 
 const IMAGE_TYPES = { ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
 const STATE_TEXT = {
@@ -91,6 +92,15 @@ const handlePictureApi = async (request, response, url, { sendJson, sendError, r
       return true;
     case "POST /api/pictures/keep":
       sendJson(response, 200, await jobs.keepOriginals((await readBody(request)).md5s));
+      return true;
+    case "POST /api/pictures/unkeep":
+      sendJson(response, 200, unkeepOps.unkeep(await readBody(request)));
+      return true;
+    case "POST /api/pictures/restore":
+      sendJson(response, 200, await unkeepOps.restore(await readBody(request)));
+      return true;
+    case "POST /api/pictures/empty-removed":
+      sendJson(response, 200, await unkeepOps.empty(await readBody(request)));
       return true;
     case "POST /api/pictures/export":
       sendJson(response, 200, await exportOps.exportPictures(await readBody(request)));

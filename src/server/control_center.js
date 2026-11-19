@@ -1149,6 +1149,11 @@ const listen = (port, attempt) => {
     if (remoteDevices.getSettings().enabled) {
       remoteGateway.start();
     }
+    try {
+      picturePass.labelEarlyKept();
+    } catch (error) {
+      console.error(`labelling earlier kept originals failed: ${error.message}`);
+    }
     background.start({
       url,
       afterTick: async (tick) => {

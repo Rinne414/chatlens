@@ -12,6 +12,8 @@ const {
   upsertImage,
 } = require("./knowledge_store");
 
+const { isRemoved } = require("./media_removed");
+
 const HASH_PATTERN = /^[a-f0-9]{32}$/u;
 const IMAGE_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif", ".heic",
@@ -91,6 +93,11 @@ const persistMediaObject = (sourcePathValue, objectDirValue, hashValue) => {
   const existing = findExistingMediaObject(objectDir, hash);
   if (existing !== null) {
     return { objectPath: existing, status: "reused" };
+  }
+  // The user took this original out of the kept library: no rule or harvest
+  // copies it back (keeping it again by hand forgets the removal first).
+  if (isRemoved(objectDir, hash)) {
+    return { objectPath: null, status: "removed-by-user" };
   }
   if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
     throw new Error(`Media source file does not exist. Path=${sourcePath}`);

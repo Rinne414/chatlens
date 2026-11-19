@@ -60,7 +60,9 @@ const SCHEMA = [
     failures INTEGER NOT NULL DEFAULT 0,
     last_used INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL DEFAULT 0,
-    evicted INTEGER NOT NULL DEFAULT 0
+    evicted INTEGER NOT NULL DEFAULT 0,
+    kept_by TEXT NOT NULL DEFAULT '',
+    removed INTEGER NOT NULL DEFAULT 0
   )`,
 ];
 
@@ -72,6 +74,16 @@ const ensurePictureSchema = (db) => {
   const fileColumns = db.prepare("PRAGMA table_info(picture_files)").all().map((column) => column.name);
   if (!fileColumns.includes("evicted")) {
     db.prepare("ALTER TABLE picture_files ADD COLUMN evicted INTEGER NOT NULL DEFAULT 0").run();
+  }
+  // kept_by: what kept the original ('manual', 'group', 'ai'; 'group_guess' /
+  // 'early' for ones kept before this was recorded; 'local' while removed means
+  // it was only the prompt library's copy). removed: 1 = the user took it out of
+  // the kept library (the file waits in media-removed), 2 = and emptied it.
+  if (!fileColumns.includes("kept_by")) {
+    db.prepare("ALTER TABLE picture_files ADD COLUMN kept_by TEXT NOT NULL DEFAULT ''").run();
+  }
+  if (!fileColumns.includes("removed")) {
+    db.prepare("ALTER TABLE picture_files ADD COLUMN removed INTEGER NOT NULL DEFAULT 0").run();
   }
   const pictureColumns = db.prepare("PRAGMA table_info(pictures)").all().map((column) => column.name);
   if (!pictureColumns.includes("sticker")) {
@@ -130,7 +142,7 @@ const fileRow = (db, md5) => db.prepare("SELECT * FROM picture_files WHERE md5 =
 
 const FILE_COLUMNS = new Set([
   "thumb", "thumb_bytes", "preview", "preview_bytes", "cache", "cache_bytes",
-  "kept", "probe", "gone", "failures", "last_used", "evicted",
+  "kept", "probe", "gone", "failures", "last_used", "evicted", "kept_by", "removed",
 ]);
 
 const updateFile = (db, md5, patch, now = Math.floor(Date.now() / 1000)) => {
@@ -227,7 +239,7 @@ const needingKeep = (db, { now, limit, groupIds }) => {
   return liveCandidates(db, {
     now,
     limit,
-    where: `COALESCE(f.kept, 0) = 0 AND NOT ${KNOWN_STICKER} AND p.md5 IN (SELECT md5 FROM pictures WHERE group_id IN (${placeholders}))`,
+    where: `COALESCE(f.kept, 0) = 0 AND COALESCE(f.removed, 0) = 0 AND NOT ${KNOWN_STICKER} AND p.md5 IN (SELECT md5 FROM pictures WHERE group_id IN (${placeholders}))`,
     order: "expiresAt ASC",
     params: Object.fromEntries(groupIds.map((groupId, index) => [`g${index}`, String(groupId)])),
   });
@@ -235,7 +247,7 @@ const needingKeep = (db, { now, limit, groupIds }) => {
 
 // Every AI picture whose original is not saved yet, closest to expiry first.
 const needingKeepAi = (db, { now, limit }) =>
-  liveCandidates(db, { now, limit, where: `f.probe = 'ai' AND COALESCE(f.kept, 0) = 0 AND NOT ${KNOWN_STICKER}`, order: "expiresAt ASC" });
+  liveCandidates(db, { now, limit, where: `f.probe = 'ai' AND COALESCE(f.kept, 0) = 0 AND COALESCE(f.removed, 0) = 0 AND NOT ${KNOWN_STICKER}`, order: "expiresAt ASC" });
 
 // Pictures per media row for the chat view, in message order.
 const picturesForRows = (db, groupId, rowIds) => {
@@ -279,6 +291,22 @@ const keptBytes = (db) =>
     )
   `).get().bytes;
 
+// Originals kept before the reason was recorded: a group that keeps every
+// picture today most likely kept it (a guess, and labelled as one); the rest
+// were kept by hand or by a group setting that has since been turned off.
+const labelEarlyKept = (db, groupIds) => {
+  if (db.prepare("SELECT 1 FROM picture_files WHERE kept = 1 AND kept_by = '' LIMIT 1").get() === undefined) {
+    return 0;
+  }
+  const ids = groupIds.map(String);
+  return db.prepare(`
+    UPDATE picture_files SET kept_by = CASE
+      WHEN md5 IN (SELECT md5 FROM pictures WHERE group_id IN (SELECT value FROM json_each(?))) THEN 'group_guess'
+      ELSE 'early' END
+    WHERE kept = 1 AND kept_by = ''
+  `).run(JSON.stringify(ids)).changes;
+};
+
 // AI pictures whose original is not saved for good that Tencent still has
 // (the same rules as liveCandidates). AI pictures are a small share of
 // picture_files, so this walks those and looks up their posts; CROSS JOIN
@@ -286,7 +314,7 @@ const keptBytes = (db) =>
 // posts (measured 2026-09-30), this ~70 ms.
 const AI_UNSAVED_LIVE = `
   FROM picture_files f CROSS JOIN pictures p ON p.md5 = f.md5
-  WHERE f.probe = 'ai' AND f.kept = 0 AND f.gone = 0 AND f.failures < 3 AND p.expires_at > @now
+  WHERE f.probe = 'ai' AND f.kept = 0 AND f.removed = 0 AND f.gone = 0 AND f.failures < 3 AND p.expires_at > @now
   GROUP BY p.md5`;
 
 // Soonest expiry first; limit -1 = all.
@@ -448,6 +476,7 @@ module.exports = {
   picturesForRows,
   usage,
   keptBytes,
+  labelEarlyKept,
   expiringAi,
   countExpiringAi,
   pendingCounts,

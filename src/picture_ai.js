@@ -76,6 +76,41 @@ const attachOriginal = ({ knowledgeDbPath, md5, objectPath }) => {
   }
 };
 
+// Many at once (taking originals out of the kept library and back): one
+// connection and one transaction. An empty objectPath unlinks the original.
+// Returns the md5s the library has no row for.
+const setOriginals = ({ knowledgeDbPath, originals }) => {
+  if (originals.length === 0) {
+    return [];
+  }
+  if (!fs.existsSync(knowledgeDbPath)) {
+    return originals.map((original) => original.md5);
+  }
+  const db = knowledgeStore.openKnowledgeStore(knowledgeDbPath);
+  db.pragma("busy_timeout = 5000");
+  try {
+    return db.transaction(() => originals
+      .filter((original) => knowledgeStore.attachMediaObject(db, { hash: original.md5, objectPath: original.objectPath }).changes === 0)
+      .map((original) => original.md5))();
+  } finally {
+    db.close();
+  }
+};
+
+// Which of these the library holds an original for: md5 -> its path.
+const originalPaths = ({ knowledgeDbPath, md5s }) => {
+  if (md5s.length === 0 || !fs.existsSync(knowledgeDbPath)) {
+    return new Map();
+  }
+  const db = knowledgeStore.openKnowledgeStore(knowledgeDbPath);
+  try {
+    return new Map(db.prepare("SELECT hash, object_path AS objectPath FROM images WHERE object_path <> '' AND hash IN (SELECT value FROM json_each(?))")
+      .all(JSON.stringify(md5s)).map((row) => [row.hash, row.objectPath]));
+  } finally {
+    db.close();
+  }
+};
+
 const readChunks = ({ knowledgeDbPath, md5 }) => {
   if (!fs.existsSync(knowledgeDbPath)) {
     return null;
@@ -88,4 +123,4 @@ const readChunks = ({ knowledgeDbPath, md5 }) => {
   }
 };
 
-module.exports = { parseBytes, recordGenerated, attachOriginal, readChunks };
+module.exports = { parseBytes, recordGenerated, attachOriginal, setOriginals, originalPaths, readChunks };

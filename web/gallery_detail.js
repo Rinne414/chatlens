@@ -105,7 +105,7 @@ const galleryDetailMeta = (detail) => {
     item.size > 0 ? formatByteSize(item.size) : "",
     item.fileName
       ? `以文件发送：${item.fileName}，这里显示的是 QQ 的预览（最长边约 1280）`
-      : item.kept ? "原图已留存在本工具里" : days === null ? "" : `腾讯还保留约 ${days} 天`,
+      : item.kept ? `原图已留存在本工具里：${keptWhyText(item)}` : days === null ? "" : `腾讯还保留约 ${days} 天`,
   ].filter((part) => part !== "").join(" · ");
 };
 
@@ -133,8 +133,8 @@ const galleryDetailActions = (detail) => {
           }
         },
       }, item.fileName ? "另存 QQ 的预览…" : "另存为…"),
-    item.kept
-      ? el("span", { class: "tag", title: "原图已经存在本工具里，在画廊「留存的原图」里能找到" }, "已留存")
+    item.kept || item.removed
+      ? galleryDetailKeptNodes(item, (patch) => galleryDetailPatch(item.md5, patch))
       : item.gone || item.fileName
         ? null
         : el("button", {

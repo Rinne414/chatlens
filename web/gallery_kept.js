@@ -7,8 +7,9 @@
    with the kept filter on, so search, groups and multi-select all work. */
 
 const GALLERY_SCOPES = [
-  [false, "全部群图", "后台记下的所有群图片"],
-  [true, "留存的原图", "原图已经存在本工具里的图，腾讯删掉之后也能看"],
+  ["all", "全部群图", "后台记下的所有群图片"],
+  ["kept", "留存的原图", "原图已经存在本工具里的图，腾讯删掉之后也能看"],
+  ["removed", "取消留存的", "你从「留存的原图」里拿出去的图；文件还在，可以放回"],
 ];
 
 // Turning the library on shows all time; turning it off goes back to the
@@ -29,30 +30,19 @@ const galleryKeptPatch = (on) => {
 const gallerySwitchPatch = (key, on) => (key === "kept" && !on ? galleryKeptPatch(false) : { [key]: on });
 
 const galleryScopeTabs = () => el("div", { class: "wall-modes gallery-scope", role: "group", "aria-label": "看哪些图" },
-  GALLERY_SCOPES.map(([kept, label, title]) => el("button", {
-    class: app.gallery.kept === kept ? "wall-mode active" : "wall-mode",
-    type: "button",
-    title,
-    "aria-pressed": String(app.gallery.kept === kept),
-    onclick: () => {
-      if (app.gallery.kept !== kept) {
-        applyGalleryFilter(galleryKeptPatch(kept));
-      }
-    },
-  }, label)));
-
-// One line, only inside the library: what it is and how it differs from 另存.
-const galleryKeptHint = () => (app.gallery.kept
-  ? el("p", { class: "kb-meta gallery-kept-hint" },
-    "这里是原图已经存在本工具里的图，腾讯删掉之后也能看。要把图放进你自己的文件夹，点开图按「另存为」，或「多选」后「另存到文件夹」。",
-    el("button", {
-      class: "btn small desktop-action",
+  // 取消留存的 only shows while there are some, or while it is open.
+  GALLERY_SCOPES.filter(([scope]) => scope !== "removed" || galleryScope() === "removed" || (keptUi.summary?.removed.count ?? 0) > 0)
+    .map(([scope, label, title]) => el("button", {
+      class: galleryScope() === scope ? "wall-mode active" : "wall-mode",
       type: "button",
-      title: "留存的原图在程序文件夹的 store/media-objects 里，文件名是图片的编号（md5），不好认；找图还是在这一页方便",
-      onclick: () => api("/api/storage/open", { method: "POST", body: JSON.stringify({ category: "knowledge-media" }) })
-        .catch(() => alert("还没有留存过原图，所以还没有这个文件夹。")),
-    }, "打开留存文件夹"))
-  : null);
+      title,
+      "aria-pressed": String(galleryScope() === scope),
+      onclick: () => {
+        if (galleryScope() !== scope) {
+          applyGalleryFilter(galleryScopePatch(scope));
+        }
+      },
+    }, label)));
 
 const galleryKeptEmptyText = () => [
   "这个范围里还没有留存的原图。",
@@ -64,6 +54,7 @@ const galleryKeptEmptyText = () => [
 const openGalleryKept = () => {
   replaceGallery({
     ...galleryKeptPatch(true),
+    removed: false, why: "",
     groupId: "", sender: "", senderLabel: "", q: "", shape: "", size: "", ai: false, prompt: false, asked: false, file: false,
     kind: "images", detail: null,
   });

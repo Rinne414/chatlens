@@ -10,6 +10,8 @@ const path = require("node:path");
 const Database = require("better-sqlite3-multiple-ciphers");
 const state = require("./toolkit_state");
 const gallery = require("../gallery_store");
+const pictureService = require("./picture_service");
+const { removedDirFor } = require("../media_removed");
 
 const storePath = () => path.join(state.toolRoot, "store", "messages.db");
 const knowledgePath = () => path.join(state.toolRoot, "store", "knowledge.db");
@@ -55,6 +57,8 @@ const filterFrom = (params) => ({
   asked: params.get("asked") === "1",
   file: params.get("file") === "1",
   kept: params.get("kept") === "1",
+  why: params.get("why") ?? "",
+  removed: params.get("removed") === "1",
 });
 
 const list = (params) => withReadOnlyStore((db) => gallery.listPictures(db, {
@@ -68,6 +72,17 @@ const facets = (params) => withReadOnlyStore((db) => gallery.galleryFacets(db, f
 
 const detail = (params) => withReadOnlyStore((db) => gallery.pictureDetail(db, String(params.get("md5") ?? "").toLowerCase()));
 
+// The kept library's numbers plus where the files are and which rules are on.
+const keptSummary = () => {
+  const pictures = pictureService.settings();
+  return {
+    ...withReadOnlyStore((db) => gallery.keptSummary(db)),
+    folder: pictureService.objectDir,
+    removedFolder: removedDirFor(pictureService.objectDir),
+    rules: { keepAllGroups: pictures.keepAllGroups.length, keepAi: pictures.keepAi === true },
+  };
+};
+
 const context = (params) => withReadOnlyStore((db) => gallery.messageContext(db, {
   groupId: params.get("groupId"),
   rowId: params.get("rowId"),
@@ -79,7 +94,7 @@ const handleGalleryApi = (request, response, url, { sendJson, sendError }) => {
   if (request.method !== "GET") {
     return false;
   }
-  const routes = { "/api/gallery": list, "/api/gallery/facets": facets, "/api/gallery/picture": detail, "/api/gallery/context": context };
+  const routes = { "/api/gallery": list, "/api/gallery/facets": facets, "/api/gallery/picture": detail, "/api/gallery/context": context, "/api/gallery/kept-summary": keptSummary };
   const handler = routes[url.pathname];
   if (handler === undefined) {
     return false;
@@ -96,7 +111,7 @@ const handleGalleryApi = (request, response, url, { sendJson, sendError }) => {
 // The list and its facet counts over a long range (1-2 s measured on 20k+
 // pictures) run in the read worker (read_worker.js); the query comes as a
 // plain object there.
-const HEAVY_ROUTES = { "/api/gallery": list, "/api/gallery/facets": facets };
+const HEAVY_ROUTES = { "/api/gallery": list, "/api/gallery/facets": facets, "/api/gallery/kept-summary": keptSummary };
 const isHeavyGalleryRoute = (pathname) => Object.hasOwn(HEAVY_ROUTES, pathname);
 const runHeavyGalleryQuery = (pathname, query) => HEAVY_ROUTES[pathname](new URLSearchParams(query));
 

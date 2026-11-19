@@ -13,6 +13,7 @@ const pictureFetch = require("../picture_fetch");
 const pictureAi = require("../picture_ai");
 const knowledge = require("./knowledge_ops");
 const { persistMediaObject } = require("../media_object_store");
+const removed = require("../media_removed");
 
 const MD5 = /^[a-f0-9]{32}$/u;
 const SIZES = new Set(["thumb", "preview", "original"]);
@@ -105,11 +106,24 @@ const resolvePicture = async (md5, size) => {
 
 let tempCounter = 0;
 
-const keepOne = async (md5) => {
+// by: what asked for it ('manual', 'group', 'ai'), shown as the reason in the
+// kept library. Only a manual keep brings back a picture the user removed.
+const keepOne = async (md5, by = "manual") => {
   const row = store.fileRow(db(), md5);
   const kept = service.keptPath(row, md5);
   if (kept !== null) {
     return { md5, status: "kept", objectPath: kept };
+  }
+  if (by === "manual") {
+    // The removed copy is the original: put back, it is kept, with nothing to
+    // download (Tencent may have deleted the picture long ago).
+    const back = removed.moveBack(service.objectDir, md5);
+    removed.forget(service.objectDir, md5);
+    if (back !== null) {
+      store.updateFile(db(), md5, { kept: 1, kept_by: by, removed: 0, cache: "", cache_bytes: 0 });
+      pictureAi.attachOriginal({ knowledgeDbPath: service.knowledgeDbPath, md5, objectPath: back });
+      return { md5, status: "kept", objectPath: back };
+    }
   }
   // The prompt library's copy first: nothing to download, and it is still
   // there for a picture Tencent already deleted.
@@ -132,7 +146,7 @@ const keepOne = async (md5) => {
     if (cached !== null) {
       fs.rmSync(cached, { force: true });
     }
-    store.updateFile(db(), md5, { kept: 1, cache: "", cache_bytes: 0 });
+    store.updateFile(db(), md5, { kept: 1, kept_by: by, removed: 0, cache: "", cache_bytes: 0 });
     pictureAi.attachOriginal({ knowledgeDbPath: service.knowledgeDbPath, md5, objectPath: persisted.objectPath });
     return { md5, status: "kept", objectPath: persisted.objectPath };
   } finally {
@@ -192,7 +206,7 @@ const keepOriginals = async (md5s) => {
   const wanted = [...new Set((Array.isArray(md5s) ? md5s : []).map(String).filter((md5) => MD5.test(md5)))].slice(0, MAX_KEEP_PER_REQUEST);
   const results = [];
   for (const md5 of wanted) {
-    results.push(await keepOne(md5));
+    results.push(await keepOne(md5, "manual"));
   }
   const tally = results.reduce((counts, item) => ({ ...counts, [item.status]: (counts[item.status] ?? 0) + 1 }), {});
   return { requested: wanted.length, tally, results };

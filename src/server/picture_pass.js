@@ -69,8 +69,8 @@ const drain = async (label, nextBatch, work, deadline) => {
   }
 };
 
-const keepWork = async (picture) => {
-  const result = await jobs.keepOne(picture.md5);
+const keepWorkBy = (by) => async (picture) => {
+  const result = await jobs.keepOne(picture.md5, by);
   if (result.status === "kept") return "ok";
   if (result.status === "gone") return "gone";
   return "failed";
@@ -136,11 +136,11 @@ const runPass = async ({ reason = "tick" } = {}) => {
     const now = service.unix;
     await drain("ai", () => store.needingProbe(db(), { now: now(), limit: 40 }), jobs.probeOne, deadline);
     await drain("previews", () => store.needingPreviews(db(), { now: now(), limit: 20 }), jobs.previewOne, deadline);
-    await drain("keep", () => store.needingKeep(db(), { now: now(), limit: 10, groupIds: current.keepAllGroups }), keepWork, deadline);
+    await drain("keep", () => store.needingKeep(db(), { now: now(), limit: 10, groupIds: current.keepAllGroups }), keepWorkBy("group"), deadline);
     await drain("thumbs", () => store.needingThumbs(db(), { now: now(), limit: 60 }), jobs.thumbOne, deadline);
     // After the thumbnails, so a big backlog of AI originals never holds up new pictures.
     if (current.keepAi) {
-      await drain("keep", () => store.needingKeepAi(db(), { now: now(), limit: 10 }), keepWork, deadline);
+      await drain("keep", () => store.needingKeepAi(db(), { now: now(), limit: 10 }), keepWorkBy("ai"), deadline);
     }
     enforceBudget();
   } catch (error) {
@@ -155,6 +155,9 @@ const runPass = async ({ reason = "tick" } = {}) => {
 const stop = () => {
   pass.stopRequested = true;
 };
+
+// Once per start: originals kept before the reason was recorded get one.
+const labelEarlyKept = () => store.labelEarlyKept(db(), service.settings().keepAllGroups);
 
 const status = () => {
   const current = service.settings();
@@ -202,4 +205,4 @@ const workflow = (md5) => {
   return pictureAi.readChunks({ knowledgeDbPath: service.knowledgeDbPath, md5 });
 };
 
-module.exports = { runPass, stop, status, expiring, workflow, enforceBudget, runLimited };
+module.exports = { runPass, stop, status, expiring, workflow, enforceBudget, runLimited, labelEarlyKept };
