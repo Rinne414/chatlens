@@ -8,6 +8,7 @@
 const { hktToUnix } = require("./review_store");
 const { relationMap } = require("./group_relations");
 const { withTopicStats } = require("./topic_stats");
+const { KNOWN_STICKER } = require("./picture_store");
 
 const DAY_SECONDS = 86400;
 const BEIJING_OFFSET_SECONDS = 8 * 3600;
@@ -82,7 +83,7 @@ const rangeTotals = (db, groupId, { fromUnix, toUnix }) => {
   `).get(groupId, fromUnix, toUnix);
   const pictures = db.prepare(`
     SELECT COUNT(*) AS pictures, COALESCE(SUM(CASE WHEN f.probe = 'ai' THEN 1 ELSE 0 END), 0) AS ai
-    FROM (SELECT DISTINCT md5 FROM pictures WHERE group_id = ? AND sent_at >= ? AND sent_at < ? AND sticker = 0) d
+    FROM (SELECT DISTINCT p.md5 FROM pictures p WHERE p.group_id = ? AND p.sent_at >= ? AND p.sent_at < ? AND NOT ${KNOWN_STICKER}) d
     LEFT JOIN picture_files f ON f.md5 = d.md5
   `).get(groupId, fromUnix, toUnix);
   const first = db.prepare("SELECT MIN(sent_at) AS first FROM messages WHERE group_id = ?").get(groupId).first;
@@ -104,7 +105,7 @@ const picturePosters = (db, groupId, { fromUnix, toUnix }) => db.prepare(`
   FROM pictures p
   JOIN messages m ON m.group_id = p.group_id AND m.row_id = p.row_id
   LEFT JOIN picture_files f ON f.md5 = p.md5
-  WHERE p.group_id = ? AND p.sent_at >= ? AND p.sent_at < ? AND p.sticker = 0 AND m.speaker <> ''
+  WHERE p.group_id = ? AND p.sent_at >= ? AND p.sent_at < ? AND NOT ${KNOWN_STICKER} AND m.speaker <> ''
   GROUP BY CASE WHEN m.speaker_uin <> '' THEN m.speaker_uin ELSE m.speaker END
   ORDER BY count DESC
 `).all(groupId, fromUnix, toUnix);

@@ -82,6 +82,8 @@ const ensurePictureSchema = (db) => {
       db.prepare(`ALTER TABLE pictures ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`).run();
     }
   }
+  // After the column upgrade above: an old table has no sticker column yet.
+  db.prepare("CREATE INDEX IF NOT EXISTS idx_pictures_sticker_md5 ON pictures(md5) WHERE sticker = 1").run();
   return db;
 };
 
@@ -202,6 +204,12 @@ const needingThumbs = (db, { now, limit }) =>
 const needingPreviews = (db, { now, limit }) =>
   liveCandidates(db, { now, limit, where: PREVIEW_WANTED, order: "sentAt DESC" });
 
+// The sticker flag is per posting: the same file is a sticker when sent from
+// the sticker panel and a plain picture when pasted. Sent as a sticker even
+// once, it is a sticker everywhere (measured: 4,773 such files, mostly small
+// reaction pictures posted dozens of times). For a row of `pictures p`.
+const KNOWN_STICKER = "EXISTS (SELECT 1 FROM pictures st WHERE st.md5 = p.md5 AND st.sticker = 1)";
+
 // Big enough to be a generated image; measured: no smaller file carried a
 // prompt. PNG (1001) from 256 KB, JPG/WebP (1000/1002) from 512 KB.
 const PROBE_WHERE = `COALESCE(f.probe, '') = '' AND p.sticker = 0 AND (
@@ -219,7 +227,7 @@ const needingKeep = (db, { now, limit, groupIds }) => {
   return liveCandidates(db, {
     now,
     limit,
-    where: `COALESCE(f.kept, 0) = 0 AND p.sticker = 0 AND p.md5 IN (SELECT md5 FROM pictures WHERE group_id IN (${placeholders}))`,
+    where: `COALESCE(f.kept, 0) = 0 AND NOT ${KNOWN_STICKER} AND p.md5 IN (SELECT md5 FROM pictures WHERE group_id IN (${placeholders}))`,
     order: "expiresAt ASC",
     params: Object.fromEntries(groupIds.map((groupId, index) => [`g${index}`, String(groupId)])),
   });
@@ -227,7 +235,7 @@ const needingKeep = (db, { now, limit, groupIds }) => {
 
 // Every AI picture whose original is not saved yet, closest to expiry first.
 const needingKeepAi = (db, { now, limit }) =>
-  liveCandidates(db, { now, limit, where: "f.probe = 'ai' AND COALESCE(f.kept, 0) = 0 AND p.sticker = 0", order: "expiresAt ASC" });
+  liveCandidates(db, { now, limit, where: `f.probe = 'ai' AND COALESCE(f.kept, 0) = 0 AND NOT ${KNOWN_STICKER}`, order: "expiresAt ASC" });
 
 // Pictures per media row for the chat view, in message order.
 const picturesForRows = (db, groupId, rowIds) => {
@@ -434,6 +442,7 @@ module.exports = {
   needingThumbs,
   needingPreviews,
   needingProbe,
+  KNOWN_STICKER,
   needingKeep,
   needingKeepAi,
   picturesForRows,

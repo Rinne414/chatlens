@@ -88,7 +88,7 @@ const todayCounts = (db, nowUnix) => {
   // scans every picture (measured 0.2 s) instead of today's few hundred.
   const pictures = db.prepare(`
     SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN f.probe = 'ai' THEN 1 ELSE 0 END), 0) AS ai
-    FROM (SELECT DISTINCT md5 FROM pictures INDEXED BY idx_pictures_time WHERE sent_at >= ? AND sticker = 0) d
+    FROM (SELECT DISTINCT p.md5 FROM pictures p INDEXED BY idx_pictures_time WHERE p.sent_at >= ? AND NOT ${pictureStore.KNOWN_STICKER}) d
     LEFT JOIN picture_files f ON f.md5 = d.md5
   `).get(start);
   return { messages, pictures: pictures.total, aiPictures: pictures.ai };

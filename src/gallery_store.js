@@ -11,6 +11,8 @@
 // attached as `kb`, AI pictures found in QQ's local originals count as AI too
 // (not only the ones the picture pass probed on Tencent).
 
+const { KNOWN_STICKER } = require("./picture_store");
+
 const DAY_SECONDS = 86400;
 const MAX_LIMIT = 240;
 const DEFAULT_LIMIT = 120;
@@ -160,7 +162,7 @@ const buildFilter = (db, {
     args.groupId = String(groupId);
   }
   if (kind !== "all") {
-    conditions.push(kind === "stickers" ? "p.sticker = 1" : "p.sticker = 0");
+    conditions.push(kind === "stickers" ? KNOWN_STICKER : `NOT ${KNOWN_STICKER}`);
   }
   if (ai) {
     conditions.push(aiCondition(db));
@@ -353,8 +355,8 @@ const galleryFacets = (db, options) => {
     db.prepare(`SELECT COUNT(DISTINCT p.md5) AS n FROM pictures p ${filter.join} WHERE ${filter.where} ${extra}`).get(filter.args).n;
   const allKinds = buildFilter(db, { ...normalized, kind: "all", ai: false });
   const kinds = {
-    images: distinct(allKinds, "AND p.sticker = 0"),
-    stickers: distinct(allKinds, "AND p.sticker = 1"),
+    images: distinct(allKinds, `AND NOT ${KNOWN_STICKER}`),
+    stickers: distinct(allKinds, `AND ${KNOWN_STICKER}`),
   };
   const noAi = buildFilter(db, { ...normalized, ai: false });
   const ai = distinct(noAi, `AND ${aiCondition(db)}`);
@@ -435,7 +437,7 @@ const messageContext = (db, { groupId, rowId, sentAt }) => {
 // than one group (counting all its postings), for 热点.
 const spreadPictures = (db, { fromUnix, toUnix }) => db.prepare(`
   SELECT p.md5 FROM pictures p
-  WHERE p.sent_at >= ? AND p.sent_at < ? AND p.sticker = 0
+  WHERE p.sent_at >= ? AND p.sent_at < ? AND NOT ${KNOWN_STICKER}
   GROUP BY p.md5 HAVING ${SPREAD_GROUPS} > 1
 `).all(fromUnix, toUnix).map((row) => row.md5);
 

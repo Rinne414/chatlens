@@ -65,6 +65,19 @@ test("one tile per picture, newest posting first, with its spread", () => {
   });
 });
 
+test("a picture sent as a sticker even once is a sticker everywhere", () => {
+  withStore((db) => {
+    // B was pasted as a plain picture in m3; here the same file comes from the sticker panel.
+    db.prepare("INSERT INTO messages (group_id, row_id, sent_at, speaker, speaker_uin, text, is_media) VALUES ('2', 'm5', ?, 'Bob', '10002', '', 1)").run(NOW - 50);
+    db.prepare(`INSERT INTO pictures (group_id, row_id, seq, md5, width, height, size, format, sent_at, expires_at, sticker)
+      VALUES ('2', 'm5', 1000, ?, 1024, 1024, 1000, 1001, ?, ?, 1)`).run(B, NOW - 50, NOW + 86400 * 30);
+    assert.deepEqual(gallery.listPictures(db, { ...range, kind: "images" }).items.map((item) => item.md5), [A]);
+    assert.deepEqual(gallery.listPictures(db, { ...range, kind: "stickers" }).items.map((item) => item.md5).sort(), [B, S].sort());
+    assert.deepEqual(gallery.listPictures(db, { ...range, kind: "images", kept: true }).items, []);
+    assert.deepEqual(gallery.galleryFacets(db, range).kinds, { images: 1, stickers: 2 });
+  });
+});
+
 test("stickers are their own kind", () => {
   withStore((db) => {
     assert.deepEqual(gallery.listPictures(db, { ...range, kind: "stickers" }).items.map((item) => item.md5), [S]);
