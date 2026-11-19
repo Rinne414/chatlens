@@ -82,3 +82,4 @@ html:not(.phone) .gallery-page .kb-results-head { position: sticky; top: 0; z-in
 .gallery-save-target code, .picture-export-path { font-size: 12px; word-break: break-all; }
 
 .gallery-kept-head:empty { display: none; }
+#gallery-facets-body.is-stale .facet-count, #gallery-facets-body.is-stale .kb-facet-count { opacity: .35; }

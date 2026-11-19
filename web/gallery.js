@@ -126,6 +126,8 @@ const loadGalleryFacets = async () => {
     return;
   }
   replaceGallery({ facetsKey: key });
+  // The numbers on screen belong to the filter before this one until the new ones arrive.
+  document.getElementById("gallery-facets-body")?.classList.add("is-stale");
   try {
     const facets = await api(`/api/gallery/facets?${key}`);
     if (app.gallery.facetsKey === key) {
@@ -135,7 +137,8 @@ const loadGalleryFacets = async () => {
     replaceGallery({ facets: { unavailable: true } });
   }
   const node = document.getElementById("gallery-facets-body");
-  if (node !== null) {
+  if (node !== null && app.gallery.facetsKey === key) {
+    node.classList.remove("is-stale");
     setChildren(node, galleryFacetSections());
   }
 };
@@ -241,7 +244,9 @@ VIEW_RELOADERS.media = () => {
   replaceGallery({ facets: null, facetsKey: "" });
   loadGallery();
 };
-VIEW_LEAVE_HOOKS.push(() => replaceGallery({ detail: null }));
+// A selection in progress is kept across pages; an empty multi-select is not
+// (coming back to a selection bar with nothing in it looked like a stuck mode).
+VIEW_LEAVE_HOOKS.push(() => replaceGallery({ detail: null, ...(app.gallery.selected.size === 0 ? { selecting: false, lastPicked: null } : {}) }));
 
 /* ---------- tiles ---------- */
 

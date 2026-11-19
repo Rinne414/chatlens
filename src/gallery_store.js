@@ -362,84 +362,144 @@ const listPictures = (db, options) => {
   };
 };
 
-// Counts for the sidebar under the current filter; each dimension is counted
-// without its own selection, so the other options stay visible.
-// Distinct pictures per bucket. Shape and size are counted without their own
-// selection (picking another bucket replaces it); each switch adds to the
-// others, so it is counted with the others as they are and itself off.
-// Counts that end up with the same filter (the usual case: nothing chosen)
-// share one pass.
-const bucketFacets = (db, normalized) => {
-  const counts = [
-    ...Object.entries(SHAPES).map(([bucket, condition]) => ({ dimension: "shapes", bucket, condition, options: { ...normalized, shape: "" } })),
-    ...Object.entries(SIZES).map(([bucket, condition]) => ({ dimension: "sizes", bucket, condition, options: { ...normalized, size: "" } })),
-    ...Object.entries(extraConditions(db)).map(([bucket, condition]) => ({ dimension: "extras", bucket, condition, options: { ...normalized, [bucket]: false } })),
-  ];
-  const passes = new Map();
-  for (const count of counts) {
-    const key = JSON.stringify(count.options);
-    passes.set(key, [...(passes.get(key) ?? []), count]);
-  }
-  const result = { shapes: {}, sizes: {}, extras: {} };
-  for (const group of passes.values()) {
-    const filter = buildFilter(db, group[0].options);
-    const columns = group.map((count, index) => `COUNT(DISTINCT CASE WHEN ${count.condition} THEN p.md5 END) AS c${index}`);
-    const row = db.prepare(`SELECT ${columns.join(", ")} FROM pictures p ${filter.join} WHERE ${filter.where}`).get(filter.args);
-    group.forEach((count, index) => {
-      result[count.dimension][count.bucket] = row[`c${index}`];
-    });
-  }
-  return result;
+// Counts for the sidebar under the current filter. Each dimension is counted
+// without its own selection, so the other options stay visible (picking
+// another shape replaces the shape; each switch adds to the others).
+//
+// Ten counts each walking every posting again took 7-11 s over all time
+// (240k postings, measured 2026-11-20). The postings in the window are
+// gathered once, then one row per picture with every yes/no the counts need,
+// and the counts read that small table.
+// Each yes/no as one set the pictures are looked up in (asking per picture
+// took 9 s for 240k of them; the sets take well under one).
+const pictureFlags = (db) => {
+  const kb = hasKnowledge(db);
+  const probed = "p.md5 IN (SELECT md5 FROM picture_files WHERE probe = 'ai')";
+  return {
+    sticker: "p.md5 IN (SELECT md5 FROM pictures WHERE sticker = 1)",
+    ai: kb ? `(${probed} OR p.md5 IN (SELECT hash FROM kb.images WHERE generator NOT IN ('stripped', 'unknown')))` : probed,
+    hasPrompt: kb ? "p.md5 IN (SELECT hash FROM kb.images WHERE prompt <> '')" : "0",
+    asked: kb ? "p.md5 IN (SELECT image_hash FROM kb.prompt_requests)" : "0",
+  };
+};
+
+// "Posted in more than one group" counts every posting ever. When the window
+// already holds every posting, the window's own count is that number.
+const windowHoldsEverything = (db, { fromUnix, toUnix }) => {
+  const span = db.prepare("SELECT MIN(sent_at) AS first, MAX(sent_at) AS last FROM pictures").get();
+  return span.first === null || (fromUnix <= span.first && toUnix > span.last);
+};
+
+const buildFacetTables = (db, normalized) => {
+  // What every count shares: the time window, the search words, and the place
+  // (kept library / removed list). Everything else is a column or a posting.
+  const base = buildFilter(db, { ...DEFAULT_OPTIONS, fromUnix: normalized.fromUnix, toUnix: normalized.toUnix, q: normalized.q, kept: normalized.kept, removed: normalized.removed, kind: "all" });
+  ensureKeptTable(db);
+  db.exec("DROP TABLE IF EXISTS temp.facet_post; DROP TABLE IF EXISTS temp.facet_pic");
+  db.prepare(`
+    CREATE TEMP TABLE facet_post AS
+    SELECT p.md5, p.group_id AS groupId, p.width, p.height, p.file_name,
+           CASE WHEN m.speaker_uin <> '' THEN m.speaker_uin ELSE COALESCE(m.speaker, '') END AS sender,
+           COALESCE(m.speaker, '') AS speaker
+    FROM pictures p LEFT JOIN messages m ON m.group_id = p.group_id AND m.row_id = p.row_id
+    WHERE ${base.where}
+  `).run(base.args);
+  // Postings are looked up by picture for the group, sender and sent-as-file
+  // choices, and for the sent-as-file count.
+  db.exec("CREATE INDEX temp.facet_post_md5 ON facet_post(md5)");
+  db.exec(`
+    DROP TABLE IF EXISTS temp.facet_grouped;
+    CREATE TEMP TABLE facet_grouped AS
+    SELECT md5, MAX(width) AS width, MAX(height) AS height, MAX(file_name) AS file_name, COUNT(DISTINCT groupId) AS groupsInWindow
+    FROM temp.facet_post GROUP BY md5
+  `);
+  const flags = pictureFlags(db);
+  const spread = windowHoldsEverything(db, normalized) ? "p.groupsInWindow > 1" : `${SPREAD_GROUPS} > 1`;
+  db.exec(`
+    CREATE TEMP TABLE facet_pic AS
+    SELECT p.md5, p.width, p.height, p.file_name,
+           ${flags.sticker} AS sticker, ${flags.ai} AS ai, ${flags.hasPrompt} AS hasPrompt, ${flags.asked} AS asked,
+           ${spread} AS spread,
+           COALESCE((SELECT k.why FROM temp.gallery_kept k WHERE k.md5 = p.md5), '') AS why
+    FROM temp.facet_grouped p;
+    CREATE UNIQUE INDEX temp.facet_pic_md5 ON facet_pic(md5);
+  `);
+};
+
+// The picture-level choices as conditions over facet_pic p; `omit` names the
+// ones a count leaves out.
+const pictureConditions = (normalized, omit = []) => {
+  const on = (name) => !omit.includes(name);
+  return [
+    on("kind") && normalized.kind !== "all" ? `p.sticker = ${normalized.kind === "stickers" ? 1 : 0}` : null,
+    on("ai") && normalized.ai ? "p.ai = 1" : null,
+    on("shape") && normalized.shape !== "" ? `(${SHAPES[normalized.shape]})` : null,
+    on("size") && normalized.size !== "" ? `(${SIZES[normalized.size]})` : null,
+    on("prompt") && normalized.prompt ? "p.hasPrompt = 1" : null,
+    on("asked") && normalized.asked ? "p.asked = 1" : null,
+    on("why") && normalized.why !== "" ? `p.why IN (${WHY_BUCKETS[normalized.why]})` : null,
+  ].filter((condition) => condition !== null);
+};
+
+// The posting-level choices (group, sender) over facet_post x.
+const postingConditions = (normalized, omit = []) => [
+  !omit.includes("groupId") && normalized.groupId !== "" ? "x.groupId = @groupId" : null,
+  !omit.includes("sender") && normalized.sender !== "" ? "x.sender = @sender" : null,
+  !omit.includes("file") && normalized.file ? "x.file_name <> ''" : null,
+].filter((condition) => condition !== null);
+
+// `posting`: one more condition the same posting must meet.
+const facetWhere = (normalized, omit = [], posting = null) => {
+  const postings = [...postingConditions(normalized, omit), ...(posting === null ? [] : [posting])];
+  const conditions = [
+    ...pictureConditions(normalized, omit),
+    postings.length === 0 ? null : `EXISTS (SELECT 1 FROM temp.facet_post x WHERE x.md5 = p.md5 AND ${postings.join(" AND ")})`,
+  ].filter((condition) => condition !== null);
+  return conditions.length === 0 ? "1" : conditions.join(" AND ");
 };
 
 const galleryFacets = (db, options) => {
   const normalized = { ...DEFAULT_OPTIONS, ...options };
-  const distinct = (filter, extra = "") =>
-    db.prepare(`SELECT COUNT(DISTINCT p.md5) AS n FROM pictures p ${filter.join} WHERE ${filter.where} ${extra}`).get(filter.args).n;
-  const allKinds = buildFilter(db, { ...normalized, kind: "all", ai: false });
-  const kinds = {
-    images: distinct(allKinds, `AND NOT ${KNOWN_STICKER}`),
-    stickers: distinct(allKinds, `AND ${KNOWN_STICKER}`),
+  buildFilter(db, normalized);
+  buildFacetTables(db, normalized);
+  const args = { groupId: String(normalized.groupId), sender: String(normalized.sender) };
+  const used = (sql) => Object.fromEntries(Object.entries(args).filter(([name]) => sql.includes(`@${name}`)));
+  const run = (sql) => db.prepare(sql).all(used(sql));
+  const count = (omit, extra = "1") => run(`SELECT COUNT(*) AS n FROM temp.facet_pic p WHERE ${facetWhere(normalized, omit)} AND ${extra}`)[0].n;
+  const buckets = (choices, omit) => {
+    const columns = Object.entries(choices).map(([bucket, condition]) => `COUNT(CASE WHEN ${condition} THEN 1 END) AS "${bucket}"`);
+    return run(`SELECT ${columns.join(", ")} FROM temp.facet_pic p WHERE ${facetWhere(normalized, omit)}`)[0];
   };
-  const noAi = buildFilter(db, { ...normalized, ai: false });
-  const ai = distinct(noAi, `AND ${aiCondition(db)}`);
-  const current = buildFilter(db, normalized);
-  const spread = db.prepare(`
-    SELECT COUNT(*) AS n FROM (
-      SELECT p.md5 FROM pictures p ${current.join} WHERE ${current.where}
-      GROUP BY p.md5 HAVING ${SPREAD_GROUPS} > 1)
-  `).get(current.args).n;
-  const byGroup = buildFilter(db, { ...normalized, groupId: "" });
-  const groups = db.prepare(`
-    SELECT p.group_id AS value, COALESCE(g.name, '') AS label, COUNT(DISTINCT p.md5) AS count
-    FROM pictures p ${byGroup.join} LEFT JOIN group_names g ON g.group_id = p.group_id
-    WHERE ${byGroup.where} GROUP BY p.group_id ORDER BY count DESC
-  `).all(byGroup.args);
-  const bySender = buildFilter(db, { ...normalized, sender: "" });
-  const senders = db.prepare(`
-    SELECT CASE WHEN m.speaker_uin <> '' THEN m.speaker_uin ELSE m.speaker END AS value,
-           MAX(m.speaker) AS label, COUNT(DISTINCT p.md5) AS count
-    FROM pictures p JOIN messages m ON m.group_id = p.group_id AND m.row_id = p.row_id
-    WHERE ${bySender.where} AND m.speaker <> ''
+  const perPosting = (value, label, omit, extra = "1") => run(`
+    SELECT ${value} AS value, ${label} AS label, COUNT(DISTINCT x.md5) AS count
+    FROM temp.facet_post x JOIN temp.facet_pic p ON p.md5 = x.md5 ${value === "x.groupId" ? "LEFT JOIN group_names g ON g.group_id = x.groupId" : ""}
+    WHERE ${[...pictureConditions(normalized), ...postingConditions(normalized, omit), extra].join(" AND ")}
     GROUP BY value ORDER BY count DESC
-  `).all(bySender.args);
-  return { kinds, ai, spread, groups, senders, whys: whyFacets(db, normalized), ...bucketFacets(db, normalized) };
-};
-
-// Inside the kept library: how many pictures each reason kept, counted
-// without the reason's own selection.
-const whyFacets = (db, normalized) => {
-  if (!normalized.kept) {
-    return null;
-  }
-  const filter = buildFilter(db, { ...normalized, why: "" });
-  const rows = db.prepare(`
-    SELECT k.why, COUNT(DISTINCT p.md5) AS n FROM pictures p ${filter.join}
-    JOIN temp.gallery_kept k ON k.md5 = p.md5 WHERE ${filter.where} GROUP BY k.why
-  `).all(filter.args);
-  const byWhy = new Map(rows.map((row) => [row.why, row.n]));
-  return Object.fromEntries(Object.keys(WHY_BUCKETS).map((bucket) => [bucket,
-    WHY_BUCKETS[bucket].split(",").reduce((sum, name) => sum + (byWhy.get(name.trim().slice(1, -1)) ?? 0), 0)]));
+  `);
+  const whys = normalized.kept
+    ? new Map(run(`SELECT p.why, COUNT(*) AS n FROM temp.facet_pic p WHERE ${facetWhere(normalized, ["why"])} GROUP BY p.why`).map((row) => [row.why, row.n]))
+    : null;
+  return {
+    kinds: {
+      images: count(["kind", "ai"], "p.sticker = 0"),
+      stickers: count(["kind", "ai"], "p.sticker = 1"),
+    },
+    ai: count(["ai"], "p.ai = 1"),
+    spread: count([], "p.spread = 1"),
+    groups: perPosting("x.groupId", "COALESCE(g.name, '')", ["groupId"]),
+    senders: perPosting("x.sender", "MAX(x.speaker)", ["sender"], "x.speaker <> ''"),
+    // Inside the kept library: how many pictures each reason kept.
+    whys: whys === null ? null : Object.fromEntries(Object.keys(WHY_BUCKETS).map((bucket) => [bucket,
+      WHY_BUCKETS[bucket].split(",").reduce((sum, name) => sum + (whys.get(name.trim().slice(1, -1)) ?? 0), 0)])),
+    shapes: buckets(SHAPES, ["shape"]),
+    sizes: buckets(SIZES, ["size"]),
+    extras: {
+      prompt: count(["prompt"], "p.hasPrompt = 1"),
+      asked: count(["asked"], "p.asked = 1"),
+      file: run(`SELECT COUNT(*) AS n FROM temp.facet_pic p WHERE ${facetWhere(normalized, ["file"], "x.file_name <> ''")}`)[0].n,
+      kept: count([], "p.why <> ''"),
+    },
+  };
 };
 
 // The whole kept library in three numbers, stickers included: what the page

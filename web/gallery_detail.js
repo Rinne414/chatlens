@@ -95,6 +95,13 @@ const openChatAtPosting = (posting) => openMessagesView({
   origin: GALLERY_ORIGIN,
 });
 
+// "4 / 34,705": the place among everything the filter finds, not only among
+// the pictures loaded so far.
+const galleryDetailPosition = (index, loaded) => {
+  const total = Math.max(app.gallery.results?.total ?? loaded, loaded);
+  return `${briefNumber(index + 1)} / ${briefNumber(total)}`;
+};
+
 /* ---------- sections ---------- */
 
 const galleryDetailMeta = (detail) => {
@@ -274,7 +281,7 @@ const galleryDetailOverlay = (detail) => {
     el("div", { class: "kb-overlay-head" },
       el("strong", {}, title),
       el("div", { class: "kb-overlay-nav" },
-        detail.index >= 0 ? el("span", { class: "kb-meta" }, `${detail.index + 1} / ${items.length}`) : null,
+        detail.index >= 0 ? el("span", { class: "kb-meta" }, galleryDetailPosition(detail.index, items.length)) : null,
         el("button", { class: "btn small", type: "button", title: "上一张（←）", disabled: detail.index <= 0, onclick: () => stepGalleryDetail(-1) }, "←"),
         el("button", { class: "btn small", type: "button", title: "下一张（→）", disabled: detail.index < 0 || detail.index >= items.length - 1, onclick: () => stepGalleryDetail(1) }, "→"),
         el("button", { class: "btn small", type: "button", onclick: dismissGalleryDetail }, "关闭"))),
