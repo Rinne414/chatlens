@@ -32,8 +32,10 @@ const commandExists = (name) => {
   return spawnSync("sh", ["-c", `command -v "$1" >/dev/null 2>&1`, "sh", name], { stdio: "ignore" }).status === 0;
 };
 
-const spawnDetachedQuiet = (command, args) => {
-  const child = spawn(command, args, { windowsHide: true, detached: true, stdio: "ignore" });
+// hidden: the child's own window starts hidden. Right for cmd.exe, whose
+// console would flash; wrong for a program whose window is the whole point.
+const spawnDetachedQuiet = (command, args, { hidden = true } = {}) => {
+  const child = spawn(command, args, { windowsHide: hidden, detached: true, stdio: "ignore" });
   child.on("error", (error) => console.error(`${command} failed: ${error.message}`));
   child.unref();
 };
@@ -42,7 +44,9 @@ const spawnDetachedQuiet = (command, args) => {
 const openPath = (targetPath) => {
   const resolved = path.resolve(targetPath);
   if (isWindows) {
-    spawnDetachedQuiet("explorer.exe", [resolved]);
+    // Not hidden: Explorer applies the hide flag to the folder window itself,
+    // so the folder opened but nobody could see it.
+    spawnDetachedQuiet("explorer.exe", [resolved], { hidden: false });
   } else if (isMac) {
     spawnDetachedQuiet("open", [resolved]);
   } else {
