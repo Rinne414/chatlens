@@ -310,6 +310,12 @@ const briefStatusLine = (data) => {
     tone = "risk";
   } else if (background.lastFinishedAt) {
     pieces.push(`${briefAgo(background.lastFinishedAt)}更新`);
+  } else if (background.readinessProblem) {
+    pieces.push(`还没设置好（${background.readinessProblem}），数据不会更新；先完成「开始使用」`);
+    tone = "warn";
+  } else if (background.settings?.enabled === false) {
+    pieces.push("后台刷新关着，数据不会自己更新；在「设置 → 后台与通知」打开，或按右上的「刷新」");
+    tone = "warn";
   } else {
     pieces.push("等待第一次后台刷新");
   }

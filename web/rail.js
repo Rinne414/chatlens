@@ -81,6 +81,10 @@ const railBackgroundLine = (data) => {
   if (data.pause?.paused) {
     return { tone: "paused", text: "AI 总结已暂停" };
   }
+  // Setup unfinished: nothing failed, there is just nothing to refresh yet.
+  if (background.readinessProblem) {
+    return { tone: "paused", text: `还没设置好：${background.readinessProblem}` };
+  }
   if (!background.enabled) {
     return { tone: "paused", text: "后台刷新已关闭" };
   }
