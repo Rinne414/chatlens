@@ -140,11 +140,11 @@ test("each kept picture says why, and the library counts and filters by reason",
 
 test("a removed picture leaves the library, shows in the removed list, and the summary counts both", () => {
   withStore((db) => {
-    assert.deepEqual(gallery.keptSummary(db), { kept: { count: 4, bytes: 1000 }, removed: { count: 0, bytes: 0 } });
+    assert.deepEqual(gallery.keptSummary(db), { kept: { count: 4, bytes: 1000 }, outside: { count: 0 }, removed: { count: 0, bytes: 0, unlisted: 0 } });
     pictureStore.updateFile(db, BY_GROUP, { kept: 0, removed: 1 });
     // The kept list is built once per connection, and each request opens its own.
     db.exec("DROP TABLE temp.gallery_kept");
-    assert.deepEqual(gallery.keptSummary(db), { kept: { count: 3, bytes: 800 }, removed: { count: 1, bytes: 200 } });
+    assert.deepEqual(gallery.keptSummary(db), { kept: { count: 3, bytes: 800 }, outside: { count: 0 }, removed: { count: 1, bytes: 200, unlisted: 0 } });
     assert.equal(gallery.listPictures(db, { ...range, kept: true }).items.some((item) => item.md5 === BY_GROUP), false);
     const waiting = gallery.listPictures(db, { ...range, removed: true, kind: "all" });
     assert.deepEqual(waiting.items.map((item) => [item.md5, item.kept, item.removed]), [[BY_GROUP, false, true]]);
@@ -328,6 +328,37 @@ test("emptying stopped halfway leaves the original waiting, not hidden behind it
     assert.equal(removed.waitingFile(context.objectDir, hash) !== null, true);
     assert.deepEqual(unkeepCore.restore(context, [hash]).tally, { restored: 1 });
     assert.deepEqual(stateOf(context, hash), { kept: 1, removed: 0, by: "manual", inObjects: true, waiting: false });
+  });
+});
+
+test("originals the gallery has no posting for are counted apart and can all be taken out together", async () => {
+  await withLibrary(async ({ context, keep, libraryPath }) => {
+    const listed = keep("posted in a group", { inLibrary: true });
+    const unlisted = keep("only the library knows it", { inLibrary: true });
+    context.db.prepare(`INSERT INTO pictures (group_id, row_id, seq, md5, width, height, size, format, sent_at, expires_at, sticker)
+      VALUES ('1', 'm1', 0, ?, 800, 800, 100, 1001, ?, ?, 0)`).run(listed.hash, NOW - 100, NOW + 86400);
+    const summaryOf = () => {
+      const reader = new (require("better-sqlite3-multiple-ciphers"))(context.db.name, { readonly: true });
+      reader.prepare("ATTACH DATABASE ? AS kb").run(context.knowledgeDbPath);
+      try {
+        return gallery.keptSummary(reader);
+      } finally {
+        reader.close();
+      }
+    };
+    assert.deepEqual([summaryOf().kept.count, summaryOf().outside.count], [1, 1]);
+    assert.deepEqual(unkeepCore.outsideGalleryMd5s(context), [unlisted.hash]);
+
+    const done = await unkeepCore.unkeepOutsideGallery(context, async () => {});
+    assert.deepEqual(done.tally, { removed: 1 });
+    assert.deepEqual(stateOf(context, unlisted.hash), { kept: 0, removed: 1, by: "local", inObjects: false, waiting: true });
+    assert.equal(libraryPath(listed.hash), listed.objectPath);
+    const after = summaryOf();
+    assert.deepEqual([after.kept.count, after.outside.count, after.removed.count, after.removed.unlisted], [1, 0, 1, 1]);
+
+    await unkeepCore.forAllWaiting(context, unkeepCore.restore, async () => {});
+    assert.deepEqual(stateOf(context, unlisted.hash), { kept: 0, removed: 0, by: "local", inObjects: true, waiting: false });
+    assert.equal(libraryPath(unlisted.hash), unlisted.objectPath);
   });
 });
 

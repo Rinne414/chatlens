@@ -17,7 +17,15 @@ const wantedMd5s = (md5s) =>
 
 const pause = () => new Promise((resolve) => { setImmediate(resolve); });
 
-const unkeep = ({ md5s }) => core.unkeep(context(), wantedMd5s(md5s));
+// `outsideGallery: true`: every kept original the gallery cannot list.
+const unkeep = async ({ md5s, outsideGallery }) => {
+  if (outsideGallery !== true) {
+    return core.unkeep(context(), wantedMd5s(md5s));
+  }
+  // Thousands of pictures: the totals are the answer, not a row for each.
+  const { requested, tally, bytes } = await core.unkeepOutsideGallery(context(), pause);
+  return { requested, tally, bytes };
+};
 
 // `all: true` works through everything removed, however many.
 const restore = async ({ md5s, all }) =>

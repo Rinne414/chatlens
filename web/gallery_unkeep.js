@@ -80,6 +80,18 @@ const keptRulesLine = (rules) => el("p", { class: "kb-meta gallery-kept-rules" }
   keptLinkButton("去看", openAutoKeepAi),
   el("span", {}, "；④ 这台电脑的 QQ 已经存有原图的（通常是你点开过的图），咒语库会复制一份。左边「为什么留存」可以按这几种来源筛选。"));
 
+// Originals the prompt library took in before the gallery recorded pictures:
+// no group and no time to list them by, so they are handled together.
+const keptOutsideLine = (outside) => (outside.count === 0 ? null : el("p", { class: "kb-meta gallery-kept-removed" },
+  `另外 ${briefNumber(outside.count)} 张不在画廊里：是咒语库更早收进来的原图，没有记下它们是哪个群、什么时候发的，所以下面列不出来，只能在咒语库里看。`,
+  el("button", {
+    class: "btn small",
+    type: "button",
+    disabled: keptUi.busy,
+    title: "把这些原图也从留存里拿出去。先放到一边，没有删，可以「全部放回留存」；要腾出空间再按「彻底删除」",
+    onclick: runOutsideUnkeep,
+  }, keptUi.busy ? "正在处理…" : `把这 ${briefNumber(outside.count)} 张取消留存`)));
+
 const keptRemovedLine = (removed) => {
   if (removed.count === 0 && !app.gallery.removed) {
     return null;
@@ -88,7 +100,7 @@ const keptRemovedLine = (removed) => {
   return el("p", { class: "kb-meta gallery-kept-removed" },
     removed.count === 0
       ? "现在没有取消留存的图。"
-      : `你取消留存了 ${briefNumber(removed.count)} 张（约 ${size}）。文件还在，没有删，所以空间还没腾出来：`,
+      : `你取消留存了 ${briefNumber(removed.count)} 张（约 ${size}）。文件还在，没有删，所以空间还没腾出来${removed.unlisted > 0 ? `；其中 ${briefNumber(removed.unlisted)} 张不在画廊里，下面列不出来，但放回和彻底删除对它们一样有效` : ""}：`,
     removed.count === 0 || app.gallery.removed ? null : el("button", { class: "btn small", type: "button", onclick: () => applyGalleryFilter(galleryScopePatch("removed")) }, "看看这些图"),
     removed.count === 0 ? null : el("button", { class: "btn small", type: "button", disabled: keptUi.busy, onclick: () => runRemovedAction("restore", { all: true }) }, "全部放回留存"),
     removed.count === 0 ? null : keptUi.confirmEmpty
@@ -114,8 +126,10 @@ const galleryKeptHeadNodes = () => {
   }
   return [
     el("p", { class: "kb-meta gallery-kept-hint" },
-      el("strong", {}, `本工具里一共留存了 ${briefNumber(summary.kept.count)} 张原图（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`),
-      el("span", {}, `存在 ${summary.folder}`),
+      el("strong", {}, summary.outside.count > 0
+        ? `留存文件夹里一共有 ${briefNumber(summary.kept.count + summary.outside.count)} 张原图，其中 ${briefNumber(summary.kept.count)} 张在画廊里（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`
+        : `本工具里一共留存了 ${briefNumber(summary.kept.count)} 张原图（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`),
+      el("span", {}, `存在 ${summary.folder}（整个文件夹实际占多少，在「存储」页看）`),
       el("button", {
         class: "btn small desktop-action",
         type: "button",
@@ -127,6 +141,7 @@ const galleryKeptHeadNodes = () => {
       ? el("p", { class: "kb-meta" }, "下面是你取消留存的图。原图文件还在，点开一张按「放回留存」，或「多选」后一起放回。")
       : el("p", { class: "kb-meta" }, "腾讯删掉之后这些图也能看。要把图放进你自己的文件夹，点开图按「另存为」，或「多选」后「另存到文件夹」。不想留的，点开图按「取消留存」，或「多选」后一起取消。"),
     app.gallery.removed ? null : keptRulesLine(summary.rules),
+    app.gallery.removed ? null : keptOutsideLine(summary.outside),
     keptRemovedLine(summary.removed),
     keptNoticeLine(),
   ];
@@ -182,6 +197,28 @@ const runPictureUnkeep = async (md5s) => {
   } catch (error) {
     keptUi.notice = `没有取消成：${error.message}`;
     keptUi.undo = [];
+  } finally {
+    keptUi.busy = false;
+    afterKeptChange();
+  }
+};
+
+// Every kept original the gallery cannot list, in one go (the server works
+// through them in chunks; with thousands it takes a while).
+const runOutsideUnkeep = async () => {
+  if (keptUi.busy) {
+    return;
+  }
+  keptUi.busy = true;
+  renderKeptHead();
+  try {
+    const done = await api("/api/pictures/unkeep", { method: "POST", body: JSON.stringify({ outsideGallery: true }) });
+    const failed = done.tally.failed ?? 0;
+    keptUi.undo = [];
+    keptUi.notice = `已取消留存 ${briefNumber(done.tally.removed ?? 0)} 张不在画廊里的原图（约 ${formatByteSize(done.bytes)}）。文件还在，可以「全部放回留存」；要腾出空间请按「彻底删除」。`
+      + (failed > 0 ? `另有 ${briefNumber(failed)} 张没有取消成（文件可能正被别的程序占用），可以再试一次。` : "");
+  } catch (error) {
+    keptUi.notice = `没有取消成：${error.message}`;
   } finally {
     keptUi.busy = false;
     afterKeptChange();

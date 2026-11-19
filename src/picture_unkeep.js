@@ -108,16 +108,33 @@ const empty = (context, md5s) => report(md5s.map((md5) => emptyOne(context, md5)
 
 const waitingMd5s = (db) => db.prepare("SELECT md5 FROM picture_files WHERE removed = ?").all(REMOVED.waiting).map((row) => row.md5);
 
-// Everything removed, a chunk at a time with a pause between chunks so the
+// Originals the prompt library holds for pictures the gallery has no record
+// of (no group, no time), so the gallery cannot list them one by one.
+const outsideGalleryMd5s = ({ db, knowledgeDbPath }) => {
+  const library = pictureAi.originalHashes({ knowledgeDbPath });
+  if (library.length === 0) {
+    return [];
+  }
+  const known = new Set(db.prepare("SELECT DISTINCT md5 FROM pictures").pluck().all());
+  return library.filter((md5) => !known.has(md5));
+};
+
+// Many pictures, a chunk at a time with a pause between chunks so the
 // program keeps answering while thousands of files move.
-const forAllWaiting = async (context, action, pause) => {
-  const md5s = waitingMd5s(context.db);
+const inChunks = async (context, md5s, action, pause) => {
   const results = [];
   for (let start = 0; start < md5s.length; start += CHUNK) {
-    results.push(...action(context, md5s.slice(start, start + CHUNK)).results);
+    // One store transaction per chunk. Stopped in the middle, the files of
+    // that chunk have moved and its records have not: asking again finishes it.
+    const chunk = md5s.slice(start, start + CHUNK);
+    results.push(...context.db.transaction(() => action(context, chunk))().results);
     await pause();
   }
   return report(results);
 };
 
-module.exports = { unkeep, restore, empty, forAllWaiting, waitingMd5s, REMOVED };
+const forAllWaiting = (context, action, pause) => inChunks(context, waitingMd5s(context.db), action, pause);
+
+const unkeepOutsideGallery = (context, pause) => inChunks(context, outsideGalleryMd5s(context), unkeep, pause);
+
+module.exports = { unkeep, restore, empty, forAllWaiting, unkeepOutsideGallery, outsideGalleryMd5s, waitingMd5s, REMOVED };

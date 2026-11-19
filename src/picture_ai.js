@@ -97,6 +97,19 @@ const setOriginals = ({ knowledgeDbPath, originals }) => {
   }
 };
 
+// Every picture the library holds an original for.
+const originalHashes = ({ knowledgeDbPath }) => {
+  if (!fs.existsSync(knowledgeDbPath)) {
+    return [];
+  }
+  const db = knowledgeStore.openKnowledgeStore(knowledgeDbPath);
+  try {
+    return db.prepare("SELECT hash FROM images WHERE object_path <> ''").pluck().all();
+  } finally {
+    db.close();
+  }
+};
+
 // Which of these the library holds an original for: md5 -> its path.
 const originalPaths = ({ knowledgeDbPath, md5s }) => {
   if (md5s.length === 0 || !fs.existsSync(knowledgeDbPath)) {
@@ -123,4 +136,4 @@ const readChunks = ({ knowledgeDbPath, md5 }) => {
   }
 };
 
-module.exports = { parseBytes, recordGenerated, attachOriginal, setOriginals, originalPaths, readChunks };
+module.exports = { parseBytes, recordGenerated, attachOriginal, setOriginals, originalPaths, originalHashes, readChunks };

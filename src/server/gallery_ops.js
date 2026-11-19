@@ -123,11 +123,26 @@ const facets = (params) => {
 
 const detail = (params) => withReadOnlyStore((db) => gallery.pictureDetail(db, String(params.get("md5") ?? "").toLowerCase()));
 
+// What the removed originals really take on disk (some have no posting to
+// read a size from); the folder is small next to the kept ones.
+const folderBytes = (directory) => {
+  let bytes = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true, recursive: true })) {
+    if (entry.isFile()) {
+      bytes += fs.statSync(path.join(entry.parentPath ?? entry.path, entry.name)).size;
+    }
+  }
+  return bytes;
+};
+
 // The kept library's numbers plus where the files are and which rules are on.
 const keptSummary = () => {
   const pictures = pictureService.settings();
+  const summary = withReadOnlyStore((db) => gallery.keptSummary(db));
+  const removedFolder = removedDirFor(pictureService.objectDir);
   return {
-    ...withReadOnlyStore((db) => gallery.keptSummary(db)),
+    ...summary,
+    removed: { ...summary.removed, bytes: fs.existsSync(removedFolder) ? folderBytes(removedFolder) : 0 },
     folder: pictureService.objectDir,
     removedFolder: removedDirFor(pictureService.objectDir),
     rules: { keepAllGroups: pictures.keepAllGroups.length, keepAi: pictures.keepAi === true },

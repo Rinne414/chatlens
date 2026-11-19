@@ -511,10 +511,16 @@ const keptSummary = (db) => {
     SELECT COUNT(*) AS count, COALESCE(SUM(${ORIGINAL_BYTES}), 0) AS bytes
     FROM temp.gallery_kept k WHERE EXISTS (SELECT 1 FROM pictures q WHERE q.md5 = k.md5)
   `).get();
+  // Kept, but the gallery has no posting for it (the prompt library took it
+  // in before pictures were recorded): it cannot be listed here.
+  const outside = db.prepare("SELECT COUNT(*) AS count FROM temp.gallery_kept k WHERE NOT EXISTS (SELECT 1 FROM pictures q WHERE q.md5 = k.md5)").get();
   const removed = hasKeptBy(db)
-    ? db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${ORIGINAL_BYTES}), 0) AS bytes FROM picture_files k WHERE k.removed = 1`).get()
-    : { count: 0, bytes: 0 };
-  return { kept, removed };
+    ? db.prepare(`
+        SELECT COUNT(*) AS count, COALESCE(SUM(${ORIGINAL_BYTES}), 0) AS bytes,
+               COUNT(CASE WHEN NOT EXISTS (SELECT 1 FROM pictures q WHERE q.md5 = k.md5) THEN 1 END) AS unlisted
+        FROM picture_files k WHERE k.removed = 1`).get()
+    : { count: 0, bytes: 0, unlisted: 0 };
+  return { kept, outside, removed };
 };
 
 // Everything the detail view needs about one picture.
