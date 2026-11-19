@@ -8,7 +8,7 @@
    until the next one (per browser: localStorage). */
 
 // v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
-const WHATS_NEW_RELEASE = "v0.0.29";
+const WHATS_NEW_RELEASE = "v0.0.30";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -17,6 +17,8 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
+  { title: "「打开文件夹」的按钮修好了", detail: "在 Windows 上，「打开留存文件夹」「打开备份文件夹」、存储页的「打开」这类按钮以前按了没有反应：文件夹其实开了，但窗口是隐藏的。现在会正常出现。", view: null, selector: "" },
+  { title: "当表情发过的图不再混在图片里", detail: "同一张图从表情面板发是表情，直接贴出来就算图片，以前只要贴过一次就会出现在画廊的图片和「留存的原图」里。现在只要当表情发过，就归到「表情包」，设了「每张都留」的群也不再自动留存它们。已经留存的不会被删，在「类型 → 表情包」里还能看到。", view: "media", selector: "#gallery-facets-body" },
   { title: "画廊里有了「留存的原图」", detail: "搜索框左边可以在「全部群图」和「留存的原图」之间切换。留存的原图是原图已经存在本工具里的图，腾讯删掉之后也能看；这里列出全部时间的，照样可以搜索、按群和发图人筛选。以前工具从电脑里复制进来的那些原图也算在内。", view: "media", selector: ".gallery-scope" },
   { title: "「留存」和「另存为」分开了", detail: "点开一张图：「留存原图」是把原图存进本工具，以后在「留存的原图」里找；「另存为…」是把原图存到你选的位置。以前的「保存原图」「下载原图」「在工具里永久保存」都改成了这两个说法。", view: "media", selector: ".gallery-scope" },
   { title: "多选可以一起留存", detail: "画廊「多选」后，底部一栏有「另存到文件夹」和新的「留存原图」，可以一次留存选中的图，中途能停下。", view: "media", selector: ".gallery-page .kb-results-head" },
