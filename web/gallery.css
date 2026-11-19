@@ -2,8 +2,11 @@
 
 .gallery-toolbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
 .gallery-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 600; cursor: pointer; }
-.gallery-kept-head { margin: 8px 0 0; display: grid; gap: 4px; }
-.gallery-kept-head p { margin: 0; font-size: 13px; line-height: 1.7; }
+.gallery-kept-head { margin: 8px 0 0; display: grid; gap: 4px; min-width: 0; }
+.gallery-kept-head p { margin: 0; font-size: 13px; line-height: 1.7; min-width: 0; overflow-wrap: anywhere; }
+.gallery-kept-about { min-width: 0; }
+.gallery-kept-about > summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 2px 0; }
+.gallery-kept-about > p { margin-top: 4px; }
 .gallery-kept-removed, .gallery-kept-notice, .gallery-kept-confirm { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .gallery-kept-notice { color: var(--ink); }
 .gallery-kept-hint { margin: 8px 0 0; font-size: 13px; line-height: 1.6; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }

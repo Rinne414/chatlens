@@ -90,7 +90,7 @@ const keptFolderLine = () => {
     return null;
   }
   return el("p", { class: "notice warn gallery-kept-removed" },
-    `留存文件夹里少了 ${briefNumber(keptUi.folder.unconfirmed)} 张原图的文件，超过一半。如果是你自己删的，点右边确认，它们就从留存里去掉；如果不是（比如文件夹没复制全），先把文件放回去，记录都还在。`,
+    `留存文件夹里少了 ${briefNumber(keptUi.folder.unconfirmed)} 张原图的文件，超过一半。如果是你自己删的，点下面的按钮确认，它们就从留存里去掉；如果不是（比如文件夹没复制全），先把文件放回去，记录都还在。`,
     el("button", {
       class: "btn small",
       type: "button",
@@ -124,7 +124,7 @@ const keptRulesLine = (rules) => el("p", { class: "kb-meta gallery-kept-rules" }
   keptLinkButton("去改", openPictureKeepSettings),
   el("span", {}, `；③「自动留存 AI 原图」（现在${rules.keepAi ? "开着" : "关着"}） `),
   keptLinkButton("去看", openAutoKeepAi),
-  el("span", {}, "；④ 这台电脑的 QQ 已经存有原图的（通常是你点开过的图），咒语库会复制一份。左边「为什么留存」可以按这几种来源筛选。"));
+  el("span", {}, "；④ 这台电脑的 QQ 已经存有原图的（通常是你点开过的图），咒语库会复制一份。「筛选」里的「为什么留存」可以按这几种来源筛选。"));
 
 // Originals the prompt library took in before the gallery recorded pictures:
 // no group and no time to list them by, so they are handled together.
@@ -175,7 +175,6 @@ const galleryKeptHeadNodes = () => {
       el("strong", {}, summary.outside.count > 0
         ? `留存文件夹里一共有 ${briefNumber(summary.kept.count + summary.outside.count)} 张原图，其中 ${briefNumber(summary.kept.count)} 张在画廊里（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`
         : `本工具里一共留存了 ${briefNumber(summary.kept.count)} 张原图（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`),
-      el("span", {}, `存在 ${summary.folder}（整个文件夹实际占多少，在「存储」页看）。里面按图片编号的前两位分成小文件夹，文件名就是编号。也可以直接在文件夹里删：程序会发现，把它们从留存里去掉，不再自动留回来；从回收站放回原处就恢复。`),
       el("button", {
         class: "btn small desktop-action",
         type: "button",
@@ -183,14 +182,18 @@ const galleryKeptHeadNodes = () => {
         onclick: () => api("/api/storage/open", { method: "POST", body: JSON.stringify({ category: "knowledge-media" }) })
           .catch(() => alert("还没有留存过原图，所以还没有这个文件夹。")),
       }, "打开留存文件夹")),
-    app.gallery.removed
-      ? el("p", { class: "kb-meta" }, "下面是你取消留存的图。原图文件还在，点开一张按「放回留存」，或「多选」后一起放回。")
-      : el("p", { class: "kb-meta" }, "腾讯删掉之后这些图也能看。要把图放进你自己的文件夹，点开图按「另存为」，或「多选」后「另存到文件夹」。不想留的，点开图按「取消留存」，或「多选」后一起取消。"),
     keptFolderLine(),
-    app.gallery.removed ? null : keptRulesLine(summary.rules),
-    app.gallery.removed ? null : keptOutsideLine(summary.outside),
     keptRemovedLine(summary.removed),
     keptNoticeLine(),
+    app.gallery.removed
+      ? el("p", { class: "kb-meta" }, "下面是你取消留存的图。原图文件还在，点开一张按「放回留存」，或「多选」后一起放回。")
+      // Unfolded where there is room; on a phone the pictures come first.
+      : el("details", { class: "gallery-kept-about", open: window.innerWidth > KB_MOBILE_WIDTH },
+        el("summary", {}, "这些原图存在哪、怎么进来的、怎么去掉"),
+        el("p", { class: "kb-meta" }, `存在 ${summary.folder}（整个文件夹实际占多少，在「存储」页看）。里面按图片编号的前两位分成小文件夹，文件名就是编号。也可以直接在文件夹里删：程序会发现，把它们从留存里去掉，不再自动留回来；从回收站放回原处就恢复。`),
+        el("p", { class: "kb-meta" }, "腾讯删掉之后这些图也能看。要把图放进你自己的文件夹，点开图按「另存为」，或「多选」后「另存到文件夹」。不想留的，点开图按「取消留存」，或「多选」后一起取消。"),
+        keptRulesLine(summary.rules),
+        keptOutsideLine(summary.outside)),
   ];
 };
 
