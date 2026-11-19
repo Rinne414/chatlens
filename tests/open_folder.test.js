@@ -8,7 +8,10 @@ const assert = require("node:assert/strict");
 const childProcess = require("node:child_process");
 const test = require("node:test");
 
-test("opening a folder does not ask for a hidden window", () => {
+// The hide flag only means something on Windows; elsewhere the opener is started with it and nothing is hidden.
+const skip = process.platform === "win32" ? false : "Windows only";
+
+test("opening a folder does not ask for a hidden window", { skip }, () => {
   const calls = [];
   const realSpawn = childProcess.spawn;
   const platformPath = require.resolve("../src/platform");
