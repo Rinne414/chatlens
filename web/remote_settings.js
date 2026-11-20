@@ -234,7 +234,7 @@ const renderRemoteCard = () => {
   return el("div", { class: "card", id: "remote-card", "data-testid": "remote-card" },
     el("h2", {}, "手机连线"),
     el("p", { class: "card-sub" },
-      "躺在床上或出门时用手机看简报、聊天和回顾。手机只是屏幕，整理仍在这台电脑上进行，所以电脑要开着（不能睡眠），ChatLens 要在运行。连接走 Tailscale（一个免费软件，把你自己的电脑和手机连成只有你能进的私人网络）：只有登录你自己的 Tailscale 账号、并在这里配对过的手机才进得来，不会开放到互联网。设置、密钥、备份和存储只能在电脑上改。"),
+      shortText("躺在床上或出门时用手机看简报、聊天和回顾。手机只是屏幕，整理仍在这台电脑上进行，所以电脑要开着（不能睡眠），ChatLens 要在运行。连接走 Tailscale（一个免费软件，把你自己的电脑和手机连成只有你能进的私人网络）：只有登录你自己的 Tailscale 账号、并在这里配对过的手机才进得来，不会开放到互联网。设置、密钥、备份和存储只能在电脑上改。", 2)),
     notice !== null ? el("div", { class: `notice ${notice.tone}` }, notice.text) : null,
     remoteState.error !== null ? el("div", { class: "notice risk" }, `读取失败：${remoteState.error}`) : null,
     status === null ? el("p", { class: "card-sub" }, "正在检测 Tailscale…") : remoteBody(status));

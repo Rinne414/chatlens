@@ -400,6 +400,14 @@ const renderSettingsView = () => {
       el("li", {}, "会联网的地方：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图会核对是否完整，下载用的临时凭证只留在内存里）；开启 AI 总结时，消息文字会发给你设置的 AI 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本号，自动的那部分可以在上面「版本与更新」关掉。"),
       el("li", {}, "Obsidian 笔记库：只在你选的文件夹里写本地文件，不联网；那个文件夹如果被 Obsidian Sync、网盘或 Git 同步，内容会跟着上传。")));
 
+  // The contents row is read from the cards once they are on the page.
+  queueMicrotask(() => {
+    document.querySelector("#view-settings > .page-index")?.remove();
+    const index = pageIndex("#view-settings", "跳到");
+    if (index !== null) {
+      $("#view-settings").prepend(index);
+    }
+  });
   setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderShortcutCard(), renderMoreLinks(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, renderRemoteCard(), renderNotesCard(), aboutCard);
 };
 
@@ -501,7 +509,7 @@ const renderBackgroundCard = () => {
   return el("div", { class: "card" },
     el("h2", { id: "settings-background" }, "后台与通知"),
     el("p", { class: "card-sub" },
-      "打开「自动刷新」后，ChatLens 开着时（窗口可以关掉）会每隔一段时间自动收新消息、攒够一段就交给 AI 总结，你打开「简报」时内容已经准备好。每条消息只总结一次；各群的总览最多每 2 小时重写一次。实际花了多少看上面的「AI 用量与费用」，也可以随时暂停或设每日预算。"),
+      shortText("打开「自动刷新」后，ChatLens 开着时（窗口可以关掉）会每隔一段时间自动收新消息、攒够一段就交给 AI 总结，你打开「简报」时内容已经准备好。每条消息只总结一次；各群的总览最多每 2 小时重写一次。实际花了多少看上面的「AI 用量与费用」，也可以随时暂停或设每日预算。", 1)),
     backgroundStatusLine(background),
     el("div", { class: "bg-grid" },
       backgroundToggle("自动刷新", "关闭后只有手动总结", current.enabled, (value) => saveBackgroundSetting({ enabled: value })),

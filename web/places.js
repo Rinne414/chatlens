@@ -93,3 +93,42 @@ const openSaveFolderButton = () => openFolderButton(
 const openBackupFolderButton = () => openFolderButton(
   "打开备份文件夹",
   () => api("/api/backup/open-folder", { method: "POST", body: "{}" }));
+
+/* ---------- long text, short first ----------
+   Explaining everything made some pages walls of text. shortText(text, keep)
+   shows the first sentence(s); the rest waits behind 「展开说明」. Places named
+   in either part are still links. */
+
+const SENTENCE_END = /(?<=。)/u;
+
+const shortText = (text, keep = 1) => {
+  const sentences = String(text).split(SENTENCE_END).filter((sentence) => sentence !== "");
+  if (sentences.length <= keep) {
+    return linked(text);
+  }
+  return [
+    linked(sentences.slice(0, keep).join("")),
+    el("details", { class: "more-text" },
+      el("summary", {}, "展开说明"),
+      el("span", {}, linked(sentences.slice(keep).join("")))),
+  ];
+};
+
+/* ---------- a long page's own contents ----------
+   One button per card, read from the cards' headings: nothing to keep in step
+   when a card is added. */
+
+const pageIndex = (rootSelector, label) => {
+  const headings = [...document.querySelectorAll(`${rootSelector} > .card > h2, ${rootSelector} > .card > div > h2`)]
+    .filter((heading) => heading.textContent.trim() !== "");
+  if (headings.length < 4) {
+    return null;
+  }
+  return el("nav", { class: "page-index", "aria-label": label },
+    el("span", { class: "page-index-label" }, label),
+    headings.map((heading) => el("button", {
+      class: "page-index-item",
+      type: "button",
+      onclick: () => heading.closest(".card").scrollIntoView({ behavior: "smooth", block: "start" }),
+    }, heading.textContent.trim().replace(/（.*$/u, ""))));
+};
