@@ -35,11 +35,12 @@
 <body>
   <div class="shell">
     <aside class="rail">
-      <div class="brand">
+      <div class="brand" title="只读本地 QQ 数据副本，不发消息，不动原始数据。">
         <img class="brand-mark" src="/icons/icon-192.png" alt="">
         <span class="brand-text">ChatLens</span>
       </div>
       <nav id="nav">
+        <div class="nav-group-label">聊天</div>
         <button data-view="brief" class="active">简报</button>
         <button data-view="review">回顾</button>
         <button data-view="bookmarks">收藏</button>
@@ -47,10 +48,12 @@
         <button data-view="trends">热点</button>
         <button data-view="group">群</button>
         <button data-view="messages">消息</button>
+        <div class="nav-group-label">图片</div>
         <button data-view="media">画廊</button>
         <button data-view="qqcollect">QQ收藏图</button>
         <button data-view="knowledge">咒语库</button>
         <button data-view="backup">备份</button>
+        <div class="nav-group-label">这台电脑</div>
         <button data-view="storage">存储</button>
         <button data-view="settings">设置</button>
       </nav>
@@ -72,8 +75,7 @@
             </select>
           </label>
         </div>
-        <button id="quit-console" class="rail-quit" type="button"><span>⏻ 退出 ChatLens</span><small id="quit-hint" class="rail-quit-hint">它在后台运行，没有窗口，关掉浏览器也不会停；要停就点这里。</small></button>
-        <p>只读本地 QQ 数据副本，不发消息，不动原始数据。</p>
+        <button id="quit-console" class="rail-quit" type="button"><span>⏻ 退出 ChatLens</span><small id="quit-hint" class="rail-quit-hint">它在后台运行，关掉浏览器也不会停。</small></button>
       </div>
     </aside>
     <main>

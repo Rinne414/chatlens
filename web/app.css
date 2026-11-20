@@ -63,6 +63,11 @@ body {
 .brand-mark { flex: none; width: 34px; height: 34px; border-radius: 9px; }
 .brand-text { font-weight: 700; font-size: 15px; }
 #nav { display: flex; flex-direction: column; gap: 2px; }
+/* What the pages below are about. Only where the rail is a column: in the
+   narrow layouts it is a wrapping row and headings would break it up. */
+.nav-group-label { margin: 8px 0 0; padding: 0 12px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; line-height: 1.5; }
+.nav-group-label:first-child { margin-top: 0; }
+@media (max-width: 900px) { .nav-group-label { display: none; } }
 #nav button {
   text-align: left;
   border: 0;
@@ -1005,7 +1010,7 @@ html[data-theme="dark"] .sel-bar { box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
 .brand { padding-bottom: 8px; }
 /* The followed groups keep room for about five rows; on a short screen the
    rail scrolls instead (theme, font size and the note are rarely needed). */
-.rail-groups { flex: 1 1 auto; min-height: 132px; display: flex; flex-direction: column; border-top: 1px solid var(--line); padding-top: 8px; }
+.rail-groups { flex: 1 1 auto; min-height: 112px; display: flex; flex-direction: column; border-top: 1px solid var(--line); padding-top: 8px; }
 .rail-groups:empty { display: none; }
 /* Once the user drags the list to a height, the rail scrolls instead of squeezing it. */
 .rail-groups:has(> .user-sized) { flex: none; }

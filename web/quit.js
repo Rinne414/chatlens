@@ -66,7 +66,8 @@ const showQuitReopenHint = async () => {
   }
   try {
     const status = await api("/api/background");
-    hint.textContent = `它在后台运行，没有窗口，关掉浏览器也不会停。${quitReopenHint(status.desktop)}`;
+    // How to open it again is asked once the dialog is up; here it is the button's hint.
+    document.getElementById("quit-console")?.setAttribute("title", `ChatLens 在后台运行，没有窗口；在这里把它关掉。${quitReopenHint(status.desktop)}`);
   } catch {
     // The static text stays; it is still true.
   }
