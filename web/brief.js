@@ -860,7 +860,7 @@ const briefGroupRow = (group) =>
         el("button", {
           class: "linklike",
           disabled: briefState.busy,
-          title: "看过总结就够了：把这个群标为本工具已查看（消息都还在，随时可以打开）",
+          title: "看过总结就够了：把这个群标为本程序已查看（消息都还在，随时可以打开）",
           onclick: () => briefMarkGroupDone(group),
         }, "标为看完"))
       : null);

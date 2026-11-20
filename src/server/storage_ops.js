@@ -179,7 +179,7 @@ const storageCatalog = (context) => {
       exists: pathExists(context.config.ntDbDir),
       openPath: context.config.ntDbDir,
       policy: "protected",
-      policyLabel: "绝不由本工具删除",
+      policyLabel: "绝不由本程序删除",
       cleanupCategory: null,
       cleanupImpact: "删掉会毁掉 QQ 在这台电脑上的聊天记录，只能由 QQ 自己管理。",
       cleanupBlockedReason: "QQ 的聊天数据库永远不会被本程序删除。",

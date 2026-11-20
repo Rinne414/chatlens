@@ -345,7 +345,7 @@ test("refuses to overwrite a foreign file at the ledger path", () => {
   const root = makeWorkspace();
   fs.writeFileSync(ledgerPath(root), JSON.stringify({ somethingElse: true }), "utf8");
 
-  assert.throws(() => loadLedger(root), /不是本工具的导出记录文件/u);
+  assert.throws(() => loadLedger(root), /不是本程序的导出记录文件/u);
 });
 
 test("reports a corrupt ledger instead of silently starting over", () => {

@@ -26,7 +26,7 @@ const GALLERY_SWITCHES = [
   ["prompt", "有咒语", "咒语库里能读到生成参数的图"],
   ["asked", "有人求咒语", "群里有人问过这张图的咒语"],
   ["file", "以文件发的图", "当作文件发的图片，多是没压缩的原图；显示的是 QQ 的预览"],
-  ["kept", "原图已留存", "原图已经存在本工具里的图，腾讯删掉之后也能看"],
+  ["kept", "原图已留存", "原图已经存在本程序里的图，腾讯删掉之后也能看"],
 ];
 const GALLERY_SEARCH_DELAY_MS = 450;
 const GIF_PICTURE_FORMAT = 2000;
@@ -290,7 +290,7 @@ const galleryBadges = (item) => {
       ? { text: days === 0 ? "今天过期" : `${days} 天后过期`, tone: "expiring", title: "腾讯过期后原图就找不回来了，除非先留存" }
       : null,
     // Inside 「留存的原图」 every tile is kept: the mark would say nothing.
-    item.kept && !app.gallery.kept ? { text: "已留存", tone: "kept", title: "原图已经存在本工具里，腾讯删掉之后也能看" } : null,
+    item.kept && !app.gallery.kept ? { text: "已留存", tone: "kept", title: "原图已经存在本程序里，腾讯删掉之后也能看" } : null,
   ].filter((badge) => badge !== null);
 };
 
@@ -392,7 +392,7 @@ const gallerySelectionNodes = () => {
       } }, "取消选择"),
       el("span", { class: "kb-results-spacer" }),
       el("button", { class: "btn small", type: "button", title: "退出多选（Esc），已选的会清空", onclick: leaveGallerySelection }, "退出多选")),
-    el("span", { class: "kb-meta" }, "点图片就是选它；按住 Shift 点另一张可以连选。「另存到文件夹」把原图复制到下面的文件夹，「留存原图」存进本工具。腾讯只保留 31 天，更早的图只有留存过的还有原图。"),
+    el("span", { class: "kb-meta" }, "点图片就是选它；按住 Shift 点另一张可以连选。「另存到文件夹」把原图复制到下面的文件夹，「留存原图」存进本程序。腾讯只保留 31 天，更早的图只有留存过的还有原图。"),
     gallerySaveTargetRow(),
     pictureExportStatus("gallery"),
     pictureKeepStatus("gallery"),
@@ -786,7 +786,7 @@ const renderMediaView = () => {
             "aria-pressed": String(tab.selecting),
             title: tab.selecting
               ? "退出多选（Esc），已选的会清空"
-              : "选几张图，一起另存到文件夹，或留存在本工具里。也可以直接点图片右上角的方框，或按住 Ctrl 点图片",
+              : "选几张图，一起另存到文件夹，或留存在本程序里。也可以直接点图片右上角的方框，或按住 Ctrl 点图片",
             onclick: () => {
               if (tab.selecting) {
                 leaveGallerySelection();

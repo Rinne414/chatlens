@@ -518,7 +518,7 @@ const openPath = (targetPath) => async () => {
 /* ---------- run view ---------- */
 
 const RANGE_PRESETS = [
-  { label: "本工具未查看", type: "sinceRead" },
+  { label: "本程序未查看", type: "sinceRead" },
   { label: "从 QQ 粘贴", type: "paste" },
   { label: "自上次记录", type: "sinceStore" },
   { label: "最近 6 小时", type: "hours", hours: 6 },
@@ -1945,7 +1945,7 @@ const renderRunView = () => {
     el("p", { class: "card-sub" },
       `LLM ${defaults.useLlm ? "开启" : "关闭"} · 媒体导出 ${defaults.exportMedia ? "开启" : "关闭"}（默认值在 config\\defaults.json）`),
     el("p", { class: "card-sub" },
-      "「摘要我还没看过的」用的是本工具消息页的已读位置，不是 QQ 红点。只在 QQ 里读过的群会改用最近 N 小时。不知道 QQ 看到哪了，就用「从 QQ 粘贴」。ChatLens 开着时可用 Ctrl+Alt+U，或开始菜单「QQ摘要-未查看」。"),
+      "「摘要我还没看过的」用的是本程序消息页的已读位置，不是 QQ 红点。只在 QQ 里读过的群会改用最近 N 小时。不知道 QQ 看到哪了，就用「从 QQ 粘贴」。ChatLens 开着时可用 Ctrl+Alt+U，或开始菜单「QQ摘要-未查看」。"),
     unreadHintNote(),
     el("div", { class: "row", style: "margin-bottom:14px" },
       modeChip("watchlist", `关注群 (${watchlist.length})`),
@@ -2350,8 +2350,8 @@ const renderWatchlistView = () => {
         ? `7 天完整 · 最近扫描 ${unixToHkt(health.latestScanUnix).slice(5, 16)}`
         : `7 天覆盖 ${Math.round(health.coverageRatio * 100)}% · 缺 ${formatDuration(health.missingSeconds)}`;
     const healthTitle = health === undefined || health.missingSeconds === 0
-      ? "最近 7 天的每个时段本工具都读过，这个群的消息都收进来了。"
-      : `最近 7 天里，本工具读过这个群 ${Math.round(health.coverageRatio * 100)}% 的时间；还有 ${formatDuration(health.missingSeconds)} 没读过，那段时间的消息可能还没收进来。`;
+      ? "最近 7 天的每个时段本程序都读过，这个群的消息都收进来了。"
+      : `最近 7 天里，本程序读过这个群 ${Math.round(health.coverageRatio * 100)}% 的时间；还有 ${formatDuration(health.missingSeconds)} 没读过，那段时间的消息可能还没收进来。`;
     return (
     el("div", { class: "wl-row" },
       el("div", {},
@@ -2404,7 +2404,7 @@ const renderWatchlistView = () => {
         watchlist.length === 0
           ? null
           : el("p", { class: "card-sub", style: "margin:0 0 10px" },
-            "「7 天覆盖」是最近 7 天里本工具读过这个群的时间占比，缺的那几小时里的消息可能还没收进来。「移除」只是不再收新消息，已经收下的消息、总结和图片都留在本机。"),
+            "「7 天覆盖」是最近 7 天里本程序读过这个群的时间占比，缺的那几小时里的消息可能还没收进来。「移除」只是不再收新消息，已经收下的消息、总结和图片都留在本机。"),
         watchlist.length === 0
           ? el("div", { class: "empty" }, "还没有关注任何群。从右侧添加。")
           : [...watchlist].sort((left, right) =>

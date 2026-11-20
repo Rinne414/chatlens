@@ -213,7 +213,7 @@ const keyStep = (status, ready) => setupStep(2, !ready ? "later" : status.ntqqKe
     setupNotice("key")),
   setupNotice("key"),
   setupFacts([
-    "QQ 的聊天数据库是加密的，钥匙只在运行中的 QQ 里。所以要先打开并登录电脑版 QQ，工具从 QQ 的内存里读出密钥，验证后加密存在本机。只读，不改 QQ，不联网。",
+    "QQ 的聊天数据库是加密的，钥匙只在运行中的 QQ 里。所以要先打开并登录电脑版 QQ，程序从 QQ 的内存里读出密钥，验证后加密存在本机。只读，不改 QQ，不联网。",
     status.platform === "linux" ? "会弹出系统的密码框：读别的程序的内存需要授权。" : null,
     "一般一两分钟，慢的电脑要几分钟；不占磁盘。",
     ["失败：确认 QQ 开着、登录的是第 1 步那个账号，再点一次。还不行就",
@@ -283,7 +283,7 @@ const groupStep = (status, ready) => {
     setupNotice("groups"));
   // The picker stays open once a group is ticked, so more can be added.
   const step = setupStep(3, !ready ? "later" : count > 0 ? "done" : "now", "选要看的群", `${count} 个`, body, body, setupFacts([
-    "读出你加入的群，勾选要看的。只读你选的群，工具会在后台定时收这些群的新消息、整理成简报。",
+    "读出你加入的群，勾选要看的。只读你选的群，程序会在后台定时收这些群的新消息、整理成简报。",
     `第一次要复制一份 QQ 聊天数据库，大约 1-2 分钟。这份副本一直留着，和 QQ 的数据库一样大${mirrorSizeText(status)}；以后每次只更新变了的部分。`,
     "没读到时这里会写原因，点「再试一次」。",
   ]));

@@ -174,7 +174,7 @@ const galleryKeptHeadNodes = () => {
     el("p", { class: "kb-meta gallery-kept-hint" },
       el("strong", {}, summary.outside.count > 0
         ? `留存文件夹里一共有 ${briefNumber(summary.kept.count + summary.outside.count)} 张原图，其中 ${briefNumber(summary.kept.count)} 张在画廊里（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`
-        : `本工具里一共留存了 ${briefNumber(summary.kept.count)} 张原图（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`),
+        : `本程序里一共留存了 ${briefNumber(summary.kept.count)} 张原图（图片和表情都算），约 ${formatByteSize(summary.kept.bytes)}。`),
       el("button", {
         class: "btn small desktop-action",
         type: "button",
@@ -344,7 +344,7 @@ const gallerySelectionKeptButtons = (count) => [
       class: "btn small",
       type: "button",
       disabled: count === 0 || keptUi.busy,
-      title: "把这些图的原图从本工具里拿出去。先放到一边，没有删，可以放回；要腾出空间再按「彻底删除」",
+      title: "把这些图的原图从本程序里拿出去。先放到一边，没有删，可以放回；要腾出空间再按「彻底删除」",
       onclick: () => runPictureUnkeep([...app.gallery.selected]),
     }, `取消留存（${briefNumber(count)}）`)
     : null,
@@ -374,11 +374,11 @@ const galleryDetailKeptNodes = (item, patch) => {
     ];
   }
   return [
-    el("span", { class: "tag", title: `原图已经存在本工具里，在画廊「留存的原图」里能找到。${keptWhyText(item)}` }, "已留存"),
+    el("span", { class: "tag", title: `原图已经存在本程序里，在画廊「留存的原图」里能找到。${keptWhyText(item)}` }, "已留存"),
     el("button", {
       class: "btn small",
       type: "button",
-      title: "把原图从本工具里拿出去。先放到一边，没有删，可以放回；要腾出空间到「留存的原图」里按「彻底删除」",
+      title: "把原图从本程序里拿出去。先放到一边，没有删，可以放回；要腾出空间到「留存的原图」里按「彻底删除」",
       onclick: () => runPictureUnkeep([item.md5]),
     }, "取消留存"),
   ];

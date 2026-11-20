@@ -95,7 +95,7 @@ const briefGoodGrid = (data) => {
       md5: image.hash,
       src: knowledgeThumbUrl(image.hash),
       title: `${image.groupName} · ${image.speaker}`,
-      badge: image.asks > 0 ? `${image.asks} 人求 tag` : null,
+      badge: image.asks > 0 ? `${image.asks} 人求咒语` : null,
       onOpen: () => briefOpenImage(image),
     }))),
     rest > 0
@@ -183,7 +183,7 @@ const briefImages = (data) => {
       el("span", { class: "brief-picture-tabs" },
         tab("good", "好图", data.images.length),
         tab("all", "全部图片", briefPictures.total)),
-      el("span", { class: "brief-sub" }, briefPictures.tab === "good" ? "被求 tag、反复转发的排在前面" : "这段时间群里发的所有图，新的在前"),
+      el("span", { class: "brief-sub" }, briefPictures.tab === "good" ? "被求咒语、反复转发的排在前面" : "这段时间群里发的所有图，新的在前"),
       el("span", { class: "brief-picture-actions" },
         el("button", {
           class: briefPictures.selecting ? "btn small active desktop-action" : "btn small primary desktop-action",

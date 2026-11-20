@@ -23,7 +23,7 @@ const SAVE_AS_PROBLEMS = {
   "not-found": "没有这张图的记录。",
   "file-only": "这张图是以文件发的，本机找不到原文件，也还没有 QQ 的预览。",
 };
-const KEEP_LABEL_TITLE = "把原图存进本工具（store/media-objects），腾讯删掉之后也能看，在画廊「留存的原图」里找；不会出现在你自己的文件夹里";
+const KEEP_LABEL_TITLE = "把原图存进本程序（store/media-objects），腾讯删掉之后也能看，在画廊「留存的原图」里找；不会出现在你自己的文件夹里";
 const SAVE_AS_TITLE = "把原图存到你选的位置。文件名是「时间_群_发图人_编号」，不会和别的图重名";
 
 /* ---------- 留存 many ---------- */

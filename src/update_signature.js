@@ -48,7 +48,7 @@ const signatureMatches = (sumsText, signatureBase64, publicKeyPem) => {
 // newer tag (a downgrade) is refused too.
 const verifyArchive = ({ archivePath, archiveName, sumsText, signature, publicKeyPem, version }) => {
   if (!signatureMatches(sumsText, signature, publicKeyPem)) {
-    throw new Error("更新包的签名无效：不是用本工具作者的钥匙签的。");
+    throw new Error("更新包的签名无效：不是用本程序作者的钥匙签的。");
   }
   if (version !== undefined && !archiveName.startsWith(`chatlens-v${version}.`) && !archiveName.startsWith(`chatlens-v${version}-`)) {
     throw new Error(`安装包不属于 v${version}。`);

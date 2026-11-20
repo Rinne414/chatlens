@@ -51,7 +51,7 @@ const inboxRow = (group) => {
       el("span", { class: "inbox-bottom" },
         el("span", { class: "inbox-preview" }, preview),
         group.unreadCount > 0
-          ? el("span", { class: "badge", title: `${group.unreadCount} 条本工具还没看过的消息` }, compactCount(group.unreadCount))
+          ? el("span", { class: "badge", title: `${group.unreadCount} 条本程序还没看过的消息` }, compactCount(group.unreadCount))
           : null),
       extra === null || extra.topics.length === 0
         ? null
@@ -81,7 +81,7 @@ const renderInbox = () => {
         el("span", {
           class: "card-sub inbox-note",
           title: "在这里打开过的群，从你看到的位置算起；还没打开过的群，从简报上次点「看完了」算起。和 QQ 里的未读无关。",
-        }, "数字是本工具还没看过的消息，不是 QQ 未读")),
+        }, "数字是本程序还没看过的消息，不是 QQ 未读")),
       groups.length === 0
         ? el("div", { class: "empty" }, "还没有本地消息记录。后台刷新第一次跑完后这里就会有群。")
         : shown.length === 0
@@ -1068,7 +1068,7 @@ const renderChat = () => {
           "aria-pressed": String(msg.panel),
           onclick: toggleChatPanel,
         }, "本群摘要"),
-        el("button", { class: "btn small", onclick: markReadToLatest }, "全部标为本工具已查看"))),
+        el("button", { class: "btn small", onclick: markReadToLatest }, "全部标为本程序已查看"))),
     el("div", { class: "chat-tools" },
       rangeStatus,
       el("div", { class: "row" },

@@ -27,7 +27,7 @@ const railAgo = (unix) => {
 };
 
 // Said wherever a group shows a count, as on 消息.
-const RAIL_UNREAD_MEANING = "数字是本工具还没看过的消息，不是 QQ 未读";
+const RAIL_UNREAD_MEANING = "数字是本程序还没看过的消息，不是 QQ 未读";
 
 // The server counts up to its cap (maxCounted, 999); below it the real number.
 const railUnreadText = (count) => (count >= (railState.data?.maxCounted ?? 999) ? `${count}+` : String(count));

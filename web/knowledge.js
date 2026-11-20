@@ -590,7 +590,7 @@ const knowledgeCoverageNote = () => {
       outside === 0 ? null : el("p", { class: "kb-meta" },
         `${outside} 张的时间不在已总结范围内。这些图的参数已经存好了，只是还不知道是谁发的；到「运行」页补跑那段时间就会逐步对上。`),
       notInMessages === 0 ? null : el("p", { class: "kb-meta" },
-        `${notInMessages} 张所在时间段已扫过部分群，但那些群的消息里没有这张图。工具还没读私聊／收藏，所以不能断定来源。`),
+        `${notInMessages} 张所在时间段已扫过部分群，但那些群的消息里没有这张图。程序还没读私聊／收藏，所以不能断定来源。`),
       unavailable === 0 ? null : el("p", { class: "kb-meta" },
         `${unavailable} 张从未记录到本地原图路径，可能没有下载过原图。`),
       evicted === 0 ? null : el("p", { class: "kb-meta" },
@@ -686,7 +686,7 @@ const renderRequests = () => {
   }
   if (data.items.length === 0) {
     return el("div", { class: "empty" },
-      "还没有记录到求图或求咒语。工具会在每次总结时自动检测 kkt / kko / kky 和「求tag」「看看原图」这类消息。");
+      "还没有记录到求图或求咒语。程序会在每次总结时自动检测 kkt / kko / kky 和「求tag」「看看原图」这类消息。");
   }
   const answered = data.items.filter(requestIsAnswered).length;
   return el("div", {},

@@ -112,7 +112,7 @@ const galleryDetailMeta = (detail) => {
     item.size > 0 ? formatByteSize(item.size) : "",
     item.fileName
       ? `以文件发送：${item.fileName}，这里显示的是 QQ 的预览（最长边约 1280）`
-      : item.kept ? `原图已留存在本工具里：${keptWhyText(item)}` : days === null ? "" : `腾讯还保留约 ${days} 天`,
+      : item.kept ? `原图已留存在本程序里：${keptWhyText(item)}` : days === null ? "" : `腾讯还保留约 ${days} 天`,
   ].filter((part) => part !== "").join(" · ");
 };
 
@@ -123,7 +123,7 @@ const galleryDetailActions = (detail) => {
   return el("div", { class: "row gallery-detail-actions" },
     detail.size === "original" || (item.gone && !item.kept) || item.fileName
       ? null
-      : el("button", { class: "btn small primary", type: "button", onclick: () => galleryDetailPatch(item.md5, { size: "original", notice: item.kept ? "" : "正在向腾讯取原图…" }) }, "看原图"),
+      : el("button", { class: "btn small primary", type: "button", title: item.kept ? "显示留存在本程序里的原图" : "向腾讯的图片服务器取原图来看（会联网）；只是看，不会留存", onclick: () => galleryDetailPatch(item.md5, { size: "original", notice: item.kept ? "" : "正在向腾讯取原图…" }) }, "看原图"),
     // A picture Tencent deleted can still be saved as when its original was kept.
     item.gone && !item.kept
       ? null

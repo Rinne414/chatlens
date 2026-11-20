@@ -1098,6 +1098,9 @@ html[data-theme="dark"] .sel-bar { box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
 .cc-notice-close:hover { color: var(--ink); }
 html.phone .cc-notices { bottom: 84px; }
 
+/* A control's hint for touch and keyboard (hints.js). */
+.cc-hint { position: fixed; z-index: 420; max-width: min(340px, calc(100vw - 16px)); padding: 8px 11px; border-radius: 10px; background: var(--ink); color: var(--panel); font-size: 13px; line-height: 1.6; box-shadow: 0 8px 24px rgba(0, 0, 0, .3); pointer-events: none; overflow-wrap: anywhere; }
+
 /* A sentence that names another page links to it (places.js). */
 .place-link { text-decoration: underline; text-underline-offset: 2px; }
 .backup-rescue-where { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }

@@ -56,7 +56,7 @@ const loadLedger = (toolRoot) => {
     throw new Error(`导出记录文件损坏，无法解析：${target}（重命名或删除后重试）`);
   }
   if (parsed?.schema !== LEDGER_SCHEMA) {
-    throw new Error(`${target} 不是本工具的导出记录文件，请先移走或改名`);
+    throw new Error(`${target} 不是本程序的导出记录文件，请先移走或改名`);
   }
   return {
     schema: LEDGER_SCHEMA,

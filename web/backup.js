@@ -304,7 +304,7 @@ const backupVerdict = (report) => {
   if (gaps === 0) {
     return el("div", { class: "backup-verdict safe" },
       el("strong", {}, saved ? "✓ 都已经备份到电脑，可以放心清理这段时间的 QQ 记录" : "✓ 电脑上都有原文件，保存后就可以放心清理"),
-      el("p", {}, "清理请在 QQ 里自己操作；本工具不会删除 QQ 里的任何东西。"));
+      el("p", {}, "清理请在 QQ 里自己操作；本程序不会删除 QQ 里的任何东西。"));
   }
   return el("div", { class: "backup-verdict check" },
     el("strong", {}, `⚠ 还有 ${briefNumber(gaps)} 个文件电脑上没有原文件`,
@@ -418,7 +418,7 @@ const renderBackupView = () => {
         el("summary", {}, "这页具体在做什么？"),
         el("p", {}, "整批备份会从电脑版 QQ 的本地缓存里，把图片、视频、文件和聊天记录按「群 / 年-月」存到你选的文件夹，AI 图另存一份咒语和参数；再次运行只补新的，不会重复。"),
         el("p", {}, "电脑 QQ 只保存你在电脑上看过的图：划过去只存一张预览图，点开看大图才存原图，QQ 没有「全部自动下载」的开关。没看过的群图片，保存时会「从 QQ 图片服务器补下载」，按 md5 取回原图（太旧的图服务器上可能已经没有了；不想联网可以在下面取消）。"),
-        el("p", {}, "工具只读取，从不删除或修改 QQ 里的任何东西。清理 QQ 请在 QQ 里自己操作。"))),
+        el("p", {}, "程序只读取，从不删除或修改 QQ 里的任何东西。清理 QQ 请在 QQ 里自己操作。"))),
     backupStatusTiles(),
     backupState.setup.ntDataConfigured ? null : el("div", { class: "notice risk" }, "还没有设置 QQ 的 nt_data 目录，请先到「设置」自动探测路径。"),
     backupState.error ? el("div", { class: "notice risk" }, backupState.error) : null,
@@ -614,7 +614,7 @@ const backupAutoKeep = (expiring, items) => {
       el("span", { class: "card-sub" },
         expiring.keepAi === true
           ? " 已开启：后台每次刷新后按过期先后慢慢留存，不用守着页面。"
-          : ` 后台每次刷新后按过期先后慢慢留存到本工具里，不用守着页面。${items.length > 0 ? `现在待留存 ${briefNumber(items.length)} 张，约 ${formatByteSize(bytes)}；` : ""}之后每张约 1.5 MB，不占图片缓存上限。`)));
+          : ` 后台每次刷新后按过期先后慢慢留存到本程序里，不用守着页面。${items.length > 0 ? `现在待留存 ${briefNumber(items.length)} 张，约 ${formatByteSize(bytes)}；` : ""}之后每张约 1.5 MB，不占图片缓存上限。`)));
 };
 
 const rescueKeepAllQuestion = (items) => {

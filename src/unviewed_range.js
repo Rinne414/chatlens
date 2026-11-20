@@ -69,7 +69,7 @@ const resolveSummaryRange = (range, context) => {
   const resolved = resolveUnviewedRange(context);
   const start = formatHkt(resolved.startUnix);
   const label = resolved.markedGroupCount === 0
-    ? `总结未查看（尚无本工具已读记录，改用最近 ${context.fallbackHours ?? 24} 小时）`
+    ? `总结未查看（尚无本程序已读记录，改用最近 ${context.fallbackHours ?? 24} 小时）`
     : `总结未查看（从 ${start.slice(0, 16)} 起）`;
   return {
     range: { type: "custom", start, end: "" },

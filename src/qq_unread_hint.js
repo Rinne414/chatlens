@@ -123,7 +123,7 @@ const hintForWatchlist = (rows, watchlist) => {
     available: groups.length > 0,
     totalUnread,
     groups,
-    disclaimer: "这是 QQ 会话列表上的红点约数，不是已读游标；打开群会把它清掉。总结范围仍以本工具的「上次读到这里」为准。",
+    disclaimer: "这是 QQ 会话列表上的红点约数，不是已读游标；打开群会把它清掉。总结范围仍以本程序的「上次读到这里」为准。",
   };
 };
 
