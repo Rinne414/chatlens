@@ -69,7 +69,7 @@ const toggleMediaOnly = async () => {
   try {
     await loadMessages(true);
   } catch (error) {
-    alert(error.message);
+    notifyError(error);
   }
   renderMessagesView();
 };

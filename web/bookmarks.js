@@ -62,7 +62,7 @@ const bookmarkStar = (item, redraw) => {
         setBookmarkKeys(result.saved);
         bookmarkState.list = null;
       } catch (error) {
-        alert(error.message);
+        notifyError(error);
       }
       bookmarkState.busy = false;
       redraw();

@@ -92,8 +92,8 @@ const restoreDeletedNotes = () => notesAction(async () => {
   notesNotice(`${result.restored} 则笔记会在下次同步时重新生成。`, "ok");
 });
 
-const queueOldMessages = (unsummarized) => {
-  if (!window.confirm(`让 AI 整理 ${unsummarized.toLocaleString()} 条还没整理过的消息？\n在后台慢慢做，不挡新消息；用的是本页设置的 AI 服务，按每日上限和预算走。进度和花费在「AI 用量」里看。`)) {
+const queueOldMessages = async (unsummarized) => {
+  if (!await confirmInPage(`让 AI 整理 ${unsummarized.toLocaleString()} 条还没整理过的消息？\n在后台慢慢做，不挡新消息；用的是本页设置的 AI 服务，按每日上限和预算走。进度和花费在「AI 用量」里看。`, { confirmLabel: "开始整理" })) {
     return;
   }
   notesAction(async () => {

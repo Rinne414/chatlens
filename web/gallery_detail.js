@@ -160,11 +160,11 @@ const galleryDetailActions = (detail) => {
           },
         }, "留存原图"),
     item.ai
-      ? el("button", { class: "btn small", type: "button", onclick: () => downloadPictureWorkflow(item.md5).catch((error) => alert(error.message)) }, "下载工作流")
+      ? el("button", { class: "btn small", type: "button", onclick: () => downloadPictureWorkflow(item.md5).catch((error) => notifyError(error)) }, "下载工作流")
       : null,
     shown === null ? null : el("button", { class: "btn small", type: "button", onclick: () => openChatAtPosting(shown) }, "在消息里看"),
     item.inLibrary
-      ? el("button", { class: "btn small", type: "button", onclick: () => openKnowledgeDetailByHash(item.md5).catch((error) => alert(error.message)) }, "在咒语库打开")
+      ? el("button", { class: "btn small", type: "button", onclick: () => openKnowledgeDetailByHash(item.md5).catch((error) => notifyError(error)) }, "在咒语库打开")
       : null,
     sender === "" || app.gallery.sender === sender
       ? null

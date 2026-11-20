@@ -511,7 +511,7 @@ const openPath = (targetPath) => async () => {
   try {
     await api("/api/open", { method: "POST", body: JSON.stringify({ path: targetPath }) });
   } catch (error) {
-    alert(error.message);
+    notifyError(error);
   }
 };
 
@@ -920,7 +920,7 @@ const startCoverageRepair = async (batches) => {
     const temporaryLine = estimate.additionalTemporaryBytes === 0
       ? `临时数据库：复用已有 ${formatBytes(estimate.existingTemporaryBytes)} 副本，不再新增完整副本`
       : `临时数据库：最多新增约 ${formatBytes(estimate.additionalTemporaryBytes)}，完成或取消后清理`;
-    const confirmed = window.confirm([
+    const confirmed = await confirmInPage([
       "开始安全补扫覆盖记录？",
       "",
       `范围：${estimate.groupCount} 个群，累计 ${formatDuration(estimate.totalGroupSeconds)}`,
@@ -946,7 +946,7 @@ const startCoverageRepair = async (batches) => {
     if (errorNode !== null) {
       errorNode.textContent = error.message;
     } else {
-      alert(error.message);
+      notifyError(error);
     }
   }
 };
@@ -2087,7 +2087,7 @@ const renderJobPanel = () => {
               try {
                 await api("/api/job/cancel", { method: "POST", body: "{}" });
               } catch (error) {
-                alert(error.message);
+                notifyError(error);
               }
             },
           }, "取消")
@@ -2364,7 +2364,7 @@ const renderWatchlistView = () => {
       el("button", {
         class: "btn small danger",
         title: "不再收这个群的新消息。已经收下的消息、总结和图片留在本机，不会删除；随时可以再添加。",
-        onclick: () => updateWatchlist({ remove: [entry.groupId] }).catch((error) => alert(error.message)),
+        onclick: () => updateWatchlist({ remove: [entry.groupId] }).catch((error) => notifyError(error)),
       }, "移除")));
   };
 
@@ -2377,7 +2377,7 @@ const renderWatchlistView = () => {
         ? el("span", { class: "tag" }, "已关注")
         : el("button", {
             class: "btn small",
-            onclick: () => updateWatchlist({ add: [group.groupId] }).catch((error) => alert(error.message)),
+            onclick: () => updateWatchlist({ add: [group.groupId] }).catch((error) => notifyError(error)),
           }, "添加"));
 
   const searchInput = el("input", {

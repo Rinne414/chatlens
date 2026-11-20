@@ -120,7 +120,7 @@ const pollBackupJob = async () => {
 };
 
 const startBackup = async (mode) => {
-  if (mode === "save" && !window.confirm(`把选中的内容保存到：\n${backupState.targetDir}\n\n已经备份过的文件会跳过，不会覆盖或删除任何东西。`)) {
+  if (mode === "save" && !await confirmInPage(`把选中的内容保存到：\n${backupState.targetDir}\n\n已经备份过的文件会跳过，不会覆盖或删除任何东西。`, { confirmLabel: "开始保存" })) {
     return;
   }
   try {
@@ -391,7 +391,7 @@ const backupReport = () => {
       el("h2", {}, report.mode === "save" ? "备份结果" : "扫描结果"),
       el("span", { class: "brief-meta" }, `${range} · ${report.groupIds.length} 个群 · ${briefWhen(Math.floor(Date.parse(report.createdAt) / 1000))}`),
       report.mode === "save"
-        ? el("button", { class: "btn small", onclick: () => api("/api/backup/open-folder", { method: "POST", body: "{}" }).catch((error) => alert(error.message)) }, "打开备份文件夹")
+        ? el("button", { class: "btn small", onclick: () => api("/api/backup/open-folder", { method: "POST", body: "{}" }).catch((error) => notifyError(error)) }, "打开备份文件夹")
         : null),
     backupVerdict(report),
     backupTiles(report),
@@ -465,7 +465,7 @@ const backupStatusTiles = () => {
     tile("上次备份", last.value, last.sub),
     tile("保存到", backupState.targetDir.split(/[\\/]/u).filter(Boolean).pop() || "未设置",
       backupTargetSub(), "",
-      backupState.openableDir === null ? null : () => api("/api/backup/open-folder", { method: "POST", body: "{}" }).catch((error) => alert(error.message))));
+      backupState.openableDir === null ? null : () => api("/api/backup/open-folder", { method: "POST", body: "{}" }).catch((error) => notifyError(error))));
 };
 
 /* ---------- rescue: AI originals about to disappear ---------- */

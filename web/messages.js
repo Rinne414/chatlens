@@ -364,7 +364,7 @@ const openChat = async ({ groupId, groupName, fromUnix, toUnix, fromLastRead, or
   try {
     await loadMessages(true);
   } catch (error) {
-    alert(`读取消息失败: ${error.message}`);
+    notify(`读取消息失败: ${error.message}`, { isError: true });
   }
   renderMessagesView();
   // A target these messages could not show (none loaded) must not fire on some
@@ -496,7 +496,7 @@ const markReadToLatest = async () => {
     await postReadMark({ toLatest: true });
     renderMessagesView();
   } catch (error) {
-    alert(error.message);
+    notifyError(error);
   }
 };
 
@@ -918,7 +918,7 @@ const chatRangeChips = () => {
         try {
           await loadMessages(true);
         } catch (error) {
-          alert(error.message);
+          notifyError(error);
         }
         renderMessagesView();
       },
@@ -948,7 +948,7 @@ const chatRangeChips = () => {
 const jumpToTime = async (text) => {
   const target = hktToUnix(text);
   if (target === null) {
-    alert("时间格式：2026-07-04 或 2026-07-04 14:30");
+    notify("时间格式：2026-07-04 或 2026-07-04 14:30", { isError: true });
     return;
   }
   const msg = app.msg;
@@ -964,7 +964,7 @@ const jumpToTime = async (text) => {
   try {
     await loadMessages(true);
   } catch (error) {
-    alert(error.message);
+    notifyError(error);
   }
   renderMessagesView();
 };
@@ -989,7 +989,7 @@ const goToLatest = async () => {
     try {
       await loadNewestPage();
     } catch (error) {
-      alert(`读取最新消息失败：${error.message}`);
+      notify(`读取最新消息失败：${error.message}`, { isError: true });
     }
   }
   renderMessagesView();
@@ -1093,7 +1093,7 @@ const renderChat = () => {
             try {
               await loadMessages(true);
             } catch (error) {
-              alert(error.message);
+              notifyError(error);
             }
             renderMessagesView();
           },

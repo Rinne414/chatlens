@@ -1083,6 +1083,21 @@ html[data-theme="dark"] .sel-bar { box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
 .rail-quit { display: grid; gap: 2px; text-align: left; }
 .rail-quit-hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
 
+/* Asking and telling inside the page (dialogs.js). */
+.cc-dialog-layer { position: fixed; inset: 0; z-index: 400; display: grid; place-items: center; padding: 16px; background: rgba(15, 20, 28, .45); }
+.cc-dialog { width: min(520px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 20px 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); box-shadow: 0 18px 50px rgba(0, 0, 0, .28); }
+.cc-dialog-title { margin: 0 0 8px; font-size: 17px; line-height: 1.4; }
+.cc-dialog-text { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.cc-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.cc-dialog-actions .btn.danger { border-color: var(--risk); color: var(--risk); }
+.cc-notices { position: fixed; left: 50%; bottom: 20px; z-index: 390; transform: translateX(-50%); display: grid; gap: 8px; width: min(560px, calc(100vw - 32px)); pointer-events: none; }
+.cc-notice { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); box-shadow: 0 10px 30px rgba(0, 0, 0, .22); font-size: 14px; line-height: 1.6; pointer-events: auto; }
+.cc-notice.is-error { border-color: var(--risk); }
+.cc-notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cc-notice-close { border: 0; background: none; color: var(--muted); font: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.cc-notice-close:hover { color: var(--ink); }
+html.phone .cc-notices { bottom: 84px; }
+
 /* A sentence that names another page links to it (places.js). */
 .place-link { text-decoration: underline; text-underline-offset: 2px; }
 .backup-rescue-where { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }

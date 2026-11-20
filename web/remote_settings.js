@@ -104,8 +104,8 @@ const enableRemote = () => remoteAction("/api/remote/enable", {}, {
   },
 });
 
-const disableRemote = () => {
-  if (!window.confirm("关闭手机连线？\n手机会立即连不上；已配对的手机会保留，重新开启后不用再配对。")) {
+const disableRemote = async () => {
+  if (!await confirmInPage("关闭手机连线？\n手机会立即连不上；已配对的手机会保留，重新开启后不用再配对。", { confirmLabel: "关闭手机连线", danger: true })) {
     return;
   }
   stopRemotePoll();
@@ -126,15 +126,15 @@ const cancelPairing = () => {
   remoteAction("/api/remote/pair-cancel");
 };
 
-const revokeDevice = (device) => {
-  if (!window.confirm(`取消「${device.name}」的配对？\n它会立即无法访问，要再用需重新配对。`)) {
+const revokeDevice = async (device) => {
+  if (!await confirmInPage(`取消「${device.name}」的配对？\n它会立即无法访问，要再用需重新配对。`, { confirmLabel: "取消配对", danger: true })) {
     return;
   }
   remoteAction("/api/remote/revoke", { id: device.id }, { onDone: () => remoteNotice("已取消这台设备的配对。", "ok") });
 };
 
-const revokeAllDevices = () => {
-  if (!window.confirm("取消所有手机的配对？\n手机丢了或不确定时用这个。")) {
+const revokeAllDevices = async () => {
+  if (!await confirmInPage("取消所有手机的配对？\n手机丢了或不确定时用这个。", { confirmLabel: "取消配对", danger: true })) {
     return;
   }
   remoteAction("/api/remote/revoke", { all: true }, { onDone: () => remoteNotice("已取消所有设备的配对。", "ok") });

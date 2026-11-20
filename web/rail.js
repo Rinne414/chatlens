@@ -114,7 +114,7 @@ const turnOnBackgroundRefresh = async () => {
   try {
     await api("/api/background", { method: "POST", body: JSON.stringify({ enabled: true }) });
   } catch (error) {
-    alert(`没能打开后台刷新：${error.message}`);
+    notify(`没能打开后台刷新：${error.message}`, { isError: true });
     return;
   }
   loadRail();

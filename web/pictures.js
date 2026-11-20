@@ -278,7 +278,7 @@ const pictureViewerActions = (viewer) => {
     viewer.probe === "ai"
       ? el("button", {
         class: "btn small",
-        onclick: () => downloadPictureWorkflow(viewer.md5).catch((error) => alert(error.message)),
+        onclick: () => downloadPictureWorkflow(viewer.md5).catch((error) => notifyError(error)),
       }, "下载工作流")
       : null,
     notice);

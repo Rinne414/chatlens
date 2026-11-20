@@ -492,7 +492,7 @@ const reviewEstimate = (costs, messages) => {
 const reviewBackfill = async (data, estimate) => {
   const calls = data.status.backfillChunks;
   const question = `补齐 ${reviewShortDay(data.day)} 的 AI 总结？\n\n约 ${calls} 次 AI 调用${estimate ? `，按你最近的用量预计 ${estimate}` : ""}。\n后台几分钟内做完，做完后这页会自动更新。`;
-  if (!window.confirm(question)) {
+  if (!await confirmInPage(question)) {
     return;
   }
   reviewState.busy = true;

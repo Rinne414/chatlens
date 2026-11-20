@@ -102,7 +102,7 @@ const openFromSheet = (view) => {
 };
 
 const unpairThisPhone = async () => {
-  if (!window.confirm("让这台手机退出配对？\n之后要再用，需要在电脑上重新生成配对码。")) {
+  if (!await confirmInPage("让这台手机退出配对？\n之后要再用，需要在电脑上重新生成配对码。", { confirmLabel: "退出配对", danger: true })) {
     return;
   }
   try {

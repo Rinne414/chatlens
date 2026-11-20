@@ -403,7 +403,7 @@ const saveGalleryDir = async (dir) => {
   try {
     replaceGallery({ saveTarget: await api("/api/pictures/save-dir", { method: "POST", body: JSON.stringify({ dir }) }), editingSaveDir: false });
   } catch (error) {
-    alert(error.message);
+    notifyError(error);
   }
   refreshGallerySelection();
 };

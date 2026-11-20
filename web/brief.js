@@ -276,7 +276,7 @@ const briefRunNow = async () => {
 };
 
 const briefMarkSeen = async () => {
-  if (!window.confirm("标记为看完了？\n下一份简报只包含从现在开始的新消息（已有的消息和总结都还在「消息」里）。")) {
+  if (!await confirmInPage("标记为看完了？\n下一份简报只包含从现在开始的新消息（已有的消息和总结都还在「消息」里）。", { confirmLabel: "标为看完" })) {
     return;
   }
   briefState.busy = true;

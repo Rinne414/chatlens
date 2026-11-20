@@ -180,7 +180,7 @@ const galleryKeptHeadNodes = () => {
         type: "button",
         title: "文件名是图片的编号（md5），不好认；找图还是在这一页方便",
         onclick: () => api("/api/storage/open", { method: "POST", body: JSON.stringify({ category: "knowledge-media" }) })
-          .catch(() => alert("还没有留存过原图，所以还没有这个文件夹。")),
+          .catch(() => notify("还没有留存过原图，所以还没有这个文件夹。", { isError: true })),
       }, "打开留存文件夹")),
     keptFolderLine(),
     keptRemovedLine(summary.removed),

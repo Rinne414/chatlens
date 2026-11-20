@@ -57,7 +57,7 @@ const pictureExportStatusNodes = (owner) => {
           type: "button",
           title: pictureExport.path ?? "",
           onclick: () => api("/api/pictures/export/open", { method: "POST", body: JSON.stringify({ folder: pictureExport.folder }) })
-            .catch((error) => alert(error.message)),
+            .catch((error) => notifyError(error)),
         }, "打开文件夹"),
   ];
 };

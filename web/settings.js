@@ -416,7 +416,7 @@ const renderMoreLinks = () =>
 /* --- background refresh, notifications, desktop integration --- */
 
 const stopBackgroundService = async () => {
-  if (!window.confirm("停止后台服务？\n\n和「退出 ChatLens」一样：ChatLens 完全退出，不再自动收消息和总结，这个页面会断开。数据和设置都不会丢，之后从开始菜单 / 应用菜单或桌面上的「ChatLens」重新打开即可。")) {
+  if (!await confirmInPage("停止后台服务？\n\n和「退出 ChatLens」一样：ChatLens 完全退出，不再自动收消息和总结，这个页面会断开。数据和设置都不会丢，之后从开始菜单 / 应用菜单或桌面上的「ChatLens」重新打开即可。", { confirmLabel: "退出 ChatLens", danger: true })) {
     return;
   }
   try {

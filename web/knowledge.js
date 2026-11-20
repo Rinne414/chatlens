@@ -221,9 +221,9 @@ const ensureKnowledgeLoaded = async () => {
 const copyToClipboard = async (text, label) => {
   try {
     await navigator.clipboard.writeText(text);
-    alert(`${label}已复制`);
+    notify(`${label}已复制`);
   } catch {
-    alert("复制失败，请手动选取文本。");
+    notify("复制失败，请手动选取文本。", { isError: true });
   }
 };
 
@@ -507,7 +507,7 @@ const exportPanel = () => {
         class: "btn small",
         title: "清空导出记录后，所有图片会被视为没导过",
         onclick: async () => {
-          if (!confirm("清空导出记录？之后所有图片都会被当成没导过。")) {
+          if (!await confirmInPage("清空导出记录？之后所有图片都会被当成没导过。", { confirmLabel: "清空记录", danger: true })) {
             return;
           }
           try {
@@ -924,7 +924,7 @@ const knowledgePictureActions = (item) => {
     item.hasWorkflow
       ? el("button", {
         class: "btn small",
-        onclick: () => downloadPictureWorkflow(item.hash).catch((error) => alert(error.message)),
+        onclick: () => downloadPictureWorkflow(item.hash).catch((error) => notifyError(error)),
       }, "下载工作流")
       : null,
     item.hasFile
@@ -933,9 +933,9 @@ const knowledgePictureActions = (item) => {
         class: "btn small",
         onclick: async () => {
           try {
-            alert((await keepOnePicture(item.hash)).text);
+            notify((await keepOnePicture(item.hash)).text);
           } catch (error) {
-            alert(error.message);
+            notifyError(error);
           }
         },
       }, "留存原图"));

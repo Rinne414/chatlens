@@ -440,7 +440,7 @@ const copyKnowledgePrompt = async (item) => {
     const full = await api(`/api/knowledge/image?hash=${encodeURIComponent(item.hash)}`);
     copyToClipboard(full.prompt, "咒语");
   } catch (error) {
-    alert(error.message);
+    notifyError(error);
   }
 };
 

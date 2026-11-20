@@ -45,13 +45,13 @@ const quitConsole = async () => {
   } catch {
     // Still offer to close; the question just says less.
   }
-  if (!window.confirm(quitQuestion(status))) {
+  if (!await confirmInPage(quitQuestion(status), { confirmLabel: "退出 ChatLens", danger: true })) {
     return;
   }
   try {
     await api("/api/shutdown", { method: "POST", body: "{}" });
   } catch (error) {
-    alert(`关闭失败：${error.message}`);
+    notify(`关闭失败：${error.message}`, { isError: true });
     return;
   }
   showQuitScreen(status?.desktop ?? null);

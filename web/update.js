@@ -67,7 +67,7 @@ const runUpdateCheck = async () => {
 };
 
 const applyUpdateNow = async (info) => {
-  if (!window.confirm(`更新到 v${info.latestVersion}？\nChatLens 会自动退出并重启（约 10-30 秒）。配置、密钥和已生成的数据都会保留。`)) {
+  if (!await confirmInPage(`更新到 v${info.latestVersion}？\nChatLens 会自动退出并重启（约 10-30 秒）。配置、密钥和已生成的数据都会保留。`, { confirmLabel: "现在更新" })) {
     return;
   }
   updateState.busy = true;

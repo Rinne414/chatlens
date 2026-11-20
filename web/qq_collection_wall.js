@@ -212,7 +212,7 @@ const qqcRenderSaveBar = () => {
       }, saveDir === "" ? "先选新图存到哪" : `存到 ${saveDir.split(/[\\/]/u).filter(Boolean).at(-1)}`),
     el("span", { class: "qqc-save-text" }, qqcSaveText()),
     !qqc.save.running && qqc.save.saved > 0
-      ? el("button", { class: "btn small", type: "button", onclick: () => api("/api/qq-collection/open", { method: "POST", body: "{}" }).catch((error) => alert(error.message)) }, "打开文件夹")
+      ? el("button", { class: "btn small", type: "button", onclick: () => api("/api/qq-collection/open", { method: "POST", body: "{}" }).catch((error) => notifyError(error)) }, "打开文件夹")
       : null);
 };
 
@@ -430,7 +430,7 @@ const qqcRenderPreviewLayer = () => {
         el("p", { class: "kb-meta" }, `${picture.width} × ${picture.height} · md5 ${picture.md5}`),
         qqcIsSaved(picture)
           ? [el("p", {}, picture.savedBy === "name" ? "✓ 已存（文件名是这张图的 md5，内容被 QQ 重新压缩过）：" : "✓ 已存："), el("code", {}, picture.savedPath),
-            el("button", { class: "btn small", type: "button", onclick: () => api("/api/qq-collection/open", { method: "POST", body: JSON.stringify({ path: picture.savedPath }) }).catch((error) => alert(error.message)) }, "打开所在文件夹")]
+            el("button", { class: "btn small", type: "button", onclick: () => api("/api/qq-collection/open", { method: "POST", body: JSON.stringify({ path: picture.savedPath }) }).catch((error) => notifyError(error)) }, "打开所在文件夹")]
           : el("button", {
             class: qqc.selected.has(picture.md5) ? "btn" : "btn primary",
             type: "button",

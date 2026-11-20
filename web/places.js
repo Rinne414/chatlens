@@ -76,7 +76,7 @@ const openFolderButton = (label, open, title = "") => el("button", {
   class: "btn small desktop-action",
   type: "button",
   title,
-  onclick: () => open().catch((error) => alert(error.message)),
+  onclick: () => open().catch((error) => notifyError(error)),
 }, label);
 
 const openKeptFolderButton = () => openFolderButton(

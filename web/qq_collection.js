@@ -139,7 +139,7 @@ const qqcStartScan = async () => {
     qqcRenderScanStatus();
     qqcPollScan();
   } catch (error) {
-    alert(error.message);
+    notifyError(error);
   }
 };
 
@@ -198,7 +198,7 @@ const qqcSaveFolders = async (form) => {
     renderQqCollectionView();
     qqcStartScan();
   } catch (error) {
-    alert(error.message);
+    notifyError(error);
   }
 };
 
