@@ -636,7 +636,7 @@ const galleryFacetSections = () => {
   const facets = app.gallery.facets;
   const tab = app.gallery;
   if (facets === null) {
-    return [el("p", { class: "kb-meta" }, "正在统计…")];
+    return [el("p", { class: "kb-meta" }, waiting("正在统计…", "时间范围越长越久，「全部」第一次要几秒"))];
   }
   if (facets.unavailable) {
     return [el("p", { class: "kb-meta" }, "暂时没有统计。")];
@@ -734,7 +734,7 @@ const galleryWall = () => {
     return el("div", { class: "notice risk" }, `读取画廊失败：${tab.error}`);
   }
   if (tab.results === null) {
-    return el("div", { class: "wall-empty" }, "读取中…");
+    return el("div", { class: "wall-empty" }, waiting("读取中…", "图片很多时要几秒到十几秒，页面可以照常用"));
   }
   if (tab.results.items.length === 0) {
     if (tab.kept) {

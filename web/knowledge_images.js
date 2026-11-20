@@ -298,7 +298,7 @@ const selectFacetRows = (rows, key, labelOf) => rows.map((row) => facetRow({
 const knowledgeFacetSections = () => {
   const facets = app.knowledgeTab.facets;
   if (facets === null) {
-    return [el("p", { class: "kb-meta" }, "正在统计…")];
+    return [el("p", { class: "kb-meta" }, waiting("正在统计…", "图片很多时要几秒到十几秒，页面可以照常用"))];
   }
   if (facets.available === false) {
     return [el("p", { class: "kb-meta" }, "暂时没有统计。")];
@@ -596,7 +596,7 @@ const knowledgeWall = () => {
   const tab = app.knowledgeTab;
   const results = tab.results;
   if (results === null) {
-    return el("div", { class: "wall-empty" }, tab.loading ? "读取中…" : "");
+    return el("div", { class: "wall-empty" }, tab.loading ? waiting("读取中…", "图片很多时要几秒到十几秒，页面可以照常用") : "");
   }
   if (results.available === false) {
     return el("div", { class: "wall-empty" }, "还没有咒语库。后台整理图片时会从 QQ 图片缓存里读出 AI 生成参数并建库。");

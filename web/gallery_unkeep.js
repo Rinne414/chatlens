@@ -168,7 +168,7 @@ const galleryKeptHeadNodes = () => {
   }
   const summary = keptUi.summary;
   if (summary === null) {
-    return [el("p", { class: "kb-meta" }, keptUi.loading ? "正在统计留存的原图…" : "暂时读不到留存的统计。")];
+    return [el("p", { class: "kb-meta" }, keptUi.loading ? waiting("正在统计留存的原图…", "留存得多时要几秒") : "暂时读不到留存的统计。")];
   }
   return [
     el("p", { class: "kb-meta gallery-kept-hint" },

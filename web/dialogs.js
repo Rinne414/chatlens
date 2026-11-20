@@ -82,3 +82,27 @@ const notify = (message, { isError = false } = {}) => {
 
 // For .catch(): something the user asked for did not work.
 const notifyError = (error) => notify(error?.message ?? String(error), { isError: true });
+
+/* ---------- waiting ----------
+   "读取中…" alone looks like a hang after a few seconds. waiting(label, hint)
+   is a line that, once the wait is noticeable, says how long it has been and
+   what to expect; it stops counting by itself when the page replaces it. */
+
+const WAITING_SHOWS_AFTER_SECONDS = 2;
+
+const waiting = (label, hint = "") => {
+  const started = Date.now();
+  const elapsed = el("span", { class: "cc-waiting-elapsed" });
+  const node = el("span", { class: "cc-waiting", role: "status" }, el("span", { class: "cc-waiting-dot" }), label, elapsed);
+  const timer = setInterval(() => {
+    if (!node.isConnected) {
+      clearInterval(timer);
+      return;
+    }
+    const seconds = Math.floor((Date.now() - started) / 1000);
+    if (seconds >= WAITING_SHOWS_AFTER_SECONDS) {
+      elapsed.textContent = ` 已经 ${seconds} 秒${hint === "" ? "" : `，${hint}`}`;
+    }
+  }, 1000);
+  return node;
+};

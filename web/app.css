@@ -1098,6 +1098,13 @@ html[data-theme="dark"] .sel-bar { box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
 .cc-notice-close:hover { color: var(--ink); }
 html.phone .cc-notices { bottom: 84px; }
 
+/* Waiting, with how long it has been (dialogs.js). */
+.cc-waiting { display: inline-flex; align-items: baseline; gap: 6px; }
+.cc-waiting-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); align-self: center; animation: cc-waiting-pulse 1.1s ease-in-out infinite; }
+.cc-waiting-elapsed { color: var(--muted); }
+@keyframes cc-waiting-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .cc-waiting-dot { animation: none; } }
+
 /* A control's hint for touch and keyboard (hints.js). */
 .cc-hint { position: fixed; z-index: 420; max-width: min(340px, calc(100vw - 16px)); padding: 8px 11px; border-radius: 10px; background: var(--ink); color: var(--panel); font-size: 13px; line-height: 1.6; box-shadow: 0 8px 24px rgba(0, 0, 0, .3); pointer-events: none; overflow-wrap: anywhere; }
 
