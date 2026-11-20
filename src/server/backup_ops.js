@@ -77,10 +77,18 @@ const groupChoices = (config) => {
     .sort((left, right) => Number(right.watched) - Number(left.watched) || right.messages - left.messages);
 };
 
+// The folder 打开备份文件夹 opens: the last backup's, else the one chosen for
+// the next; null while it does not exist yet (the first backup makes it).
+const openableDir = (config = state.loadConfig()) => {
+  const target = readReport()?.targetDir ?? config.backup?.targetDir ?? defaultTargetDir();
+  return target && fs.existsSync(target) ? target : null;
+};
+
 const getSetup = () => {
   const config = state.loadConfig();
   return {
     targetDir: config.backup?.targetDir ?? defaultTargetDir(),
+    openableDir: openableDir(config),
     groups: groupChoices(config),
     categories: normalizeCategories(config.backup?.categories),
     // On by default: PC QQ never downloaded most pictures, and QQ's own image
@@ -129,4 +137,4 @@ const start = ({ mode, groupIds, fromDay, toDay, categories, remote, targetDir }
   return { started: true, jobId: job.id };
 };
 
-module.exports = { getSetup, start, readReport, validateTargetDir, defaultTargetDir };
+module.exports = { getSetup, start, readReport, validateTargetDir, defaultTargetDir, openableDir };

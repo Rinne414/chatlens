@@ -665,9 +665,8 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
     // Opens the folder of the last backup; the path comes from the tool's own
     // report, never from the request.
     if (request.method === "POST" && url.pathname === "/api/backup/open-folder") {
-      // Before the first backup: the folder chosen for it, if it is there already.
-      const target = backupOps.readReport()?.targetDir ?? backupOps.getSetup().targetDir ?? null;
-      if (target === null || !fs.existsSync(target)) {
+      const target = backupOps.openableDir();
+      if (target === null) {
         throw new Error("备份文件夹还不存在，保存一次之后才会有。");
       }
       launchExplorer(target);

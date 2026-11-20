@@ -37,6 +37,8 @@ const backupState = {
   // Set once the user ticks/unticks the box, so a reload keeps their choice.
   remoteChosen: false,
   targetDir: "",
+  // The backup folder when it exists already (it is made by the first backup).
+  openableDir: null,
   job: null,
   report: null,
   error: null,
@@ -71,6 +73,7 @@ const openBackupView = async () => {
     backupState.categories = backupState.categories ?? { ...setup.categories };
     backupState.remote = backupState.remoteChosen ? backupState.remote : setup.remote;
     backupState.targetDir = backupState.targetDir || setup.targetDir;
+    backupState.openableDir = setup.openableDir ?? null;
     backupState.fromDay = backupState.fromDay ?? backupDaysAgo(29);
     backupState.toDay = backupState.toDay ?? backupToday();
     backupState.error = null;
@@ -255,7 +258,7 @@ const backupForm = () => {
       el("span", { class: "brief-meta" }, "扫描只统计有多少、电脑上缺哪些，不写入任何文件；可以跳过直接保存。")),
     el("p", { class: "brief-meta backup-dest" }, "「保存到电脑」存到：",
       el("code", {}, backupState.targetDir.trim() || "（还没填，见第 4 步）"),
-      backupState.targetDir.trim() ? openBackupFolderButton() : null));
+      backupState.openableDir !== null ? openBackupFolderButton() : null));
 };
 
 /* ---------- progress and report ---------- */
@@ -461,8 +464,8 @@ const backupStatusTiles = () => {
         () => document.getElementById("backup-rescue")?.scrollIntoView({ behavior: "smooth", block: "start" })),
     tile("上次备份", last.value, last.sub),
     tile("保存到", backupState.targetDir.split(/[\\/]/u).filter(Boolean).pop() || "未设置",
-      backupState.targetDir ? `${backupState.targetDir} · 点这里打开文件夹` : "在下面第 4 步填写", "",
-      backupState.targetDir ? () => api("/api/backup/open-folder", { method: "POST", body: "{}" }).catch((error) => alert(error.message)) : null));
+      backupTargetSub(), "",
+      backupState.openableDir === null ? null : () => api("/api/backup/open-folder", { method: "POST", body: "{}" }).catch((error) => alert(error.message))));
 };
 
 /* ---------- rescue: AI originals about to disappear ---------- */
@@ -487,6 +490,15 @@ const rescueExpiryLine = (items) => {
 };
 
 const rescueBadgeText = (daysLeft) => (daysLeft === 0 ? "不到 1 天" : `${daysLeft} 天`);
+
+const backupTargetSub = () => {
+  if (!backupState.targetDir) {
+    return "在下面第 4 步填写";
+  }
+  return backupState.openableDir === null
+    ? `${backupState.targetDir} · 这个文件夹还没有，第一次保存时会建好`
+    : `${backupState.openableDir} · 点这里打开文件夹`;
+};
 
 const backupRescueProgressText = () => {
   const rescue = backupState.rescue;
