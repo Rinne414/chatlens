@@ -227,7 +227,7 @@ const qqcFolders = (data) => {
     el("div", { class: "gp-section-head" },
       el("h3", {}, "你的图存在哪"),
       editing ? null : el("button", { class: "btn small", type: "button", dataset: { waitSave: "" }, disabled: qqc.save.running, title: qqc.save.running ? "存完图再改" : null, onclick: () => { qqc.editingFolders = true; renderQqCollectionView(); } }, "更改")),
-    el("p", { class: "kb-meta" }, "同一张图（内容一样），或文件名就是这张图的 md5（在 QQ 收藏里「另存为」会重新压缩成 JPG，但保留这个名字）都算已存；分到哪个子文件夹、改没改名都认得出来。"),
+    el("p", { class: "kb-meta" }, "内容相同，或文件名是这张图的 md5（QQ「另存为」得到的 JPG 就是这样），都算已存；放在哪个子文件夹都认得出。"),
     editing
       ? qqcFolderForm(settings)
       : el("dl", { class: "qqc-folder-list" },

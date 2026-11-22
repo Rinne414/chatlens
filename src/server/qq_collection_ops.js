@@ -100,7 +100,9 @@ const reload = () => {
     };
     collectionError = null;
   } catch (error) {
-    collectionError = `读取 QQ 收藏失败：${error.message}`;
+    collectionError = error.code === "ENOENT"
+      ? "没有找到这个账号的 QQ 收藏。在 QQ 里打开一次「收藏」让它同步，再点「重新读取」；还不行就到设置检查 QQ 数据库路径。"
+      : `读取 QQ 收藏失败：${error.message}`;
   }
 };
 
