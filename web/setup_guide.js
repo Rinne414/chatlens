@@ -310,8 +310,8 @@ const aiStep = (status) => {
       el("button", { class: "btn small", type: "button", onclick: () => openSettingsCard(() => $("#settings-llm")) }, "去设置 AI 服务")));
 };
 
-// The footer used to say everything stays on this computer; these do go
-// online (settings.js 安全说明 lists the same). The update check has no switch.
+// What goes online, in the same terms as settings.js 安全说明; each item
+// names the switch that turns it off where there is one.
 const setupOnlineNote = () => el("details", { class: "setup-online" },
   el("summary", {}, "聊天记录只存在这台电脑上。联网时会发生什么？"),
   el("ul", {},

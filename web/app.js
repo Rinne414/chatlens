@@ -352,8 +352,8 @@ const settings = {
   theme: themeOf(readThemeChoice()),
   // "auto" follows the viewport width (see app.css); a number overrides it.
   zoom: readZoomChoice(),
-  // Always on. Kept as a field because it also gates real avatar images, not
-  // just nav emoji; the toggle was removed since nobody wants them off.
+  // Always on, with no toggle. A field because it also gates real avatar
+  // images, not just nav emoji.
   icons: true,
 };
 
