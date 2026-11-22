@@ -42,7 +42,7 @@ const isWindowsHost = () => settingsState.status?.platform === "win32";
 const secretStorageText = () => {
   const backend = settingsState.status?.secretBackend;
   if (backend === "dpapi") {
-    return "用 Windows 自带的加密保存在这台电脑上，只有你这个 Windows 账户能解开（Windows DPAPI，位置 %APPDATA%\\QQSummaryTools\\）";
+    return "用 Windows 自带的加密存在这台电脑上，只有你的 Windows 账户能解开（DPAPI，%APPDATA%\\QQSummaryTools）";
   }
   if (backend === "secret-tool") {
     return "存进系统的密码保管处（钥匙圈：GNOME Keyring / KWallet，经 secret-tool）";
@@ -245,9 +245,9 @@ const renderSettingsView = () => {
   }
   const ntqqKeyHint = el("div", { style: "margin:0 0 8px" },
     el("p", { class: "card-sub", style: "margin:0 0 8px" },
-      "QQ 的聊天记录是加密的，要有密钥才能读。推荐「自动获取密钥」：先打开并登录电脑版 QQ，再点下面的按钮。程序会在正在运行的 QQ 里找到它打开聊天记录用的密钥（读取 QQ 的进程内存），试着打开一次确认无误后保存。"),
+      "QQ 的聊天记录是加密的。先打开并登录电脑版 QQ，再点「自动获取密钥」：程序从运行中的 QQ 内存里读出密钥，试开一次确认后保存。"),
     el("p", { class: "card-sub", style: "margin:0 0 8px" },
-      "只读不改：不改动 QQ 的任何文件和设置，全程在这台电脑上完成，不联网。"),
+      "只读，不联网。"),
     el("div", { class: "row" },
       el("button", {
         class: "btn small primary",
@@ -263,7 +263,7 @@ const renderSettingsView = () => {
             const result = await api("/api/settings/keys/auto-detect", { method: "POST", body: "{}" });
             settingsState.status = await api("/api/settings");
             if (settingsState.status?.ntqqKeySaved === true) {
-              autoKeyState.notice = { text: `✓ 已自动获取并保存密钥（从 ${result.candidateCount} 个候选中命中）。输入框留空是正常的，密钥不会回显。`, isError: false };
+              autoKeyState.notice = { text: "✓ 密钥已保存。输入框不会显示它。", isError: false };
             } else {
               autoKeyState.notice = { text: "密钥验证通过，但没有写入本机保存位置。请再点一次「自动获取密钥」。", isError: true };
             }
@@ -284,11 +284,11 @@ const renderSettingsView = () => {
 
   const keysCard = el("div", { class: "card", id: "settings-keys" },
     el("h2", {}, "密钥"),
-    el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}，不会放进程序文件夹。`),
+    el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}。`),
     keyRow("QQ 数据库密钥（NTQQ_DB_KEY）", "ntqqKey", status.ntqqKeySaved, ntqqKeyHint),
     keyRow("AI 服务的 API Key（AI 总结用，可选）", "llmKey", status.llmKeySaved,
       el("p", { class: "card-sub", style: "margin:0 0 8px" },
-        "API Key 是 AI 服务商给你的一串密码，用它调用 AI 并按用量付费。DeepSeek、OpenAI 等大多数服务都能用（要求「OpenAI 兼容」接口；在自己电脑上跑模型的 Ollama 也行）。不填就只做本地统计，不做 AI 总结。")));
+        "AI 服务商给你的密钥，按用量付费。支持 OpenAI 兼容接口的服务都行，如 DeepSeek、OpenAI，或本机的 Ollama。不填就不做 AI 总结。")));
 
   /* --- LLM config --- */
   // Inputs read from a draft so re-renders (model chips, schedule refresh)
@@ -397,7 +397,7 @@ const renderSettingsView = () => {
     el("ul", { style: "margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.9" },
       el("li", {}, "只读：程序复制数据库文件后离线解析，从不写 QQ 的任何文件，也不使用 QQ 登录协议。"),
       el("li", {}, "只在这台电脑上：ChatLens 只接受这台电脑自己的访问（127.0.0.1），每次启动还会换一个随机口令（访问令牌）。开启「手机连线」后，只有通过 Tailscale（把你自己的设备连成私人网络的软件）进来、并在这里配对过的手机能访问，而且只能看，不能改设置。"),
-      el("li", {}, "会联网的地方：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求（原图会核对是否完整，下载用的临时凭证只留在内存里）；开启 AI 总结时，消息文字会发给你设置的 AI 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本号，自动的那部分可以在上面「版本与更新」关掉。"),
+      el("li", {}, "会联网的地方：头像；群图片的缩略图和你点开的原图会向腾讯的图片服务器请求；开启 AI 总结时，消息文字会发给你设置的 AI 服务；检查更新（打开时和每 6 小时一次，或点「检查更新」）只向 GitHub 读取最新版本号，自动的那部分可以在上面「版本与更新」关掉。"),
       el("li", {}, "Obsidian 笔记库：只在你选的文件夹里写本地文件，不联网；那个文件夹如果被 Obsidian Sync、网盘或 Git 同步，内容会跟着上传。")));
 
   // The contents row is read from the cards once they are on the page.
@@ -424,7 +424,7 @@ const renderMoreLinks = () =>
 /* --- background refresh, notifications, desktop integration --- */
 
 const stopBackgroundService = async () => {
-  if (!await confirmInPage("停止后台服务？\n\n和「退出 ChatLens」一样：ChatLens 完全退出，不再自动收消息和总结，这个页面会断开。数据和设置都不会丢，之后从开始菜单 / 应用菜单或桌面上的「ChatLens」重新打开即可。", { confirmLabel: "退出 ChatLens", danger: true })) {
+  if (!await confirmInPage("停止后台服务？\n\nChatLens 会完全退出，不再自动收消息和总结，这个页面会断开。数据和设置都保留，之后从开始菜单 / 应用菜单或桌面上的「ChatLens」重新打开。", { confirmLabel: "退出 ChatLens", danger: true })) {
     return;
   }
   try {
@@ -443,7 +443,7 @@ const renderStopRow = () => el("div", { class: "settings-stop" },
     el("button", { class: "btn small", type: "button", onclick: quitConsole }, "⏻ 退出 ChatLens"),
     el("button", { class: "btn small danger", type: "button", onclick: stopBackgroundService }, "停止后台服务")),
   el("p", { class: "card-sub", style: "margin:6px 0 0" },
-    `这两个按钮做的是同一件事：ChatLens 完全退出，不再自动收消息和总结，直到你再打开它。数据和设置都不会丢。${quitReopenHint(settingsState.background?.desktop)}`));
+    `两个按钮都会让 ChatLens 完全退出，直到你再打开它。数据和设置都保留。${quitReopenHint(settingsState.background?.desktop)}`));
 
 const backgroundToggle = (label, hint, checked, onChange) =>
   el("label", { class: "bg-toggle" },
@@ -509,7 +509,7 @@ const renderBackgroundCard = () => {
   return el("div", { class: "card" },
     el("h2", { id: "settings-background" }, "后台与通知"),
     el("p", { class: "card-sub" },
-      shortText("打开「自动刷新」后，ChatLens 开着时（窗口可以关掉）会每隔一段时间自动收新消息、攒够一段就交给 AI 总结，你打开「简报」时内容已经准备好。每条消息只总结一次；各群的总览最多每 2 小时重写一次。实际花了多少看上面的「AI 用量与费用」，也可以随时暂停或设每日预算。", 1)),
+      shortText("ChatLens 开着时（窗口关掉也行）每隔一段时间收新消息，攒够一段就交给 AI 总结，打开简报时已经准备好。花了多少在上面的「AI 用量与费用」里看，也能暂停或设每日预算。", 1)),
     backgroundStatusLine(background),
     el("div", { class: "bg-grid" },
       backgroundToggle("自动刷新", "关闭后只有手动总结", current.enabled, (value) => saveBackgroundSetting({ enabled: value })),
@@ -528,14 +528,13 @@ const renderBackgroundCard = () => {
       el("button", {
         class: "btn small",
         disabled: background.running,
+        title: "马上收一次新消息，还没攒够一段的也交给 AI 总结（开着 AI 总结时会产生费用）",
         onclick: async () => {
           await desktopAction("/api/background/run-now", { force: true }, "已开始刷新，并会把攒着的新消息一起总结。");
         },
       }, "立即刷新"),
       msg),
-    el("p", { class: "card-sub", style: "margin:4px 0 0" },
-      "「立即刷新」：马上收一次新消息，并把还没攒够一段的新消息也交给 AI 总结（开着 AI 总结时会产生费用）；不改任何设置。"),
     renderStopRow(),
     el("p", { class: "card-sub", style: "margin:12px 0 0" },
-      "想要独立的程序窗口：在 Chrome / Edge 地址栏右侧点「安装」图标，之后从开始菜单直接打开，任务栏图标还会显示 @ 你的数量。"));
+      "想要独立窗口：在 Chrome / Edge 地址栏右侧点「安装」图标。任务栏图标会显示 @ 你的数量。"));
 };

@@ -76,7 +76,7 @@ const aiRedoReport = (report) => {
   return el("div", { class: "ai-redo" },
     el("p", { class: "card-sub", style: "margin:10px 0 4px" },
       `${job.fromDay} – ${job.toDay}：重做 ${job.redoChunks} 段已有摘要，补齐 ${job.backfillChunks} 段没摘要过的消息（${briefNumber(job.backfillMessages)} 条）。`,
-      `后台每次刷新处理一批（新消息优先，还有待做时两次刷新之间只隔 2 分钟），Grok 不能用时自动暂停，不会改用付费 API。`),
+      "后台每次刷新处理一批，新消息优先。Grok 不能用时自动暂停，不花 API 费用。"),
     el("div", { class: "ai-tiles" },
       el("div", { class: "ai-tile" },
         el("span", { class: "ai-tile-label" }, "已用"),
@@ -92,7 +92,7 @@ const aiRedoReport = (report) => {
         remaining.chunks > 0 && Number.isFinite(remaining.etaMinutes)
           ? el("span", { class: "ai-tile-meta" }, `照目前的速度，大约还要 ${aiDuration(remaining.etaMinutes)}（ChatLens 开着才会继续）`)
           : null,
-        el("span", { class: "ai-tile-meta" }, perMessage.measured ? "按这次已完成部分的实测平均估算" : "按试跑实测（每条约 122 token）估算，跑一阵后会更准"))),
+        el("span", { class: "ai-tile-meta" }, perMessage.measured ? "按这次已完成部分的实测平均估算" : "先按每条约 122 token 估算，跑一阵后会更准"))),
     el("details", { class: "settings-fold" },
       el("summary", {}, "展开：每天、每个群的进度"),
       aiRedoTable(report.rows)));

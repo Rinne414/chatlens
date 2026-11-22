@@ -122,7 +122,7 @@ const aiRedoRow = (usage) => {
         onclick: () => aiAction("/api/llm/redo", { days: Number(daysSelect.value) }, "已排队，后台会用详细模式处理这些日子。"),
       }, "用详细模式重做")),
     el("p", { class: "card-sub", style: "margin:4px 0 0" },
-      "会重新调用 AI，把选中日子的摘要换成详细版，用量按这些日子的消息多少算，排队后这里会显示已用和预计还需。排队后不能取消，只能用上面的「暂停 AI 整理」先停下。"),
+      "会重新调用 AI，用量看这些日子的消息多少。排队后不能取消，可以用上面的「暂停 AI 整理」停下。"),
     report);
 };
 
@@ -144,7 +144,7 @@ const aiDetailRow = (usage) => {
       ? el("div", { class: "notice warn", style: "margin:8px 0 0" }, "你现在用的是按量计费的 API key：详细模式的用量是标准的好几倍，费用会明显增加。有 Grok 订阅的话，建议在上方登录 Grok 再用详细模式。")
       : null,
     detailed && usage.grokSelected
-      ? el("p", { class: "card-sub", style: "margin:8px 0 0" }, "Grok 不能用而改用备用 API key 时，会自动按标准模式处理，不会用详细模式烧 API 费用。")
+      ? el("p", { class: "card-sub", style: "margin:8px 0 0" }, "Grok 不能用、改用备用 API key 时，自动按标准模式处理。")
       : null,
     detailed ? aiRedoRow(usage) : null);
 };
@@ -238,7 +238,7 @@ const aiPriceEditor = () => {
   });
   return el("details", { class: "ai-prices", open: aiUsageState.showPrices, ontoggle: (event) => { aiUsageState.showPrices = event.target.open; } },
     el("summary", {}, "价格表（每百万 token）"),
-    el("p", { class: "card-sub" }, `内置价格抄自官网（${providers.priceSourceDate}），会过时。你的服务商或模型不在表里，就在下面加一行：模型名只要包含这里填的文字就算匹配，排在内置价格前面。`),
+    el("p", { class: "card-sub" }, `内置价格取自官网（${providers.priceSourceDate}），可能过时。表里没有你的模型就加一行：模型名包含所填文字即算匹配，优先于内置价格。`),
     el("table", { class: "ai-table" },
       el("thead", {}, el("tr", {}, ["模型名包含", "币种", "发给 AI", "发给 AI（缓存命中）", "AI 写回", "离峰半价", ""].map((head) => el("th", {}, head)))),
       el("tbody", {},
@@ -298,7 +298,7 @@ const renderAiUsageCard = () => {
   const perThousand = usage.perThousandMessages;
   return el("div", { class: "card" },
     el("h2", {}, "AI 用量与费用"),
-    el("p", { class: "card-sub" }, "token 是 AI 服务算用量和收费的单位，文字越多 token 越多：「发给 AI」是送去总结的消息，「AI 写回」是它写的总结。这里按 AI 服务每次报回的实际 token 数统计，费用按下方价格表估算，以服务商账单为准。后台刷新只收新消息，本身不调用 AI：群里攒够一段新消息才总结一次，各群总览再按「简报合并」的间隔重写，所以费用主要看群有多热闹。"),
+    el("p", { class: "card-sub" }, shortText("按 AI 服务每次报回的 token 数统计，费用按下方价格表估算，以服务商账单为准。token 是 AI 计费的单位：「发给 AI」是送去总结的消息，「AI 写回」是它写的总结。群里攒够一段新消息才总结一次，各群总览按「简报合并」的间隔重写，所以费用主要看群有多热闹。", 1)),
     aiPauseRow(usage),
     aiDetailRow(usage),
     el("div", { class: "ai-tiles" },

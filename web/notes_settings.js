@@ -294,7 +294,7 @@ const renderNotesCard = () => {
   return el("div", { class: "card", id: "notes-card", "data-testid": "notes-card" },
     el("h2", {}, "Obsidian 笔记库"),
     el("p", { class: "card-sub" },
-      shortText("把群里整理出来的东西按主题写成 Obsidian 笔记：一个主题一则，例如一个模型连同它的版本、LoRA、插件和教程（几个群都在讲的，AI 会整理「群里的共识」）；每天一则日报，每个群一则。只提过一两次的东西不单独成一则，在日报和它的主题里。只写进库里的一个文件夹，不动你别的笔记；「我的笔记」下面你写的字永远保留。", 1)),
+      shortText("把群里整理出来的东西按主题写成 Obsidian 笔记：一个主题一则（例如一个模型和它的版本、LoRA、教程），几个群都在讲的附上「群里的共识」；另有每天的日报和每个群一则。只写进库里的一个文件夹；「我的笔记」下面你写的字会一直保留。", 1)),
     notice !== null ? el("div", { class: `notice ${notice.tone}` }, notice.text) : null,
     notesState.error !== null ? el("div", { class: "notice risk" }, `读取失败：${notesState.error}`) : null,
     ...(data === null ? [el("p", { class: "card-sub" }, "正在读取…")] : notesBody(data)));

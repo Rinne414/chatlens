@@ -59,7 +59,7 @@ const renderShortcutCard = () => {
   const loadingText = settingsState.backgroundError ? `读取失败：${settingsState.backgroundError}` : "正在读取…";
   return el("div", { class: "card", id: "settings-shortcuts" },
     el("h2", {}, "快捷方式"),
-    el("p", { class: "card-sub" }, "不用再去安装文件夹里找启动脚本：点快捷方式就打开简报，ChatLens 没开时会先把它启动。"),
+    el("p", { class: "card-sub" }, "点快捷方式就打开简报；ChatLens 没开时会先启动它。"),
     desktop === null
       ? el("p", { class: "card-sub" }, loadingText)
       : el("div", { class: "bg-grid" }, shortcutOptions(desktop).map((option) =>
@@ -130,7 +130,7 @@ const shortcutPromptCard = () => {
       el("strong", {}, "要在桌面放一个快捷方式吗？"),
       el("span", {}, desktop.appShortcut
         ? linked("开始菜单里已经有「ChatLens」（也可以按 Ctrl+Alt+U）。桌面上再放一个，双击就能打开。以后可在「设置 → 快捷方式」里改。")
-        : linked("双击就能打开，不用再去安装文件夹里找。以后可在「设置 → 快捷方式」里改。"))),
+        : linked("双击就能打开。以后可在「设置 → 快捷方式」里改。"))),
     el("div", { class: "shortcut-prompt-actions" },
       el("button", { class: "btn small primary", type: "button", disabled: shortcutState.busy, onclick: () => answerShortcutPrompt(true) }, "放到桌面"),
       el("button", { class: "btn small ghost", type: "button", disabled: shortcutState.busy, onclick: () => answerShortcutPrompt(false) }, "不用了")));
