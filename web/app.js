@@ -1629,7 +1629,7 @@ const renderPasteRow = () => {
   }
   return el("div", { class: "paste-panel", "data-testid": "paste-panel" },
     el("p", { class: "card-sub" },
-      "在 QQ 里复制你看到的那几条（带昵称和时间），贴到这里。当作阅读游标：从对上的第一则开始总结到现在，或到下面的终点。不改 QQ 已读，也不往 QQ 里塞按钮。"),
+      "在 QQ 里复制你看到的那几条（带昵称和时间），贴到这里，从这几条开始总结到现在，或到下面的终点。"),
     el("label", { class: "paste-label", for: "paste-start" }, "起点（必填）"),
     el("textarea", {
       id: "paste-start",
@@ -1970,9 +1970,9 @@ const renderRunView = () => {
   const runCard = el("div", { class: "card" },
     el("h2", {}, "运行一次总结"),
     el("p", { class: "card-sub" },
-      `LLM ${defaults.useLlm ? "开启" : "关闭"} · 媒体导出 ${defaults.exportMedia ? "开启" : "关闭"}（默认值在 config\\defaults.json）`),
+      `LLM ${defaults.useLlm ? "开启" : "关闭"} · 媒体导出 ${defaults.exportMedia ? "开启" : "关闭"}`),
     el("p", { class: "card-sub" },
-      "「摘要我还没看过的」用的是本程序消息页的已读位置，不是 QQ 红点。只在 QQ 里读过的群会改用最近 N 小时。不知道 QQ 看到哪了，就用「从 QQ 粘贴」。ChatLens 开着时可用 Ctrl+Alt+U，或开始菜单「QQ摘要-未查看」。"),
+      "「摘要我还没看过的」从你在「消息」页看到的位置算起，不看 QQ 红点；没在这里看过的群用最近 N 小时。想从 QQ 里看到的地方开始，用「从 QQ 粘贴」。"),
     unreadHintNote(),
     el("div", { class: "row", style: "margin-bottom:14px" },
       modeChip("watchlist", `关注群 (${watchlist.length})`),
