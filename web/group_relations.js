@@ -677,7 +677,7 @@ const groupRelations = (data, overrides = {}) => {
   const interactions = relations.links.reduce((sum, link) => sum + link.total, 0);
   const blurb = el("p", { class: "kb-meta" },
     `${briefNumber(related)} 人互相回复或 @ 过，共 ${briefNumber(interactions)} 次。头像越大说话越多，线越粗来往越多，外圈同色是一个小圈子。`,
-    "点一个人看 TA 和谁最常来往，双击打开个人页；人可以拖动，空白处拖动平移，Ctrl + 滚轮缩放。");
+    "点人看来往 · 双击看个人页 · 拖动空白处平移 · Ctrl + 滚轮缩放");
   const under = el("div", { class: "rel-under" }, circleChips(picture), topPairs(picture));
   const stage = picture.view.stage;
   const live = stage.parentElement;

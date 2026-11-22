@@ -1037,7 +1037,7 @@ const briefFooter = (data) => {
     settingsOf.enabled === false
       ? "后台刷新已关闭"
       : `后台每 ${settingsOf.intervalMinutes ?? 15} 分钟自动收消息`,
-    budget ? ` · 今天 AI 调用 ${budget.used}/${budget.limit}` : "",
+    budget ? ` · 今天 AI 调用 ${budget.used} 次（每日上限 ${budget.limit}）` : "",
     briefSpend(data.status?.spendToday) ? `，约 ${briefSpend(data.status.spendToday)}` : "",
     " · ",
     el("button", { class: "linklike", onclick: () => openView("settings") }, "AI 用量与后台设置"),

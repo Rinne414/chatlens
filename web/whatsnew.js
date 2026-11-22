@@ -102,9 +102,9 @@ const whatsNewCard = () => {
   // One line until opened: the news about the program never outweighs the
   // news from the groups.
   const open = whatsNewState.open === true;
-  return el("section", { class: open ? "whats-new" : "whats-new folded", "aria-label": "这次更新的新东西" },
+  return el("section", { class: open ? "whats-new" : "whats-new folded", "aria-label": "ChatLens 这次更新了什么" },
     el("div", { class: "whats-new-head" },
-      el("strong", {}, `这次更新的新东西（${WHATS_NEW.length} 项）`),
+      el("strong", {}, `ChatLens 这次更新了什么（${WHATS_NEW.length} 项）`),
       el("span", { class: "whats-new-actions" },
         el("button", {
           class: "btn small ghost",

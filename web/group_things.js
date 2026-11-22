@@ -82,7 +82,8 @@ const bubbleMap = (things) => thingMap(things, {
   factsOf: (thing) => `${thing.messages} 条 · ${thing.people} 人`,
   onOpen: (thing) => openThing(thing),
   caption: "这一天的事，越大越重要",
-  weightNote: "越大越重要：参与的人、消息、时长和你关注的词都算",
+  weightNote: "圈越大越重要",
+  weightWhy: "按参与的人、消息、时长和你关注的词算",
 });
 
 /* --- the ranked list --- */

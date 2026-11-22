@@ -136,5 +136,5 @@ const thingMap = (things, options) => {
     el("div", { class: "thing-legend" },
       Object.entries(THING_KINDS).map(([kind, info]) => el("span", { class: `thing-legend-item thing-${kind}`, title: info.hint },
         el("i", { "aria-hidden": "true" }), info.label)),
-      el("span", { class: "kb-meta" }, options.weightNote)));
+      el("span", { class: "kb-meta", title: options.weightWhy ?? "" }, options.weightNote)));
 };

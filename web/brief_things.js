@@ -275,7 +275,7 @@ const briefThingsHeadLine = (data) => {
   const job = data.job;
   const parts = [];
   if (data.createdAt) {
-    parts.push(`${briefClock(data.createdAt)} 整理 · ${data.madeFromTopics} 个话题 · ${data.model}`);
+    parts.push(`${briefClock(data.createdAt)} 整理 · ${data.madeFromTopics} 个话题`);
   }
   // Topics new or rewritten since the merge are on neither the map nor the
   // list (the things show their topics as they were): say so instead of
@@ -321,7 +321,8 @@ const briefThingsBody = (data) => {
       factsOf: briefThingFacts,
       onOpen: (thing) => (thing.isOther ? openBriefOther() : openBriefThing(thing)),
       caption: "各群这段时间值得知道的事，越大越重要",
-      weightNote: "越大越重要：几个群在聊、聊了多少、重要程度和你关注的词都算",
+      weightNote: "圈越大越重要",
+      weightWhy: "按几个群在聊、聊了多少、重要程度和你关注的词算",
     }),
     briefThingList(parts),
     thingFeedbackLine());
@@ -348,7 +349,7 @@ const briefThingsSection = () => {
     el("div", { class: "brief-things-head" },
       el("h3", { class: "brief-section-title" }, "值得知道的事",
         data.things === null ? null : el("span", { class: "brief-count" }, data.things.filter((thing) => thing.kind !== "chat").length)),
-      el("span", { class: "kb-meta" }, briefThingsHeadLine(data)),
+      el("span", { class: "kb-meta", title: data.model ? `整理用的模型：${data.model}` : "" }, briefThingsHeadLine(data)),
       data.job?.status === "running" || data.topicCount === 0 ? null : el("button", { class: "linklike desktop-action", type: "button", onclick: remakeBriefThings }, "重新整理")),
     briefThings.error ? el("p", { class: "setup-note error" }, briefThings.error) : null,
     failed,
