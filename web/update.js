@@ -186,7 +186,7 @@ const renderUpdateCard = () => {
     : null;
   const state = hasUpdate
     ? `，可以更新到 v${info.latestVersion}`
-    : info?.skipped ? "（没有检查过有没有新版本）" : info !== null ? "，已是最新" : "";
+    : info?.skipped ? "（不自动检查更新）" : info !== null ? "，已是最新" : "";
 
   return el("div", { class: `card update-card ${hasUpdate ? "has-update" : ""}`, id: "update-card" },
     el("h2", {}, "版本与更新"),
@@ -194,7 +194,7 @@ const renderUpdateCard = () => {
     el("div", { class: "row" }, applyButton, checkButton, msg),
     hasUpdate
       ? el("p", { class: "card-sub", style: "margin:6px 0 0" },
-          "「一键更新」会下载新版本、核对签名后重启 ChatLens，这个页面会断开一会儿；设置、密钥和数据都保留。程序里没有退回旧版本的按钮，要用回旧版得到 GitHub 发布页手动下载。")
+          "更新时这个页面会断开一会儿。程序里没有退回旧版本的按钮，要用回旧版得到 GitHub 发布页手动下载。")
       : null,
     // Only while still behind: once on the latest version (updated by hand, or
     // a later try worked) the old failure no longer matters.
@@ -205,7 +205,7 @@ const renderUpdateCard = () => {
     updateAutoCheckSwitch(),
     el("p", { class: "card-sub update-footnote" },
       "一键更新会下载安装包、核对签名后自动重启 ChatLens，你的配置、密钥和数据不受影响。",
-      updateState.checkedAt > 0 ? `上次检查：${railAgo(Math.floor(updateState.checkedAt / 1000))}。` : "",
+      updateState.checkedAt > 0 && !updateState.info?.skipped ? `上次检查：${railAgo(Math.floor(updateState.checkedAt / 1000))}。` : "",
       " 项目主页：",
       el("a", { href: "https://github.com/Rinne414/chatlens", target: "_blank", rel: "noopener" }, "GitHub"),
       "。"));

@@ -285,7 +285,7 @@ const renderSettingsView = () => {
   const keysCard = el("div", { class: "card", id: "settings-keys" },
     el("h2", {}, "密钥"),
     el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}。`),
-    keyRow("QQ 数据库密钥（NTQQ_DB_KEY）", "ntqqKey", status.ntqqKeySaved, ntqqKeyHint),
+    keyRow("QQ 数据库密钥", "ntqqKey", status.ntqqKeySaved, ntqqKeyHint),
     keyRow("AI 服务的 API Key（AI 总结用，可选）", "llmKey", status.llmKeySaved,
       el("p", { class: "card-sub", style: "margin:0 0 8px" },
         "AI 服务商给你的密钥，按用量付费。支持 OpenAI 兼容接口的服务都行，如 DeepSeek、OpenAI，或本机的 Ollama。不填就不做 AI 总结。")));
@@ -484,7 +484,7 @@ const backgroundStatusLine = (background) => {
   const facts = [
     background.lastFinishedAt ? `上次 ${unixToHkt(Math.floor(Date.parse(background.lastFinishedAt) / 1000)).slice(5, 16)}` : "还没有刷新过",
     background.nextRunAt ? `下次 ${unixToHkt(Math.floor(Date.parse(background.nextRunAt) / 1000)).slice(11, 16)}` : null,
-    background.lastResult?.briefing?.budget ? `今天 AI 调用 ${background.lastResult.briefing.budget.used}/${background.lastResult.briefing.budget.limit}` : null,
+    background.lastResult?.briefing?.budget ? `今天 AI 调用 ${background.lastResult.briefing.budget.used} 次（每日上限 ${background.lastResult.briefing.budget.limit}）` : null,
   ].filter(Boolean);
   return el("div", {},
     el("p", { class: "bg-status" }, facts.join(" · ")),
