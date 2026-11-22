@@ -494,7 +494,7 @@ const gallerySelectionNodes = () => {
       } }, "取消选择"),
       el("span", { class: "kb-results-spacer" }),
       el("button", { class: "btn small", type: "button", title: "退出多选（Esc），已选的会清空", onclick: leaveGallerySelection }, "退出多选")),
-    el("span", { class: "kb-meta" }, "点图片就是选它；按住 Shift 点另一张可以连选。「另存到文件夹」把原图复制到下面的文件夹，「留存原图」存进本程序。腾讯只保留 31 天，更早的图只有留存过的还有原图。"),
+    el("span", { class: "kb-meta" }, "点图选中，按住 Shift 连选。「另存到文件夹」复制一份到你的文件夹，「留存原图」存进本程序；腾讯只保留原图 31 天。"),
     gallerySaveTargetRow(),
     pictureExportStatus("gallery"),
     pictureKeepStatus("gallery"),
@@ -850,7 +850,7 @@ const galleryWall = () => {
     return el("div", { class: "notice risk" }, `读取画廊失败：${tab.error}`);
   }
   if (tab.results === null) {
-    return el("div", { class: "wall-empty" }, waiting("读取中…", "图片很多时要几秒到十几秒，页面可以照常用"));
+    return el("div", { class: "wall-empty" }, waiting("读取中…", "图片多时可能要十几秒"));
   }
   if (tab.results.items.length === 0) {
     if (tab.similar !== null) {
@@ -862,7 +862,7 @@ const galleryWall = () => {
     return el("div", { class: "wall-empty" },
       "这个范围里没有图片。可以把时间放宽，或去掉上面的条件。",
       el("br"),
-      el("span", { class: "kb-meta" }, "画廊显示后台记录下来的所有群图片；超过 31 天的只剩已保存的缩略图和预览，腾讯那边的原图取不到了。"));
+      el("span", { class: "kb-meta" }, "超过 31 天的图只剩缩略图和预览，原图要留存过才有。"));
   }
   return imageWall({
     key: GALLERY_WALL_KEY,

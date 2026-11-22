@@ -703,7 +703,7 @@ const requestRow = (row) => {
 const renderRequests = () => {
   const data = app.knowledgeTab.requests;
   if (data === null) {
-    return el("div", { class: "empty" }, waiting("读取中…", "图片很多时要几秒到十几秒，页面可以照常用"));
+    return el("div", { class: "empty" }, waiting("读取中…", "图片多时可能要十几秒"));
   }
   if (data.needsHarvest === true) {
     return el("div", { class: "empty" },
@@ -751,7 +751,7 @@ const coverageMonthRow = (row, maxImages) => {
 const renderCoverage = () => {
   const data = app.knowledgeTab.coverage;
   if (data === null || data === undefined) {
-    return el("div", { class: "empty" }, waiting("读取中…", "图片很多时要几秒到十几秒，页面可以照常用"));
+    return el("div", { class: "empty" }, waiting("读取中…", "图片多时可能要十几秒"));
   }
   if (data.available === false) {
     return el("div", { class: "empty" }, "还没有咒语库。跑一次总结就会开始建库。");

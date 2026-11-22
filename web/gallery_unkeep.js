@@ -9,7 +9,7 @@
 const KEPT_WHY_TEXT = {
   manual: "你手动留存的",
   group: "它所在的群设了「每张都留存原图」",
-  group_guess: "它所在的群设过「每张都留存原图」（这张留得早，当时没记原因，是推断的）",
+  group_guess: "它所在的群设过「每张都留存原图」（推断）",
   ai: "开着「自动留存 AI 原图」时留的",
   local: "这台电脑的 QQ 已经存有这张原图（通常是你点开过），咒语库复制了一份",
   early: "较早留存的，当时没有记下原因（你手动留的，或当时设了「每张都留存原图」的群）",
@@ -124,12 +124,12 @@ const keptRulesLine = (rules) => el("p", { class: "kb-meta gallery-kept-rules" }
   keptLinkButton("去改", openPictureKeepSettings),
   el("span", {}, `；③「自动留存 AI 原图」（现在${rules.keepAi ? "开着" : "关着"}） `),
   keptLinkButton("去看", openAutoKeepAi),
-  el("span", {}, "；④ 这台电脑的 QQ 已经存有原图的（通常是你点开过的图），咒语库会复制一份。「筛选」里的「为什么留存」可以按这几种来源筛选。"));
+  el("span", {}, "；④ 这台电脑的 QQ 已经存有原图的（通常是你点开过的图），咒语库会复制一份。可在「筛选 → 为什么留存」里按来源筛选。"));
 
 // Originals the prompt library took in before the gallery recorded pictures:
 // no group and no time to list them by, so they are handled together.
 const keptOutsideLine = (outside) => (outside.count === 0 ? null : el("p", { class: "kb-meta gallery-kept-removed" },
-  linked(`另外 ${briefNumber(outside.count)} 张不在画廊里：是咒语库更早收进来的原图，没有记下它们是哪个群、什么时候发的，所以下面列不出来，只能在咒语库里看。`),
+  linked(`另外 ${briefNumber(outside.count)} 张是咒语库更早收进来的原图，没有群和时间，只能在咒语库里看。`),
   el("button", {
     class: "btn small",
     type: "button",
@@ -146,7 +146,7 @@ const keptRemovedLine = (removed) => {
   return el("p", { class: "kb-meta gallery-kept-removed" },
     removed.count === 0
       ? "现在没有取消留存的图。"
-      : `你取消留存了 ${briefNumber(removed.count)} 张（约 ${size}）。文件还在，没有删，所以空间还没腾出来${removed.unlisted > 0 ? `；其中 ${briefNumber(removed.unlisted)} 张不在画廊里，下面列不出来，但放回和彻底删除对它们一样有效` : ""}：`,
+      : `取消留存的 ${briefNumber(removed.count)} 张（约 ${size}）还没删，仍占空间${removed.unlisted > 0 ? `；其中 ${briefNumber(removed.unlisted)} 张不在画廊里，同样可以放回或删除` : ""}：`,
     removed.count === 0 || app.gallery.removed ? null : el("button", { class: "btn small", type: "button", onclick: () => applyGalleryFilter(galleryScopePatch("removed")) }, "看看这些图"),
     removed.count === 0 ? null : el("button", { class: "btn small", type: "button", disabled: keptUi.busy, onclick: () => runRemovedAction("restore", { all: true }) }, "全部放回留存"),
     removed.count === 0 ? null : keptUi.confirmEmpty
@@ -190,7 +190,7 @@ const galleryKeptHeadNodes = () => {
       // Unfolded where there is room; on a phone the pictures come first.
       : el("details", { class: "gallery-kept-about", open: window.innerWidth > KB_MOBILE_WIDTH },
         el("summary", {}, "这些原图存在哪、怎么进来的、怎么去掉"),
-        el("p", { class: "kb-meta" }, linked(`存在 ${summary.folder}（整个文件夹实际占多少，在「存储」页看）。里面按图片编号的前两位分成小文件夹，文件名就是编号。也可以直接在文件夹里删：程序会发现，把它们从留存里去掉，不再自动留回来；从回收站放回原处就恢复。`)),
+        el("p", { class: "kb-meta" }, linked(`存在 ${summary.folder}，占用在「存储」页看。文件名是图片编号（md5）。也可以直接在文件夹里删：ChatLens 会把它们从留存里去掉；从回收站放回原处就恢复。`)),
         el("p", { class: "kb-meta" }, "腾讯删掉之后这些图也能看。要把图放进你自己的文件夹，点开图按「另存为」，或「多选」后「另存到文件夹」。不想留的，点开图按「取消留存」，或「多选」后一起取消。"),
         keptRulesLine(summary.rules),
         keptOutsideLine(summary.outside)),
