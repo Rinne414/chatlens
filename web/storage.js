@@ -328,8 +328,7 @@ const storageRemeasureTool = () => {
 
 const storageToolbar = () => el("div", { class: "storage-toolbar", "data-testid": "storage-view" },
   el("div", {},
-    el("strong", {}, "计算大小只读文件大小，不读文件内容。"),
-    el("span", {}, "本程序的文件夹在打开这页时自动计算；QQ 的文件夹文件太多，点「全部计算」或那一行的「计算大小」才算。")),
+    el("span", {}, "QQ 的文件夹文件多，点「全部计算」或那一行的「计算大小」才算。")),
   el("button", {
     class: "btn small",
     "data-testid": "storage-refresh",
