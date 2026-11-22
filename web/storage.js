@@ -12,7 +12,7 @@ const storageState = {
 };
 
 const STORAGE_SECTIONS = [
-  { id: "protected", title: "QQ 的数据和本程序的设置", description: "只能查看，这里没有删除按钮。" },
+  { id: "protected", title: "QQ 的数据和本程序的设置", description: "这些在 QQ 和设置里管理。" },
   { id: "important", title: "本程序存下的消息、图片和进度", description: "长期保存；删掉就找不回，或者要重新整理。" },
   { id: "regenerable", title: "可以重新生成", description: "删掉后，需要时程序会重新做一份。" },
   { id: "history", title: "历史输出", description: "可以删除，但对应的报告、导出文件或图片预览会跟着没有。" },
