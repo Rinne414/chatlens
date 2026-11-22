@@ -198,7 +198,7 @@ const backupRangePicker = () => {
     el("div", { class: "backup-inline" },
       el("label", {}, "从 ", el("input", { type: "date", value: backupState.fromDay, onchange: (event) => { backupState.fromDay = event.target.value; } })),
       el("label", {}, "到 ", el("input", { type: "date", value: backupState.toDay, onchange: (event) => { backupState.toDay = event.target.value; } }))),
-    el("p", { class: "brief-meta" }, "扫描时会把这段时间的消息从电脑 QQ 重新读一遍，所以本地记录之前的日子也能备份。"));
+    el("p", { class: "brief-meta" }, "本地记录开始之前的日子也能备份。"));
 };
 
 const presetMatches = (preset) =>
@@ -243,7 +243,7 @@ const backupTargetPicker = () =>
     el("label", { class: "backup-remote" },
       el("input", { type: "checkbox", checked: backupState.remote, onchange: (event) => { backupState.remote = event.target.checked; backupState.remoteChosen = true; } }),
       el("span", {}, "从 QQ 图片服务器补下载：电脑上没有原图的群图片",
-        el("small", {}, "按图片 md5 下载并校验，只对群图片有效，旧图可能已失效。会产生外网请求。"))));
+        el("small", {}, "会联网下载并校验；只对群图片有效，太旧的图可能已经没有了。"))));
 
 const backupForm = () => {
   const running = backupState.job?.status === "running";
@@ -255,7 +255,7 @@ const backupForm = () => {
     el("div", { class: "backup-actions" },
       el("button", { class: "btn primary", disabled: running || !ready, onclick: () => startBackup("save") }, "保存到电脑"),
       el("button", { class: "btn", disabled: running || !ready, onclick: () => startBackup("scan") }, "先扫描看看"),
-      el("span", { class: "brief-meta" }, "扫描只统计有多少、电脑上缺哪些，不写入任何文件；可以跳过直接保存。")),
+      el("span", { class: "brief-meta" }, "扫描只统计有多少、缺哪些，不写文件；也可以直接保存。")),
     el("p", { class: "brief-meta backup-dest" }, "「保存到电脑」存到：",
       el("code", {}, backupState.targetDir.trim() || "（还没填，见第 4 步）"),
       backupState.openableDir !== null ? openBackupFolderButton() : null));
@@ -304,7 +304,7 @@ const backupVerdict = (report) => {
   if (gaps === 0) {
     return el("div", { class: "backup-verdict safe" },
       el("strong", {}, saved ? "✓ 都已经备份到电脑，可以放心清理这段时间的 QQ 记录" : "✓ 电脑上都有原文件，保存后就可以放心清理"),
-      el("p", {}, "清理请在 QQ 里自己操作；本程序不会删除 QQ 里的任何东西。"));
+      el("p", {}, "清理要在 QQ 里自己操作。"));
   }
   return el("div", { class: "backup-verdict check" },
     el("strong", {}, `⚠ 还有 ${briefNumber(gaps)} 个文件电脑上没有原文件`,
@@ -413,10 +413,10 @@ const renderBackupView = () => {
   setChildren(root, el("div", { class: "backup-page" },
     el("section", { class: "backup-intro" },
       el("h2", {}, "把群里的图和聊天记录存到电脑"),
-      el("p", {}, "QQ 里没点开过的图，原图只在腾讯服务器上留 31 天；存到电脑的才一直是你的。这里做两件事：先救快过期的 AI 原图，再按群和时间整批备份。"),
+      el("p", {}, "没点开过的图，原图只在腾讯服务器上留 31 天。这页先救快过期的 AI 原图，再按群和时间整批备份。"),
       el("details", { class: "backup-explain" },
         el("summary", {}, "这页具体在做什么？"),
-        el("p", {}, "整批备份会从电脑版 QQ 的本地缓存里，把图片、视频、文件和聊天记录按「群 / 年-月」存到你选的文件夹，AI 图另存一份咒语和参数；再次运行只补新的，不会重复。"),
+        el("p", {}, "整批备份会从电脑版 QQ 的本地缓存里，把图片、视频、文件和聊天记录按「群 / 年-月」存到你选的文件夹，AI 图另存一份咒语和参数；再次运行只补新的。"),
         el("p", {}, "电脑 QQ 只保存你在电脑上看过的图：划过去只存一张预览图，点开看大图才存原图，QQ 没有「全部自动下载」的开关。没看过的群图片，保存时会「从 QQ 图片服务器补下载」，按 md5 取回原图（太旧的图服务器上可能已经没有了；不想联网可以在下面取消）。"),
         el("p", {}, "程序只读取，从不删除或修改 QQ 里的任何东西。清理 QQ 请在 QQ 里自己操作。"))),
     backupStatusTiles(),
@@ -613,13 +613,13 @@ const backupAutoKeep = (expiring, items) => {
       el("strong", {}, "以后自动留存所有 AI 原图"),
       el("span", { class: "card-sub" },
         expiring.keepAi === true
-          ? " 已开启：后台每次刷新后按过期先后慢慢留存，不用守着页面。"
-          : ` 后台每次刷新后按过期先后慢慢留存到本程序里，不用守着页面。${items.length > 0 ? `现在待留存 ${briefNumber(items.length)} 张，约 ${formatByteSize(bytes)}；` : ""}之后每张约 1.5 MB，不占图片缓存上限。`)));
+          ? " 已开启：后台每次刷新后按过期先后留存。"
+          : ` 后台每次刷新后按过期先后留存到本程序里。${items.length > 0 ? `现在待留存 ${briefNumber(items.length)} 张，约 ${formatByteSize(bytes)}；` : ""}之后每张约 1.5 MB，不占图片缓存上限。`)));
 };
 
 const rescueKeepAllQuestion = (items) => {
   const bytes = items.reduce((total, item) => total + (Number(item.size) || 0), 0);
-  return `留存全部 ${briefNumber(items.length)} 张：从腾讯服务器下载原图，存进本程序（不是下面的备份文件夹），约 ${formatByteSize(bytes)}，之后在画廊「留存的原图」里看。每次下载 5 张，随时可以停下；不想要的以后可以在画廊里取消留存。`;
+  return `留存全部 ${briefNumber(items.length)} 张？从腾讯服务器下载原图存进本程序（不是下面的备份文件夹），约 ${formatByteSize(bytes)}，在画廊「留存的原图」里看。随时可以停下，以后也能取消留存。`;
 };
 
 const setConfirmKeepAll = (on) => {
@@ -654,10 +654,10 @@ const backupRescue = () => {
     el("div", { class: "backup-rescue-head" },
       el("div", {},
         el("h2", {}, "先救快过期的 AI 原图"),
-        el("p", { class: "card-sub" }, "咒语已经记下了，但原图还只在腾讯服务器上，腾讯删掉后就找不回来。点图可以先看一眼。"),
+        el("p", { class: "card-sub" }, "咒语已经记下，原图还只在腾讯服务器上，过期就找不回来。"),
         items.length === 0 ? null : el("p", { class: "card-sub backup-expiry-line" }, rescueExpiryLine(items)),
         el("p", { class: "card-sub backup-rescue-where" },
-          linked("留存下来的原图存在本程序里，在画廊「留存的原图」里看、取消留存。"),
+          linked("留存的原图在画廊「留存的原图」里看。"),
           openKeptFolderButton())),
       rescueKeepAllButton(items)),
     rescueKeepAllConfirm(items),
