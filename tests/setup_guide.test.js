@@ -114,7 +114,7 @@ test("steps still waiting show what they do, how long, the disk they use and the
   const text = run("textOfNode(setupGuideCard())");
 
   assert.match(text, /找不到？手动指定/u);
-  assert.match(text, /QQ 的内存里读出密钥/u);
+  assert.match(text, /密钥要从运行中的 QQ 内存里读出/u);
   assert.match(text, /到设置页手动填密钥/u);
   assert.match(text, /大约 1-2 分钟.*和 QQ 的数据库一样大（现在约 15/u);
   assert.match(text, /联网时会发生什么/u);
