@@ -165,7 +165,7 @@ const askForm = () => {
       el("button", { class: "btn primary", disabled: askRunning(), onclick: () => submitAsk(input.value) }, askRunning() ? "正在找…" : "问"),
       el("span", { class: "brief-meta ask-key-hint" }, "Ctrl + Enter 发送")),
     // Each question is two AI calls (ask_history.js: a search plan, then the answer).
-    el("p", { class: "brief-meta ask-cost-note" }, "每问一次调用两次 AI：问题和找到的相关消息会发给你在设置里填的 AI 服务，用它的额度。"),
+    el("p", { class: "brief-meta ask-cost-note" }, "每问一次调用两次 AI：问题和找到的消息会发给你设置的 AI 服务，用它的额度。"),
     askRunning()
       ? el("p", { class: "brief-meta ask-progress" }, `正在查「${askState.job.meta?.question ?? ""}」：先在聊天记录里找相关消息，再让 AI 整理回答…`)
       : null);
@@ -223,8 +223,7 @@ const askResult = () => {
   const result = askState.current;
   if (result === null) {
     return el("div", { class: "ask-empty" },
-      el("p", {}, "问任何关于群聊历史的问题。AI 会先在本机的聊天记录里找相关消息，再只根据找到的内容回答，并标出每句话的出处。"),
-      el("p", { class: "brief-meta" }, "记录里没有的事它会直说没找到，不会编。"));
+      el("p", {}, "问任何关于群聊历史的问题。AI 只根据本机聊天记录里找到的消息回答，标出出处，找不到会直说。"));
   }
   const citations = result.citations ?? [];
   const shown = askState.showAllCitations ? citations : citations.slice(0, ASK_CITATION_PREVIEW);

@@ -338,7 +338,7 @@ const briefRunNow = async () => {
 };
 
 const briefMarkSeen = async () => {
-  if (!await confirmInPage("标记为看完了？\n下一份简报只包含从现在开始的新消息（已有的消息和总结都还在「消息」里）。", { confirmLabel: "标为看完" })) {
+  if (!await confirmInPage("标为看完了？\n下一份简报从现在开始算。之前的消息和总结在「消息」里还能看。", { confirmLabel: "标为看完" })) {
     return;
   }
   briefState.busy = true;
@@ -604,7 +604,7 @@ const briefMentionThread = (thread) => {
         el("span", { class: "brief-meta" }, `${item.groupName} · ${briefWhen(item.sentAt)}`),
         older.length > 0 ? el("span", { class: "brief-thread-count" }, `连续 ${thread.items.length} 条`) : null,
         item.youWereThere
-          ? el("span", { class: "brief-there", title: "你在这条前后说过话（它之前 1 分半钟内，或之后 10 分钟内），多半已经看到" }, "你当时在聊")
+          ? el("span", { class: "brief-there", title: "你在这条前后说过话，可能已经看到" }, "你当时在聊")
           : null),
       item.quotedMine ? el("p", { class: "brief-quote" }, `你说：${item.quotedMine}`) : null,
       el("p", { class: "brief-mention-text" }, item.text)),
@@ -753,7 +753,7 @@ const briefWatchDetail = (item) => {
         : null,
       // The briefing carries the newest ones; 回顾 pages through every mention.
       item.total > item.latest.length
-        ? el("button", { class: "linklike", onclick: () => openReviewView({ query: item.word, range: briefWindowRange() }), title: "回顾按关键词搜索（也会搜到包含这个词的更长的词、你自己说的话），条数可能和这里不同" }, "在回顾里看这几天的全部")
+        ? el("button", { class: "linklike", onclick: () => openReviewView({ query: item.word, range: briefWindowRange() }), title: "回顾里的条数可能和这里不同" }, "在回顾里看这几天的全部")
         : el("button", { class: "linklike", onclick: () => openReviewView({ query: item.word }) }, "在回顾里搜更早的")));
 };
 
@@ -952,7 +952,7 @@ const briefGroupRow = (group) =>
         el("button", {
           class: "linklike",
           disabled: briefState.busy,
-          title: "看过总结就够了：把这个群标为本程序已查看（消息都还在，随时可以打开）",
+          title: "把这个群标为已看过；消息都还在",
           onclick: () => briefMarkGroupDone(group),
         }, "标为看完"))
       : null);

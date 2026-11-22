@@ -170,7 +170,7 @@ const thingsBody = () => {
       data.job?.status === "failed" ? el("p", { class: "setup-note error" }, `上次没整理成：${data.job.error}`) : null,
       el("p", {}, `这天有 ${data.topicCount} 段对话。整理后会合成几件值得知道的事，按重要程度排好，闲聊折起来。`),
       el("button", { class: "btn small primary", type: "button", disabled: data.topicCount === 0, onclick: makeThings }, "整理这一天"),
-      el("p", { class: "kb-meta" }, "会调用一次你设置的 AI 服务（读这天各段的标题和摘要，不读原始消息）。"));
+      el("p", { class: "kb-meta" }, "会调用一次 AI 服务，只发送这天各段的标题和摘要。"));
   }
   const failed = data.job?.status === "failed" ? el("p", { class: "setup-note error" }, `重新整理没成功，下面还是上次的结果：${data.job.error}`) : null;
   const changed = data.unsorted > 0 || data.lost > 0;

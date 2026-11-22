@@ -200,7 +200,7 @@ const pathStep = (status) => {
       setupNotice("path")),
     chips === null && setupGuide.notice?.step !== "path" ? null : el("div", {}, chips, setupNotice("path")),
     setupFacts([
-      "在这台电脑上找 QQ 存聊天记录的文件夹。只读，不改 QQ 的任何文件。",
+      "在这台电脑上找 QQ 存聊天记录的文件夹。",
       "几秒钟，这一步不占磁盘。",
       "找不到：QQ 的设置里能查到聊天文件存在哪个文件夹，点「找不到？手动指定」填进去。",
     ]));
@@ -213,7 +213,7 @@ const keyStep = (status, ready) => setupStep(2, !ready ? "later" : status.ntqqKe
     setupNotice("key")),
   setupNotice("key"),
   setupFacts([
-    "QQ 的聊天数据库是加密的，钥匙只在运行中的 QQ 里。所以要先打开并登录电脑版 QQ，程序从 QQ 的内存里读出密钥，验证后加密存在本机。只读，不改 QQ，不联网。",
+    "先打开并登录电脑版 QQ：聊天数据库是加密的，密钥要从运行中的 QQ 内存里读出，验证后加密存在本机。只读，不联网。",
     status.platform === "linux" ? "会弹出系统的密码框：读别的程序的内存需要授权。" : null,
     "一般一两分钟，慢的电脑要几分钟；不占磁盘。",
     ["失败：确认 QQ 开着、登录的是第 1 步那个账号，再点一次。还不行就",
@@ -283,9 +283,8 @@ const groupStep = (status, ready) => {
     setupNotice("groups"));
   // The picker stays open once a group is ticked, so more can be added.
   const step = setupStep(3, !ready ? "later" : count > 0 ? "done" : "now", "选要看的群", `${count} 个`, body, body, setupFacts([
-    "读出你加入的群，勾选要看的。只读你选的群，程序会在后台定时收这些群的新消息、整理成简报。",
+    "勾选要看的群。后台会定时收这些群的新消息，整理成简报。",
     `第一次要复制一份 QQ 聊天数据库，大约 1-2 分钟。这份副本一直留着，和 QQ 的数据库一样大${mirrorSizeText(status)}；以后每次只更新变了的部分。`,
-    "没读到时这里会写原因，点「再试一次」。",
   ]));
   step.classList.add("groups-step");
   return step;
@@ -307,7 +306,7 @@ const aiStep = (status) => {
   const ai = aiReadiness(status);
   return setupStep(4, ai.ok ? "done" : "now", "AI 总结（可选）", ai.detail,
     el("div", {},
-      el("p", {}, "填一个 AI 服务（DeepSeek、OpenAI 兼容服务或 Grok 订阅），简报里就会有每个群在聊什么的总结。不填也能用：消息、图片、热点、搜索都照常有。开启后消息文字会发给你选的 AI 服务，用你自己账号的额度。"),
+      el("p", {}, "填一个 AI 服务（DeepSeek、OpenAI 兼容服务或 Grok 订阅），简报里就有每个群在聊什么的总结。不填也能看消息、图片、热点和搜索。消息文字会发给你选的服务，用你自己的额度。"),
       el("button", { class: "btn small", type: "button", onclick: () => openSettingsCard(() => $("#settings-llm")) }, "去设置 AI 服务")));
 };
 
@@ -366,7 +365,7 @@ const setupGuideCard = () => {
   const coreReady = keyReady && (app.state?.watchlist ?? []).length > 0;
   return el("section", { class: "brief-setup", "data-testid": "setup-guide" },
     el("h2", {}, "开始使用"),
-    el("p", { class: "setup-lead" }, "三步就能用，第四步可选。每一步都在这里点完，不用找设置。"),
+    el("p", { class: "setup-lead" }, "三步就能用，第四步可选。"),
     el("ol", { class: "setup-steps" },
       pathStep(status),
       keyStep(status, pathReady),

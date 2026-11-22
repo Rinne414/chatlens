@@ -304,7 +304,7 @@ const briefThingsBody = (data) => {
     }
     // The phone only reads: making things changes this computer's store.
     return el("div", {},
-      el("p", { class: "brief-empty-line" }, `${data.topicCount} 个群话题还没整理。整理会调用一次你设置的 AI 服务（读各群话题的标题和摘要，不读原始消息）。`),
+      el("p", { class: "brief-empty-line" }, `${data.topicCount} 个群话题还没整理。整理会调用一次 AI 服务，只发送各群话题的标题和摘要。`),
       ccRemote
         ? el("p", { class: "kb-meta" }, "到电脑上的 ChatLens 点「现在整理」。")
         : el("button", { class: "btn small primary", type: "button", onclick: remakeBriefThings }, "现在整理"));

@@ -80,8 +80,8 @@ const renderInbox = () => {
         }, label, key === "all" || countFor(test) === null ? "" : ` ${countFor(test)}`))),
         el("span", {
           class: "card-sub inbox-note",
-          title: "在这里打开过的群，从你看到的位置算起；还没打开过的群，从简报上次点「看完了」算起。和 QQ 里的未读无关。",
-        }, "数字是本程序还没看过的消息条数（k 是千），不是 QQ 未读")),
+          title: "从你在这里看到的位置算起；没打开过的群从简报上次「看完了」算起。和 QQ 的未读数不同。",
+        }, "未读条数（k = 千）")),
       groups.length === 0
         ? el("div", { class: "empty" }, "还没有本地消息记录。后台刷新第一次跑完后这里就会有群。")
         : shown.length === 0

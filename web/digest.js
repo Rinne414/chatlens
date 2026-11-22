@@ -215,7 +215,7 @@ const digestPeriodBody = (digest, keyPrefix) => {
 
 // Generating calls the user's AI service: say what is sent and whose quota it uses.
 const DIGEST_COST_NOTES = {
-  day: "会把这天各群的 AI 摘要（不是原始消息）发给你设置的 AI 服务，用它的额度。",
+  day: "会把这天各群的 AI 摘要发给你设置的 AI 服务，用它的额度。",
   period: "会把这段时间各群的 AI 摘要发给你设置的 AI 服务，用它的额度；缺的每日总览会先补上，可能要调用好几次。",
 };
 
