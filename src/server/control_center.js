@@ -1142,6 +1142,13 @@ const routeRequest = (request, response, { remote = false } = {}) => {
     return;
   }
 
+  // The Simplified -> Traditional tables for 繁體中文 (web/lang.js), from the
+  // package the notes already use; fetched only when that language is chosen.
+  if (url.pathname === "/opencc-cn2t.js") {
+    serveStaticFile(response, path.join(state.toolRoot, "node_modules", "opencc-js", "dist", "umd", "cn2t.js"));
+    return;
+  }
+
   if (/^\/[\w-]+\.(?:css|js|webmanifest)$/u.test(url.pathname)) {
     serveStaticFile(response, path.join(webDir, url.pathname.slice(1)));
     return;
