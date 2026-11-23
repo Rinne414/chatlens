@@ -282,15 +282,31 @@ const galleryPrompt = (detail) => {
   return el("section", { class: "gallery-prompt" },
     promptBlock(record.prompt, "咒语", { clamp: false }),
     el("div", { class: "kb-detail-grid" },
-      detailRow("模型", record.checkpoint),
-      detailRow("steps", params.steps),
-      detailRow("CFG", params.cfgScale),
-      detailRow("采样器", params.sampler),
-      detailRow("seed", params.seed)),
+      galleryParamRow("模型", record.checkpoint, { find: true }),
+      galleryParamRow("steps", params.steps),
+      galleryParamRow("CFG", params.cfgScale),
+      galleryParamRow("采样器", params.sampler),
+      galleryParamRow("seed", params.seed)),
     record.loras.length === 0
       ? null
-      : el("div", { class: "kb-chip-row" }, record.loras.map((lora) =>
-        el("span", { class: "kb-chip" }, lora.weight === null ? lora.name : `${lora.name} @${lora.weight}`))));
+      : el("div", { class: "kb-chip-row" }, record.loras.map((lora) => el("button", {
+        class: "kb-chip clickable", type: "button", title: `找用了 ${lora.name} 的图`, onclick: () => findGalleryPicturesWith(lora.name),
+      }, lora.weight === null ? lora.name : `${lora.name} @${lora.weight}`))));
+};
+
+// The wall narrowed to the pictures made with this model or LoRA (the search
+// box reads the same names).
+const findGalleryPicturesWith = (name) => applyGalleryFilter({ q: String(name).trim() });
+
+// A value that is copied by a click; find: also a way to the pictures made with it.
+const galleryParamRow = (label, value, { find = false } = {}) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  return el("div", { class: "kb-detail-row" },
+    el("span", { class: "kb-detail-label" }, label),
+    el("button", { class: "kb-detail-value kb-copy-value", type: "button", title: "点一下复制", onclick: () => copyToClipboard(String(value), label) }, String(value)),
+    find ? el("button", { class: "kb-linkish", type: "button", title: `找用了这个${label}的图`, onclick: () => findGalleryPicturesWith(value) }, "找图") : null);
 };
 
 const galleryOthers = (detail) => {

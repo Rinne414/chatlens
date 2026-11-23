@@ -128,6 +128,8 @@ const mountWall = (container, options) => {
       const index = layout.boxes.findIndex((entryBox) => entryBox.y + entryBox.h > top);
       return index < 0 ? null : index;
     },
+    // Where every entry sits (page pixels inside the wall), for moving by keys.
+    boxes: () => layout.boxes,
     // Rebuilds the visible tiles, e.g. after badges arrive.
     repaint: () => {
       for (const node of nodes.values()) {
@@ -194,6 +196,9 @@ const wallSetEntries = (key, entries) => {
 const wallRepaint = (key) => {
   activeWalls.get(key)?.repaint();
 };
+
+// The boxes of a mounted wall's entries, or null without a wall.
+const wallBoxes = (key) => activeWalls.get(key)?.boxes() ?? null;
 
 // Index of the entry at the top of the screen, or null without a wall.
 const wallTopIndex = (key) => activeWalls.get(key)?.topIndex() ?? null;

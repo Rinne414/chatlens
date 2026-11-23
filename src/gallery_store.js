@@ -394,6 +394,22 @@ const listPictures = (db, options) => {
   return { total, items: describeRows(db, rows, normalized) };
 };
 
+// How many pictures each day (UTC+8, as the wall's day headings) of the range
+// holds, newest day first: the wall's date rail. A picture counts on the day
+// of its newest posting inside the filter, which is where the wall shows it.
+const DAY_ZONE_SECONDS = 8 * 3600;
+const pictureDays = (db, options) => {
+  const filter = buildFilter(db, { ...DEFAULT_OPTIONS, ...options });
+  return db.prepare(`
+    SELECT day, COUNT(*) AS n FROM (
+      SELECT strftime('%Y-%m-%d', MAX(p.sent_at) + ${DAY_ZONE_SECONDS}, 'unixepoch') AS day
+      FROM pictures p ${filter.join}
+      WHERE ${filter.where}
+      GROUP BY p.md5
+    ) GROUP BY day ORDER BY day DESC
+  `).all(filter.args);
+};
+
 const describeRows = (db, rows, normalized) => {
   const md5s = rows.map((row) => row.md5);
   const byMd5 = new Map(md5s.map((md5) => [md5, []]));
@@ -641,4 +657,4 @@ const spreadPictures = (db, { fromUnix, toUnix }) => db.prepare(`
 
 const rangeForDays = (days, nowUnix) => ({ fromUnix: nowUnix - days * DAY_SECONDS, toUnix: nowUnix + 60 });
 
-module.exports = { picturesByMd5, postingsOf, listPictures, galleryFacets, pictureDetail, messageContext, spreadPictures, rangeForDays, hasKnowledge, keptSummary };
+module.exports = { picturesByMd5, postingsOf, listPictures, pictureDays, galleryFacets, pictureDetail, messageContext, spreadPictures, rangeForDays, hasKnowledge, keptSummary };

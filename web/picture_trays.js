@@ -22,6 +22,10 @@ const pictureTrays = {
   dragging: false,
   // Told which pictures were just saved: (md5s, savedAtUnix, folder).
   onSaved: () => {},
+  // The copies the last save made ({ trayId, name, items: [{ md5, file }] }), while it can be taken back.
+  lastSave: null,
+  // Told which pictures' saves were taken back: [{ md5, savedAt, savedDir }] (what is still saved of each).
+  onUnsaved: () => {},
   // Told after a tray was added, changed or removed.
   onChanged: () => {},
   // Told when a drag ends (a wall holds its redraw while a tile is dragged).
@@ -87,7 +91,7 @@ const trayResultText = (tray, result) => {
 };
 
 const saveBatchesToTray = async (md5s, tray, job) => {
-  const result = { saved: [], previews: 0, already: 0, failed: {}, file: "", error: null };
+  const result = { saved: [], made: [], previews: 0, already: 0, failed: {}, file: "", error: null };
   let counted = 0;
   try {
     for (let start = 0; start < md5s.length; start += TRAY_BATCH) {
@@ -100,6 +104,8 @@ const saveBatchesToTray = async (md5s, tray, job) => {
         }
       }
       result.saved.push(...saved.map((item) => item.md5));
+      // Only copies this save made can be taken back (not ones that were there already).
+      result.made.push(...saved.filter((item) => item.already !== true).map((item) => ({ md5: item.md5, file: item.file })));
       result.previews += saved.filter((item) => item.previewOnly).length;
       result.already += saved.filter((item) => item.already).length;
       result.file = saved[0]?.file ?? result.file;
@@ -137,6 +143,9 @@ const saveToTray = (md5s, trayId) => {
   const run = job.chain.then(() => saveBatchesToTray(chosen, tray, job)).then((result) => {
     const text = trayResultText(tray, result);
     job.last = text;
+    if (result.made.length > 0) {
+      pictureTrays.lastSave = { trayId: tray.id, name: tray.name, items: result.made };
+    }
     return { text, failed: result.error !== null || result.saved.length === 0 };
   });
   job.chain = run.then(() => {
@@ -146,6 +155,51 @@ const saveToTray = (md5s, trayId) => {
     renderTrayDock();
   });
   return run;
+};
+
+/* --- taking the last save back --- */
+
+const TRAY_UNDO_BATCH = 200;
+const TRAY_UNDO_KEPT = { changed: "存了之后被改过", "too-old": "存了超过一小时", "not-ours": "不是这次存的" };
+
+const trayUndoText = (name, results) => {
+  const gone = results.filter((item) => item.status === "undone" || item.status === "gone").length;
+  const kept = Object.entries(TRAY_UNDO_KEPT)
+    .map(([status, why]) => [results.filter((item) => item.status === status).length, why])
+    .filter(([count]) => count > 0)
+    .map(([count, why]) => `${briefNumber(count)} 张${why}`);
+  return [
+    gone === 0 ? "" : `已撤销：从「${name}」拿走了刚存的 ${briefNumber(gone)} 张`,
+    kept.length === 0 ? "" : `${gone === 0 ? "没有撤销：" : "；没动的："}${kept.join("，")}`,
+  ].join("");
+};
+
+// Removes the copies the last save made from their folder. Resolves to the
+// sentence that says what happened (null when there was nothing to take back).
+const undoLastTraySave = async () => {
+  const last = pictureTrays.lastSave;
+  if (last === null) {
+    return null;
+  }
+  pictureTrays.lastSave = null;
+  const results = [];
+  try {
+    for (let start = 0; start < last.items.length; start += TRAY_UNDO_BATCH) {
+      const saves = last.items.slice(start, start + TRAY_UNDO_BATCH).map((item) => ({ ...item, tray: last.trayId }));
+      results.push(...(await api("/api/pictures/export/undo", { method: "POST", body: JSON.stringify({ saves }) })).results);
+    }
+  } catch (error) {
+    notifyError(error);
+  }
+  const text = results.length === 0 ? "没有撤销成。" : trayUndoText(last.name, results);
+  const job = pictureTrays.jobs.get(last.trayId);
+  if (job !== undefined) {
+    job.last = text;
+  }
+  pictureTrays.onUnsaved(results.filter((item) => item.status === "undone" || item.status === "gone"));
+  renderTrayDock();
+  notify(text, { isError: results.every((item) => item.status !== "undone" && item.status !== "gone") });
+  return text;
 };
 
 // For places with no line of their own to say it in (a tile's 存 button, a drop).
@@ -404,7 +458,10 @@ const trayDockNodes = () => {
     selected.length === 0
       ? el("span", { class: "kb-meta tray-dock-how" }, "拖动图片就能存")
       : el("div", { class: "tray-chips", role: "group", "aria-label": `把选中的 ${selected.length} 张存到` }, trays.map((tray, index) => trayTakeChip(tray, index, selected))),
-    status === "" ? null : el("span", { class: "tray-status", "aria-live": "polite" }, status),
+    status === "" ? null : el("span", { class: "tray-status", "aria-live": "polite" }, status,
+      pictureTrays.lastSave === null ? null : [" ", el("button", {
+        class: "kb-linkish", type: "button", title: "把刚才存的从文件夹里拿走（Ctrl+Z）", onclick: undoLastTraySave,
+      }, "撤销")]),
   ];
 };
 

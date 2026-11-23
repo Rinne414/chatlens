@@ -388,6 +388,26 @@ const markGallerySaved = (md5s, savedAt, savedDir) => {
 };
 
 pictureTrays.onSaved = markGallerySaved;
+
+// A save taken back: each picture's mark goes back to what is still saved of it.
+pictureTrays.onUnsaved = (changes) => {
+  const byMd5 = new Map(changes.map((change) => [change.md5, change]));
+  const results = app.gallery.results;
+  if (byMd5.size === 0 || results === null) {
+    return;
+  }
+  const unmark = (item) => ({ ...item, savedAt: byMd5.get(item.md5).savedAt, savedDir: byMd5.get(item.md5).savedDir });
+  replaceGallery({ results: { ...results, items: results.items.map((item) => (byMd5.has(item.md5) ? unmark(item) : item)) }, facetsKey: "" });
+  if (app.gallery.detail !== null && byMd5.has(app.gallery.detail.md5)) {
+    const md5 = app.gallery.detail.md5;
+    replaceGallery({ detail: { ...app.gallery.detail, item: unmark(app.gallery.detail.item) } });
+    api(`/api/gallery/picture?md5=${md5}`).then((data) => galleryDetailPatch(md5, { data })).catch(() => {});
+  }
+  repaintGalleryAfterSave();
+  if (app.view === "media") {
+    loadGalleryFacets();
+  }
+};
 // The first tray's folder is also where the multi-select 「另存到文件夹」 writes.
 pictureTrays.onChanged = () => {
   if (app.view !== "media") {
@@ -478,6 +498,7 @@ const gallerySelectionNodes = () => {
         onclick: keepGallerySelection,
       }, `留存原图（${briefNumber(count)}）`),
       gallerySelectionKeptButtons(count),
+      galleryCompareButton(),
       el("button", { class: "btn small", type: "button", disabled: loaded.length === 0, onclick: () => selectGalleryItems(loaded) },
         `全选已加载的 ${briefNumber(loaded.length)} 张`),
       el("button", { class: "btn small", type: "button", disabled: count === 0, onclick: () => {
@@ -555,6 +576,8 @@ const galleryTile = (item, index) => {
   const tile = galleryTileNode(item, index);
   // Which picture the mouse is on (gallery_select_tray.js: 空格 / O / X).
   tile.dataset.md5 = item.md5;
+  // The frame the arrow keys move, and the tint of a Shift range (gallery_cursor.js).
+  markGalleryTile(tile, item, index);
   // Dragged onto a 存图文件夹, or (one picture) out to the desktop or a folder.
   tile.draggable = true;
   tile.addEventListener("pointerdown", () => prepareTrayDrag(item));
@@ -939,6 +962,7 @@ const renderMediaView = () => {
           })),
         galleryReturnBanner(),
         galleryWall(),
+        galleryRailNode(),
         tab.selecting ? el("div", { id: "gallery-selection", class: "gallery-selection" }, gallerySelectionNodes()) : null,
         el("div", { id: "gallery-foot", class: "wall-foot" }, galleryFootText())))));
   restoreGallerySearchFocus(typed);

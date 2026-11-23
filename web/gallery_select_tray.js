@@ -125,10 +125,11 @@ const saveGalleryQuickLook = (tray, thenNext) => {
       notify(outcome.text, { isError: outcome.failed });
       return;
     }
-    galleryQuickLook.notice = outcome.text;
+    galleryQuickLook.notice = outcome.failed || pictureTrays.lastSave === null ? outcome.text : `${outcome.text}（Ctrl+Z 撤销）`;
     renderGalleryQuickLook();
   };
   galleryQuickLook.notice = `正在存到「${tray.name}」…`;
+  // (when it is done the line says where it went and that Ctrl+Z takes it back)
   saveToTray([md5], tray.id).then((outcome) => (outcome === "" ? null : tell(outcome)));
   renderGalleryQuickLook();
   if (thenNext) {
@@ -227,6 +228,17 @@ document.addEventListener("keydown", (event) => {
       if (!event.repeat) {
         selectAllLoadedGallery();
       }
+    } else if (key === "z" && !event.shiftKey && pictureTrays.lastSave !== null) {
+      // Takes back the last save into a 存图文件夹 (picture_trays.js).
+      event.preventDefault();
+      if (!event.repeat) {
+        undoLastTraySave().then((text) => {
+          if (galleryQuickLook.md5 !== null && typeof text === "string") {
+            galleryQuickLook.notice = text;
+            renderGalleryQuickLook();
+          }
+        });
+      }
     }
     return;
   }
@@ -243,8 +255,8 @@ document.addEventListener("keydown", (event) => {
     }
     return;
   }
-  // On the wall itself: only with a picture under the mouse and nothing opened over the wall.
-  const md5 = galleryHover.md5;
+  // On the wall itself: the framed picture or the one under the mouse, with nothing opened over the wall.
+  const md5 = galleryCurrentMd5();
   if (md5 === null || event.repeat || !nothingOpen) {
     return;
   }

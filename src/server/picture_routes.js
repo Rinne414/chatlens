@@ -137,6 +137,9 @@ const handlePictureApi = async (request, response, url, { sendJson, sendError, r
     case "POST /api/pictures/export":
       sendJson(response, 200, await exportOps.exportPictures(await readBody(request)));
       return true;
+    case "POST /api/pictures/export/undo":
+      sendJson(response, 200, exportOps.undoSaves(await readBody(request)));
+      return true;
     case "GET /api/pictures/save-dir":
       sendJson(response, 200, exportOps.getSaveTarget());
       return true;

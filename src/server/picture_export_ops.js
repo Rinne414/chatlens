@@ -20,6 +20,7 @@ const { promptFor, sidecarText } = require("../knowledge_export");
 const { newFolderName, isFolderName, extensionOf, fileStem, uniqueName } = require("../picture_export");
 const { validateTargetDir } = require("./backup_ops");
 const trayList = require("../picture_trays");
+const { undoSave } = require("../picture_save_undo");
 
 const MAX_PER_REQUEST = 10;
 const MD5 = /^[a-f0-9]{32}$/u;
@@ -136,6 +137,21 @@ const exportPictures = async ({ md5s, folder = null, tray = null }) => {
   return { folder: name, path: directory, results };
 };
 
+// POST /api/pictures/export/undo: takes back saves into 存图文件夹 just made
+// (src/picture_save_undo.js decides what may be removed).
+const MAX_UNDO = 500;
+const undoSaves = ({ saves }) => {
+  const now = Math.floor(Date.now() / 1000);
+  const results = (Array.isArray(saves) ? saves : []).slice(0, MAX_UNDO).map((save) => {
+    const md5 = String(save?.md5 ?? "").toLowerCase();
+    const status = undoSave(state.getStore(), { md5, dir: trayById(String(save?.tray ?? "")).path, file: save?.file, nowUnix: now });
+    // What is still saved of it elsewhere, for the wall's 「已存」 mark.
+    const left = MD5.test(md5) ? pictureStore.savesOf(state.getStore(), md5)[0] ?? null : null;
+    return { md5, file: String(save?.file ?? ""), status, savedAt: left?.savedAt ?? 0, savedDir: left?.dir ?? "" };
+  });
+  return { results };
+};
+
 const openExportFolder = ({ folder }) => {
   const directory = folderPath(folder);
   if (!fs.existsSync(directory)) {
@@ -230,4 +246,4 @@ const downloadName = (md5, filePath) => {
   }
 };
 
-module.exports = { exportPictures, openExportFolder, getSaveTarget, setSaveDir, downloadName, getTrays, changeTrays, saveName, originalForDownload, MAX_PER_REQUEST };
+module.exports = { exportPictures, undoSaves, openExportFolder, getSaveTarget, setSaveDir, downloadName, getTrays, changeTrays, saveName, originalForDownload, MAX_PER_REQUEST };

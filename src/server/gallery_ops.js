@@ -73,6 +73,8 @@ const list = (params) => withReadOnlyStore((db) => gallery.listPictures(db, {
   offset: params.get("offset"),
 }));
 
+const days = (params) => withReadOnlyStore((db) => ({ days: gallery.pictureDays(db, filterFrom(params)) }));
+
 // The counts change only when a store file does (new pictures, a keep, the
 // prompt library): until then the same question gets the same answer at once.
 const FACET_CACHE_SIZE = 24;
@@ -234,7 +236,7 @@ const handleGalleryApi = (request, response, url, { sendJson, sendError }) => {
   if (request.method !== "GET") {
     return false;
   }
-  const routes = { "/api/gallery": list, "/api/gallery/facets": facets, "/api/gallery/picture": detail, "/api/gallery/context": context, "/api/gallery/kept-summary": keptSummary, "/api/gallery/similar": similarPictures };
+  const routes = { "/api/gallery": list, "/api/gallery/days": days, "/api/gallery/facets": facets, "/api/gallery/picture": detail, "/api/gallery/context": context, "/api/gallery/kept-summary": keptSummary, "/api/gallery/similar": similarPictures };
   const handler = routes[url.pathname];
   if (handler === undefined) {
     return false;
@@ -251,7 +253,7 @@ const handleGalleryApi = (request, response, url, { sendJson, sendError }) => {
 // The list and its facet counts over a long range (1-2 s measured on 20k+
 // pictures) run in the read worker (read_worker.js); the query comes as a
 // plain object there.
-const HEAVY_ROUTES = { "/api/gallery": list, "/api/gallery/facets": facets, "/api/gallery/kept-summary": keptSummary };
+const HEAVY_ROUTES = { "/api/gallery": list, "/api/gallery/days": days, "/api/gallery/facets": facets, "/api/gallery/kept-summary": keptSummary };
 const isHeavyGalleryRoute = (pathname) => Object.hasOwn(HEAVY_ROUTES, pathname);
 const runHeavyGalleryQuery = (pathname, query) => HEAVY_ROUTES[pathname](new URLSearchParams(query));
 

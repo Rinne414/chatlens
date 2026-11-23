@@ -169,3 +169,32 @@ html.phone .tray-dock { display: none; }
 .quick-look-picked { padding: 1px 8px; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 650; }
 .quick-look-notice { flex-basis: 100%; order: -1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: #fff; font-weight: 650; }
 .quick-look-keys .tray-key { margin: 0 2px; background: transparent; color: #e6e8eb; border-color: rgba(255, 255, 255, .45); }
+
+/* the frame the arrow keys move; the pictures a Shift click would add */
+.wall-tile { scroll-margin: 150px 0 240px; }
+.wall-tile.cursor { outline: 3px solid var(--ink); outline-offset: 2px; z-index: 2; }
+.wall-tile.selected.cursor { outline-color: var(--accent); outline-offset: 2px; }
+.wall-tile.range-preview:not(.selected)::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--accent); opacity: .3; pointer-events: none; }
+
+/* 并排看 */
+.gallery-compare { position: fixed; inset: 0; z-index: 392; display: grid; grid-template-rows: minmax(0, 1fr) auto; place-items: center; gap: 10px; padding: 24px 24px 16px; background: rgba(10, 13, 18, .9); }
+.gallery-compare-grid { display: grid; gap: 14px; width: 100%; height: 100%; min-height: 0; }
+.gallery-compare-item { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; margin: 0; min-width: 0; min-height: 0; justify-items: center; }
+.gallery-compare-item img { width: 100%; height: 100%; min-height: 0; object-fit: contain; background: center / contain no-repeat; }
+.gallery-compare-item figcaption { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 12px; color: #e6e8eb; font-size: 13px; }
+
+/* the date rail */
+.gallery-rail { position: fixed; right: 18px; top: 50%; transform: translateY(-50%); z-index: 4; display: flex; flex-direction: column; align-items: stretch; gap: 1px; width: 44px; max-height: min(70vh, 640px); padding: 6px 4px; overflow-y: auto; scrollbar-width: none; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 4px 14px rgba(0, 0, 0, .12); }
+.gallery-rail[hidden] { display: none; }
+.gallery-rail::-webkit-scrollbar { display: none; }
+.gallery-rail-heading { padding: 4px 0 1px; color: var(--muted); font-size: 10px; text-align: center; }
+.gallery-rail-stop, .gallery-rail-newest { padding: 2px 0; border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; font-size: 12px; line-height: 1.5; text-align: center; cursor: pointer; }
+.gallery-rail-stop:hover, .gallery-rail-newest:hover, .gallery-rail-stop:focus-visible, .gallery-rail-newest:focus-visible { background: var(--line); outline: none; }
+.gallery-rail-stop.active { background: var(--accent); color: #fff; font-weight: 650; }
+.gallery-rail-newest { color: var(--accent); font-weight: 650; }
+.gallery-page .kb-results { padding-right: 58px; }
+@media (max-width: 900px) { .gallery-page .kb-results { padding-right: 0; } }
+
+/* a value in the picture's window that a click copies */
+.kb-copy-value { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: copy; }
+.kb-copy-value:hover, .kb-copy-value:focus-visible { color: var(--accent); text-decoration: underline; outline: none; }
