@@ -8,7 +8,8 @@
 
 const TRENDS_DAY_CHOICES = [[1, "今天"], [3, "3 天"], [7, "7 天"], [30, "30 天"]];
 const TRENDS_PAGE = 30;
-const TRENDS_KINDS = [["all", "全部"], ["thing", "新东西"], ["link", "链接"], ["picture", "图片"]];
+// "artist" is a list of its own (trends_artists.js), not a kind of card.
+const TRENDS_KINDS = [["all", "全部"], ["thing", "新东西"], ["link", "链接"], ["picture", "图片"], ["artist", "画师"]];
 const TRENDS_ORIGIN = { view: "trends", label: "热点" };
 
 // range: null (use `days`) or { fromDay, toDay } picked by the user.
@@ -29,11 +30,16 @@ const trendsQuery = () => {
 };
 
 const loadTrends = async ({ fresh = false } = {}) => {
+  if (app.trends.kind === "artist") {
+    await loadArtistTrends({ fresh });
+    return;
+  }
   replaceTrends({ loading: true, error: null, shown: TRENDS_PAGE });
   renderTrendsView();
   try {
-    const data = await api(`/api/trends?${trendsQuery()}${fresh ? "&fresh=1" : ""}`);
-    replaceTrends({ data, loading: false });
+    const query = trendsQuery();
+    const data = await api(`/api/trends?${query}${fresh ? "&fresh=1" : ""}`);
+    replaceTrends({ data, dataQuery: query, loading: false });
   } catch (error) {
     replaceTrends({ loading: false, error: error.message });
   }
@@ -221,11 +227,17 @@ const trendsToolbar = (data) => el("div", { class: "gallery-toolbar" },
     type: "button",
     "aria-pressed": String(app.trends.kind === kind),
     onclick: () => {
+      const wasArtist = app.trends.kind === "artist";
       replaceTrends({ kind, shown: TRENDS_PAGE });
+      // The two lists are fetched apart: the one being switched to may not be in yet for this range.
+      if (kind === "artist" || (wasArtist && app.trends.dataQuery !== trendsQuery())) {
+        loadTrends();
+        return;
+      }
       renderTrendsView();
     },
   }, label))),
-  data === null ? null : el("span", { class: "kb-meta" },
+  data === null || app.trends.kind === "artist" ? null : el("span", { class: "kb-meta" },
     `看了 ${briefNumber(data.messages)} 条消息和 ${briefNumber(data.summarizedChunks)} 段 AI 总结`));
 
 const renderTrendsView = () => {
@@ -234,6 +246,10 @@ const renderTrendsView = () => {
     return;
   }
   const { data, loading, error, kind } = app.trends;
+  if (kind === "artist") {
+    setChildren(root, artistTrendsPage());
+    return;
+  }
   const events = (data?.events ?? []).filter((event) => kind === "all" || event.kind === kind);
   setChildren(root, el("section", { class: `panel tr-page ${loading ? "is-loading" : ""}` },
     el("p", { class: "tr-intro" }, "同一件事在好几个群里被提到：谁先说的、怎么传开、各群怎么看。"),

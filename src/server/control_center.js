@@ -348,6 +348,16 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/trends/artists") {
+      sendJson(response, 200, await readWorker.call("artistTrends", {
+        days: url.searchParams.get("days") ?? "3",
+        fromUnix: Number(url.searchParams.get("fromUnix")),
+        toUnix: Number(url.searchParams.get("toUnix")),
+        fresh: url.searchParams.get("fresh") === "1",
+      }));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/trends") {
       sendJson(response, 200, await readWorker.call("trends", {
         days: url.searchParams.get("days") ?? "3",

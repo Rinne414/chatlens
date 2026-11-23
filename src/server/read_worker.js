@@ -16,6 +16,7 @@ const HANDLERS = {
   promptRequests: ["./knowledge_ops", "promptRequests"],
   coverage: ["./knowledge_ops", "coverage"],
   trends: ["./trends_ops", "getTrends"],
+  artistTrends: ["./trends_ops", "getArtistTrends"],
   groupInsights: ["./group_ops", "getGroupInsightsReadOnly"],
   groupPerson: ["./group_ops", "getGroupPersonReadOnly"],
   personAcross: ["./group_ops", "getPersonAcrossReadOnly"],

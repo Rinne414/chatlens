@@ -65,3 +65,20 @@
   .tr-head { flex-direction: column; gap: 6px; }
   .tr-reach { justify-items: start; text-align: left; }
 }
+
+/* 热点 → 画师 (trends_artists.js) */
+.ta-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.ta-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ta-row { display: grid; grid-template-columns: 2.2em minmax(10ch, 1.2fr) minmax(80px, 1fr) minmax(16ch, auto) minmax(9ch, auto); gap: 12px; align-items: center; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ta-row:hover, .ta-row:focus-visible { background: var(--bg); outline: none; }
+.ta-rank { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.ta-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ta-bar { position: relative; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.ta-bar span { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--accent); }
+.ta-bar span.before { background: var(--line-strong); }
+.ta-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.ta-change { font-size: 13px; font-weight: 700; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.ta-change.up { color: var(--ok, #15803d); }
+.ta-change.down { color: var(--muted); }
+html.phone .ta-row { grid-template-columns: 2em 1fr auto; }
+html.phone .ta-row .ta-bar, html.phone .ta-row .ta-count { display: none; }

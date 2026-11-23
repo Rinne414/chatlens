@@ -28,6 +28,7 @@ const REMOTE_API_ROUTES = new Set([
   "GET /api/inbox-extras",
   "GET /api/media-index",
   "GET /api/trends",
+  "GET /api/trends/artists",
   "GET /api/group",
   "GET /api/group/timeline",
   "GET /api/group/person",
