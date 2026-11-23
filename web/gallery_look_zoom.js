@@ -14,6 +14,30 @@ const LOOK_ZOOM_SLACK = 60;
 const LOOK_DRAG_START = 4;
 
 const galleryLookZoom = { scale: 1, x: 0, y: 0, drag: null, dragged: false };
+// Pictures whose original has arrived (shown instead of the preview from then
+// on) and the ones it was asked for: a close-up of the preview alone is blurry.
+const galleryLookOriginals = { ready: new Set(), asked: new Set() };
+
+// Asked for once per picture, the first time it is looked at closer. The
+// original goes through the same store as 「看原图」; when it cannot be had
+// the preview simply stays.
+const wantGalleryLookOriginal = () => {
+  const md5 = galleryQuickLook.md5;
+  const item = (app.gallery.results?.items ?? []).find((candidate) => candidate.md5 === md5) ?? null;
+  if (md5 === null || galleryLookOriginals.asked.has(md5) || (item !== null && item.gone && !item.kept)) {
+    return;
+  }
+  galleryLookOriginals.asked.add(md5);
+  const original = new Image();
+  original.onload = () => {
+    galleryLookOriginals.ready.add(md5);
+    const image = galleryLookImage();
+    if (galleryQuickLook.md5 === md5 && image !== null) {
+      image.src = original.src;
+    }
+  };
+  original.src = pictureUrl(md5, "original");
+};
 
 const galleryLookImage = () => document.querySelector("#quick-look .quick-look-image");
 
@@ -69,6 +93,7 @@ const zoomGalleryLookAt = (clientX, clientY, wanted) => {
   const moved = clampGalleryLookPan(image, scale, pointX - (pointX - galleryLookZoom.x) * ratio, pointY - (pointY - galleryLookZoom.y) * ratio);
   Object.assign(galleryLookZoom, { scale, ...moved });
   applyGalleryLookZoom(image);
+  wantGalleryLookOriginal();
 };
 
 // A click on the picture: close up at that point (its real pixels when it is
@@ -144,7 +169,7 @@ const endGalleryLookDrag = (event) => {
 const galleryQuickLookImage = (md5) => {
   const image = el("img", {
     class: "quick-look-image",
-    src: pictureUrl(md5, "preview"),
+    src: pictureUrl(md5, galleryLookOriginals.ready.has(md5) ? "original" : "preview"),
     alt: "",
     draggable: "false",
     style: `background-image:url("${pictureUrl(md5, "thumb")}")`,
