@@ -31,6 +31,9 @@ const compute = () => {
     background: {
       enabled: status.settings?.enabled !== false,
       running: status.running,
+      // For the tooltip of 「正在更新…」: which step, and since when (ISO, as the scheduler keeps it).
+      phase: status.phase,
+      lastStartedAt: status.lastStartedAt,
       lastFinishedAt: isoToUnix(status.lastFinishedAt),
       nextRunAt: isoToUnix(status.nextRunAt),
       lastError: status.lastError,

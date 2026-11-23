@@ -81,7 +81,7 @@ const whatsNewGo = (item) => {
     return;
   }
   if (item.run === "keys") {
-    toggleBriefKeyHelp();
+    toggleKeyHelp();
     return;
   }
   if (item.view !== null && app.view !== item.view) {

@@ -30,7 +30,8 @@ const paletteEntries = (sources, rawQuery) => {
   const listed = [
     ...sources.pages.map(([view, title]) => ({ kind: "page", label: title, hint: "页面", keywords: `${view} ${PALETTE_PAGE_WORDS[view] ?? ""}`, action: { type: "page", view } })),
     { kind: "command", label: "退出 ChatLens", hint: "命令", keywords: "关闭 关掉 停止 后台 quit exit", action: { type: "quit" } },
-    { kind: "command", label: "切换夜间 / 日间模式", hint: "命令", keywords: "主题 暗色 深色 theme dark", action: { type: "theme" } },
+    { kind: "command", label: "切换夜间 / 日间模式 / 跟随系统", hint: "命令", keywords: "主题 暗色 深色 theme dark system", action: { type: "theme" } },
+    { kind: "command", label: "键盘快捷键", hint: "命令 · ?", keywords: "快捷键 按键 键盘 keys shortcuts help", action: { type: "keys" } },
     ...sources.groups.map((group) => ({ kind: "group", label: group.name, hint: "Enter 打开聊天 · Shift+Enter 群页", keywords: `群 ${group.groupId}`, action: { type: "chat", groupId: group.groupId, groupName: group.name } })),
     ...sources.words.map((item) => ({ kind: "word", label: `关注的词：${item.word}`, hint: `这几天 ${item.total} 条`, keywords: item.word, action: { type: "word", word: item.word } })),
   ].filter((entry) => query === "" || paletteMatches(entry, query));
@@ -79,6 +80,9 @@ const runPaletteAction = (action) => {
       break;
     case "theme":
       document.getElementById("theme-toggle")?.click();
+      break;
+    case "keys":
+      toggleKeyHelp();
       break;
     case "quit":
       quitConsole();

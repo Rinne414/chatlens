@@ -479,7 +479,7 @@ const backgroundStatusLine = (background) => {
     return el("div", { class: "notice warn" }, `后台刷新暂停：${background.readinessProblem}。`);
   }
   if (background.running) {
-    return el("p", { class: "bg-status busy" }, "正在刷新…");
+    return el("p", { class: "bg-status busy" }, refreshRunningText(background, "正在刷新"), " · ", refreshStopButton(refreshBackgroundStatus));
   }
   const facts = [
     background.lastFinishedAt ? `上次 ${unixToHkt(Math.floor(Date.parse(background.lastFinishedAt) / 1000)).slice(5, 16)}` : "还没有刷新过",

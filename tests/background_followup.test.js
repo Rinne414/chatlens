@@ -46,3 +46,16 @@ test("the refresh result survives a warning written on stderr in the middle of i
     "out:refreshResult={\"groups\":38,\"briefing\":{\"jobQueued\":12}}",
   ]);
 });
+
+test("the refresh's step lines name what it is doing, and are not kept as log lines", () => {
+  const { phaseOf } = require("../src/server/background");
+  assert.equal(phaseOf("progress=phase:ingest"), "ingest");
+  assert.equal(phaseOf("progress=ai-start"), null);
+  assert.equal(phaseOf("something else"), null);
+});
+
+test("stopping a round when none is running says so and changes nothing", () => {
+  const { stopRun, getStatus } = require("../src/server/background");
+  assert.deepEqual(stopRun(), { stopped: false, reason: "not-running" });
+  assert.equal(getStatus().phase, null);
+});

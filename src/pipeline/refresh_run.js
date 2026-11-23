@@ -492,13 +492,17 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
     briefWindow.settle(db, { now });
     const created = engine.closeChunks(db, groupIds, { now, force, ...gate });
     common.progress(`briefing-chunks:${created}`);
-    const map = await engine.mapPendingChunks(db, client, { now, log: common.info, ...gate });
+    const step = (name, run) => {
+      common.progress(`phase:${name}`);
+      return run();
+    };
+    const map = await step("summaries", () => engine.mapPendingChunks(db, client, { now, log: common.info, ...gate }));
     // The account was refused: merges and digests would be refused as well.
     const aiDown = map.routeDown !== null;
-    const reduce = aiDown ? { skipped: "ai-down" } : await engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate });
-    const digests = aiDown ? [] : await runDigests(db, client, { now, gate });
-    const promises = aiDown ? { skipped: "ai-down" } : await runCommitments(db, client, { config, now, gate });
-    const notes = aiDown ? { skipped: "ai-down" } : await runNotesAiSafely(db, client, { config, now, gate });
+    const reduce = aiDown ? { skipped: "ai-down" } : await step("merge", () => engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate }));
+    const digests = aiDown ? [] : await step("digests", () => runDigests(db, client, { now, gate }));
+    const promises = aiDown ? { skipped: "ai-down" } : await step("commitments", () => runCommitments(db, client, { config, now, gate }));
+    const notes = aiDown ? { skipped: "ai-down" } : await step("notes", () => runNotesAiSafely(db, client, { config, now, gate }));
     return {
       chunksCreated: created,
       map,
@@ -574,6 +578,8 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   const timings = {};
   const timed = async (name, fn) => {
     const started = Date.now();
+    // The console shows which step a long refresh is at (background.js phaseOf).
+    common.progress(`phase:${name}`);
     try {
       return await fn();
     } finally {

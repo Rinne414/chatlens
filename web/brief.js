@@ -386,7 +386,16 @@ const briefRefreshPieces = (data) => {
   if (background.running) {
     // A long AI round no longer holds up new messages (background.js).
     const synced = background.lastSync?.ok && Date.parse(background.lastSync.at) > Date.parse(background.lastStartedAt ?? "");
-    return { tone: "busy", pieces: [el("span", { class: "brief-pulse" }), "正在整理新消息…", synced ? ` · 新消息${briefAgo(background.lastSync.at)}收过` : ""] };
+    return { tone: "busy", pieces: [
+      el("span", { class: "brief-pulse" }),
+      refreshRunningText(background, "正在整理新消息"),
+      synced ? ` · 新消息${briefAgo(background.lastSync.at)}收过` : "",
+      " · ",
+      refreshStopButton(async () => {
+        await loadBriefing({ fresh: true });
+        renderBriefView();
+      }),
+    ] };
   }
   if (background.readinessProblem) {
     return { tone: "warn", pieces: [`还没设置好（${background.readinessProblem}），消息不会更新；先完成「开始使用」`] };
@@ -1027,7 +1036,7 @@ const briefFooter = (data) => {
     " · ",
     el("button", { class: "linklike", onclick: () => openView("settings") }, "AI 用量与后台设置"),
     " · ",
-    el("button", { class: "linklike", onclick: toggleBriefKeyHelp, title: "j / k 移动 · o 打开 · s 收藏 · Ctrl+K 搜索" }, "键盘快捷键（?）"));
+    el("button", { class: "linklike", onclick: toggleKeyHelp, title: "j / k 移动 · o 打开 · s 收藏 · Ctrl+K 搜索" }, "键盘快捷键（?）"));
 };
 
 const renderBriefView = () => {

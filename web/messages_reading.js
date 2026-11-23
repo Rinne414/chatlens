@@ -245,8 +245,8 @@ const chatMentionNavNodes = () => {
   const title = `近 ${chatReading.mentionDays} 天里这个群有 ${briefNumber(mentions.length)} 条 @你 或回复你的消息`;
   return [
     el("span", { class: "chat-mention-count", title }, `@你 ${briefNumber(mentions.length)}`),
-    el("button", { class: "btn small", type: "button", title: "上一条 @你 或回复你的消息", "aria-label": "上一条 @你 的消息", onclick: () => stepChatMention(-1) }, "↑"),
-    el("button", { class: "btn small", type: "button", title: "下一条 @你 或回复你的消息", "aria-label": "下一条 @你 的消息", onclick: () => stepChatMention(1) }, "↓"),
+    el("button", { class: "btn small", type: "button", title: "上一条 @你 或回复你的消息（p）", "aria-label": "上一条 @你 的消息", onclick: () => stepChatMention(-1) }, "↑"),
+    el("button", { class: "btn small", type: "button", title: "下一条 @你 或回复你的消息（n）", "aria-label": "下一条 @你 的消息", onclick: () => stepChatMention(1) }, "↓"),
   ];
 };
 

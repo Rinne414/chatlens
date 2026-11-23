@@ -90,6 +90,8 @@ let stopping = false;
 // of it. Once it says the QQ database copy is free (progress=ai-start), a
 // messages-only refresh (--sync-only) runs beside it every interval.
 let aiPhase = false;
+// Set by stopRun(): the user ended this round; it did not fail.
+let stoppedByUser = false;
 let sideChild = null;
 let sideTimer = null;
 
@@ -237,8 +239,12 @@ const lineReader = (onLine) => {
   };
 };
 
+// "progress=phase:ingest" -> "ingest": what the refresh is doing right now.
+const PHASE_PREFIX = "progress=phase:";
+const phaseOf = (line) => (line.startsWith(PHASE_PREFIX) ? line.slice(PHASE_PREFIX.length).trim() : null);
+
 const logLine = (line) => {
-  if (line.trim().length > 0 && !line.startsWith("refreshResult=")) {
+  if (line.trim().length > 0 && !line.startsWith("refreshResult=") && phaseOf(line) === null) {
     pushLog(line.trim().slice(0, 300));
   }
 };
@@ -334,7 +340,9 @@ const tick = ({ force }) => {
   status.lastStartedAt = new Date().toISOString();
   status.lastError = null;
   status.nextRunAt = null;
+  status.phase = null;
   aiPhase = false;
+  stoppedByUser = false;
   const args = [refreshScript, ...(force ? ["--force"] : [])];
   // CHATLENS_URL: the Obsidian notes link back to chat moments in this console.
   child = spawn(process.execPath, args, { cwd: state.toolRoot, env: { ...process.env, CHATLENS_URL: serverUrl ?? "" }, ...platform.spawnOptionsForTree() });
@@ -346,6 +354,7 @@ const tick = ({ force }) => {
     if (line.startsWith("progress=ai-start")) {
       enterAiPhase();
     }
+    status.phase = phaseOf(line) ?? status.phase;
     logLine(line);
     tickLog.push(line);
     if (tickLog.length > MAX_LOG_LINES) {
@@ -365,11 +374,22 @@ const tick = ({ force }) => {
   child.on("error", (error) => {
     status.lastError = error.message;
   });
-  child.on("close", (code) => {
+  child.on("close", (code, signal) => {
     child = null;
     status.running = false;
+    status.phase = null;
     aiPhase = false;
     stopSideTimer();
+    // A refresh that finished by itself just as it was being stopped is a finished refresh.
+    const wasStopped = stoppedByUser && (code !== 0 || signal !== null);
+    stoppedByUser = false;
+    if (wasStopped && !stopping) {
+      // Ended by 「停下这一轮」: what was stored stays, the last finished
+      // refresh stays the one on record, and the next round comes as usual.
+      status.lastStoppedAt = new Date().toISOString();
+      schedule();
+      return;
+    }
     if (stopping) {
       // Killed because the console is closing: not a failure, and the last
       // refresh that did finish stays the one on record (background-status.json).
@@ -534,12 +554,27 @@ const stop = () => {
 
 const runNow = ({ force = true } = {}) => tick({ force });
 
+// 「停下这一轮」: ends the refresh that is running, and nothing else. Messages
+// already stored and summaries already written stay; the next round starts
+// at its usual time.
+const stopRun = () => {
+  if (!status.running || child === null) {
+    return { stopped: false, reason: "not-running" };
+  }
+  stoppedByUser = true;
+  platform.killTree(child.pid);
+  return { stopped: true };
+};
+
 const serverUrlOf = () => serverUrl;
 
 const getStatus = () => ({
   settings: settings(),
   readinessProblem: readiness(),
   running: status.running,
+  // What the running refresh is doing (see refresh_run.js timed()); null when idle.
+  phase: status.running ? status.phase ?? null : null,
+  lastStoppedAt: status.lastStoppedAt ?? null,
   // Messages fetched beside a refresh busy with AI work (see startSideSync).
   syncing: sideChild !== null,
   lastSync: status.lastSync ?? null,
@@ -551,4 +586,4 @@ const getStatus = () => ({
   log: status.log.slice(-12),
 });
 
-module.exports = { start, stop, runNow, serverUrlOf, getStatus, saveSettings, notifyAfterTick, followUpDelay, lineReader, parseResult, DEFAULTS };
+module.exports = { start, stop, runNow, stopRun, phaseOf, serverUrlOf, getStatus, saveSettings, notifyAfterTick, followUpDelay, lineReader, parseResult, DEFAULTS };

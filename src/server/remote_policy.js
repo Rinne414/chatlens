@@ -70,6 +70,7 @@ const REMOTE_API_ROUTES = new Set([
   "POST /api/briefing/retry-failed",
   "POST /api/watch-words",
   "POST /api/background/run-now",
+  "POST /api/background/stop-run",
   "POST /api/paste-cursor",
   "POST /api/quick-summary",
   "POST /api/review/backfill",

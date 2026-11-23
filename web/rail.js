@@ -93,7 +93,7 @@ const railBackgroundLine = (data) => {
     return { tone: "paused", text: "后台刷新已关闭，消息不会自己更新" };
   }
   if (background.running) {
-    return { tone: "running", text: "正在更新…" };
+    return { tone: "running", text: "正在更新…", title: refreshRunningText(background, "正在更新") };
   }
   if (background.lastError) {
     const when = railAgo(background.lastFinishedAt);
@@ -154,7 +154,7 @@ const renderRailStatus = () => {
       class: `rail-status-line ${line.tone}`,
       type: "button",
       // Unfinished setup is done in 简报's 「开始使用」, not in 设置.
-      title: data.background.readinessProblem ? "去简报页的「开始使用」把设置做完" : "后台刷新与通知设置",
+      title: line.title ?? (data.background.readinessProblem ? "去简报页的「开始使用」把设置做完" : "后台刷新与通知设置"),
       onclick: () => openView(data.background.readinessProblem ? "brief" : "settings"),
     }, el("span", { class: "rail-dot" }), line.text),
     railFreshnessLine(data.background),

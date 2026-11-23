@@ -337,8 +337,19 @@ const readZoomChoice = () => {
   }
 };
 
+// The stored choice: "light", "dark" or "system" (follow the computer).
+const THEME_CHOICES = ["light", "dark", "system"];
+const systemDark = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+const readThemeChoice = () => {
+  const stored = localStorage.getItem("cc-theme");
+  return THEME_CHOICES.includes(stored) ? stored : "light";
+};
+const themeOf = (choice) => (choice === "system" ? (systemDark?.matches ? "dark" : "light") : choice);
+
 const settings = {
-  theme: localStorage.getItem("cc-theme") ?? "light",
+  themeChoice: readThemeChoice(),
+  // What is shown now: "light" or "dark".
+  theme: themeOf(readThemeChoice()),
   // "auto" follows the viewport width (see app.css); a number overrides it.
   zoom: readZoomChoice(),
   // Always on. Kept as a field because it also gates real avatar images, not
@@ -354,7 +365,9 @@ const applySettings = () => {
   }
   const themeButton = $("#theme-toggle");
   if (themeButton !== null) {
-    themeButton.textContent = settings.theme === "dark" ? "☀️ 日间模式" : "🌙 夜间模式";
+    // The button names what a click changes to; the tooltip says what it is now.
+    themeButton.textContent = { light: "🌙 夜间模式", dark: "🖥️ 跟随系统", system: "☀️ 日间模式" }[settings.themeChoice];
+    themeButton.title = { light: "现在是日间模式", dark: "现在是夜间模式", system: `现在跟随系统（${settings.theme === "dark" ? "夜间" : "日间"}）` }[settings.themeChoice];
   }
 };
 
@@ -380,11 +393,25 @@ const changeZoom = (value) => {
   applyZoom();
 };
 
+// 日间 -> 夜间 -> 跟随系统 -> 日间.
 const toggleTheme = () => {
-  settings.theme = settings.theme === "dark" ? "light" : "dark";
-  localStorage.setItem("cc-theme", settings.theme);
+  settings.themeChoice = THEME_CHOICES[(THEME_CHOICES.indexOf(settings.themeChoice) + 1) % THEME_CHOICES.length];
+  settings.theme = themeOf(settings.themeChoice);
+  try {
+    localStorage.setItem("cc-theme", settings.themeChoice);
+  } catch {
+    // Private windows may refuse storage; the choice still applies now.
+  }
   applySettings();
 };
+
+// The computer switched between light and dark while the page is open.
+systemDark?.addEventListener?.("change", () => {
+  if (settings.themeChoice === "system") {
+    settings.theme = themeOf("system");
+    applySettings();
+  }
+});
 
 // Deterministic avatar color per group/speaker id or name.
 const hashHue = (value) => {

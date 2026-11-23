@@ -557,3 +557,7 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .brief-window-mode { max-width: 100%; padding: 1px 4px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .brief-window-mode:hover, .brief-window-mode:focus-visible { border-color: var(--line-strong); outline: none; }
 .brief-window-mode option { background: var(--panel); color: var(--ink); }
+
+/* 键盘快捷键 (key_help.js): the page's keys, then the ones that work everywhere */
+.key-help-title { margin: 10px 0 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.brief-keys-help { max-height: calc(100vh - 40px); overflow-y: auto; }
