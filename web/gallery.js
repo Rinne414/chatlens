@@ -388,8 +388,7 @@ const markGallerySaved = (md5s, savedAt, savedDir) => {
 };
 
 pictureTrays.onSaved = markGallerySaved;
-// The first tray's folder is also where the multi-select 「另存到文件夹」 writes,
-// and its name is on every tile's 存 button.
+// The first tray's folder is also where the multi-select 「另存到文件夹」 writes.
 pictureTrays.onChanged = () => {
   if (app.view !== "media") {
     return;
@@ -405,24 +404,6 @@ pictureTrays.onChanged = () => {
 
 // The dragged tile alone, or the whole selection when it is part of it.
 const galleryDragMd5s = (item) => (app.gallery.selected.has(item.md5) ? [...app.gallery.selected] : [item.md5]);
-
-const gallerySaveButton = (item) => {
-  const tray = firstTray();
-  // Nothing to save once Tencent deleted a picture that was never kept.
-  if (tray === null || (item.gone && !item.kept)) {
-    return null;
-  }
-  return el("button", {
-    class: "wall-save",
-    type: "button",
-    title: `把原图存到「${tray.name}」（${tray.path}）`,
-    "aria-label": `存到${tray.name}`,
-    onclick: (event) => {
-      event.stopPropagation();
-      saveToTrayAndTell([item.md5], tray.id);
-    },
-  }, "存");
-};
 
 // Selecting starts from any tile (its corner box, or Ctrl+click), so nobody
 // has to scroll back up to a button; leaving clears the selection.
@@ -589,7 +570,7 @@ const galleryTileNode = (item, index) => wallTile({
     : openGalleryDetail(index)),
   badges: galleryBadges(item),
   // Shown on hover; always while selecting (gallery.css).
-  corner: el("div", { class: "wall-corner desktop-action" }, gallerySaveButton(item), gallerySelectBox(item)),
+  corner: el("div", { class: "wall-corner desktop-action" }, gallerySelectBox(item)),
   caption: galleryCaption(item),
   extraClass: [item.sticker ? "sticker" : "", app.gallery.selected.has(item.md5) ? "selected" : ""].join(" "),
   onError: (image) => {

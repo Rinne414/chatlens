@@ -133,10 +133,6 @@ html.phone .tray-dock { display: none; }
 
 /* a tile's own 存 button beside its select box */
 .gallery-page .wall-corner { display: flex; gap: 6px; }
-.wall-save { width: 30px; height: 30px; border: 0; border-radius: 8px; background: rgba(12, 15, 20, .55); color: #fff; font: 700 13px/1 inherit; cursor: pointer; opacity: 0; transition: opacity var(--dur), background var(--dur); }
-.wall-tile:hover .wall-save, .wall-save:focus-visible { opacity: 1; }
-.wall-save:hover { background: var(--accent); }
-.gallery-page.selecting .wall-save { display: none; }
 .wall-badge.saved { background: rgba(55, 65, 81, .9); }
 .gallery-detail-saved { overflow-wrap: anywhere; }
 
