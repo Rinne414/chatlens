@@ -213,6 +213,13 @@ const dismissPictureViewer = () => dismissOverlay(closePictureViewer);
 // The viewer belongs to the chat that opened it.
 VIEW_LEAVE_HOOKS.push(closePictureViewer);
 
+// In the gallery the enlarged picture can still be saved with the tray keys: say so where it is looked at.
+const pictureViewerKeyHint = () => (app.view === "media" && app.gallery.detail !== null && (pictureTrays.list ?? []).length > 0
+  ? el("p", { class: "card-sub picture-viewer-keys" },
+    el("kbd", { class: "tray-key" }, "S"), " 或 ", el("kbd", { class: "tray-key" }, "1"), " – ", el("kbd", { class: "tray-key" }, String(Math.min(9, pictureTrays.list.length))),
+    " 存到托盘 · ", el("kbd", { class: "tray-key" }, "Esc"), " 关闭")
+  : null);
+
 const pictureViewerActions = (viewer) => {
   const notice = el("p", { class: "card-sub picture-viewer-notice" }, viewer.notice);
   return el("div", { class: "picture-viewer-actions" },
@@ -336,7 +343,8 @@ const renderPictureViewer = () => {
       el("button", { class: "btn small", onclick: dismissPictureViewer }, "关闭")),
     meta.length > 0 ? el("p", { class: "card-sub" }, meta) : null,
     el("p", { class: "card-sub" }, viewer.md5),
-    pictureViewerActions(viewer))));
+    pictureViewerActions(viewer),
+    pictureViewerKeyHint())));
 };
 
 const openPictureViewer = (picture) => {

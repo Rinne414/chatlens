@@ -136,6 +136,19 @@ const saveGalleryDetailToTray = async (detail, tray) => {
   if (!outcome.failed) {
     api(`/api/gallery/picture?md5=${md5}`).then((data) => galleryDetailPatch(md5, { data })).catch(() => {});
   }
+  return outcome;
+};
+
+// A number key with many pictures selected: one stray key must not copy
+// dozens of files, so past a few it asks first.
+const TRAY_KEY_ASK_ABOVE = 5;
+const saveSelectionByKey = async (tray) => {
+  const md5s = [...app.gallery.selected];
+  if (md5s.length > TRAY_KEY_ASK_ABOVE
+    && !await confirmInPage(`把选中的 ${md5s.length} 张存到「${tray.name}」？\n${tray.path}`, { confirmLabel: "存" })) {
+    return;
+  }
+  saveToTrayAndTell(md5s, tray.id);
 };
 
 // One button per tray; the number is the key that does the same.
@@ -149,7 +162,7 @@ const galleryDetailTrayButtons = (detail) => {
     type: "button",
     title: `把原图存到 ${tray.path}${index < TRAY_KEYS ? `（按 ${index + 1}${index === 0 ? " 或 S" : ""}）` : ""}`,
     onclick: () => saveGalleryDetailToTray(detail, tray),
-  }, `存到「${tray.name}」`, index < TRAY_KEYS ? el("kbd", { class: "tray-key" }, String(index + 1)) : null));
+  }, `存到「${tray.name}」`, index < TRAY_KEYS ? el("kbd", { class: "tray-key" }, index === 0 ? "S / 1" : String(index + 1)) : null));
 };
 
 const galleryDetailActions = (detail) => {
@@ -374,16 +387,20 @@ document.addEventListener("keydown", (event) => {
   const tray = event.ctrlKey || event.metaKey || event.altKey || event.repeat || document.querySelector(".cc-dialog-layer") !== null
     ? null
     : trayForKey(event.key);
-  if (tray !== null && pictureUi.viewer === null) {
+  if (tray !== null) {
     const detail = app.gallery.detail;
     if (detail !== null && !(detail.item.gone && !detail.item.kept)) {
       event.preventDefault();
-      saveGalleryDetailToTray(detail, tray);
+      // With the picture enlarged the panel's own line is covered: say it on top as well.
+      const saving = saveGalleryDetailToTray(detail, tray);
+      if (pictureUi.viewer !== null) {
+        saving.then((outcome) => notify(outcome.text, { isError: outcome.failed }));
+      }
       return;
     }
-    if (detail === null && app.gallery.selecting && app.gallery.selected.size > 0) {
+    if (detail === null && pictureUi.viewer === null && app.gallery.selecting && app.gallery.selected.size > 0) {
       event.preventDefault();
-      saveToTrayAndTell([...app.gallery.selected], tray.id);
+      saveSelectionByKey(tray);
       return;
     }
   }

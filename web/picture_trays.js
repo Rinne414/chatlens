@@ -327,7 +327,7 @@ const trayDockNodes = () => {
   return [
     el("div", { class: "tray-dock-head" },
       el("strong", {}, "存图托盘"),
-      el("span", { class: "kb-meta" }, "把图片拖进来，原图就存进文件夹。看大图时按托盘的数字也行")),
+      el("span", { class: "kb-meta" }, "把图片拖进来，原图就存进文件夹。点开一张图或多选之后，按托盘上的数字也行（第一个还可以按 S）")),
     trays.map((tray, index) => trayNode(tray, index, { selected })),
     pictureTrays.editing === "new"
       ? el("div", { class: "tray editing" }, trayEditForm(null))
