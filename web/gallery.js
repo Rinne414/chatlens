@@ -209,6 +209,17 @@ const applyGalleryFilter = (patch) => {
   loadGallery();
 };
 
+// For → on the last loaded picture: the next page, and whether it brought any.
+const loadGalleryNextPage = async () => {
+  const tab = app.gallery;
+  const before = tab.results?.items.length ?? 0;
+  if (tab.similar !== null || tab.loading || tab.loadingMore || tab.results === null || before >= tab.results.total) {
+    return false;
+  }
+  await loadGallery({ append: true });
+  return (app.gallery.results?.items.length ?? 0) > before;
+};
+
 const loadMoreGallery = () => {
   const tab = app.gallery;
   if (tab.similar !== null || tab.loading || tab.loadingMore || tab.results === null || tab.results.items.length >= tab.results.total) {
@@ -543,7 +554,7 @@ const gallerySaveTargetRow = () => {
 
 const gallerySelectBox = (item) => el("label", {
   class: app.gallery.selected.has(item.md5) ? "wall-pick picked" : "wall-pick",
-  title: app.gallery.selecting ? "选中" : "选中这张，开始多选（也可以按住 Ctrl 点图片）",
+  title: app.gallery.selecting ? "选中" : "选中这张，开始多选（也可以按住 Ctrl 或 Shift 点图片）",
   onclick: (event) => event.stopPropagation(),
 }, el("input", {
   type: "checkbox",
@@ -573,7 +584,7 @@ const galleryTile = (item, index) => {
 const galleryTileNode = (item, index) => wallTile({
   src: pictureUrl(item.md5, "thumb"),
   alt: item.sticker ? "表情" : "图片",
-  onOpen: (event) => (app.gallery.selecting || event.ctrlKey || event.metaKey
+  onOpen: (event) => (app.gallery.selecting || event.ctrlKey || event.metaKey || event.shiftKey
     ? toggleGallerySelected(item.md5, event.currentTarget.closest(".wall-tile"), event)
     : openGalleryDetail(index)),
   badges: galleryBadges(item),

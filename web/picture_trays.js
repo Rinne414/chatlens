@@ -49,6 +49,10 @@ const trayForKey = (key) => {
   return /^[1-9]$/u.test(key) ? pictureTrays.list?.[Number(key) - 1] ?? null : null;
 };
 
+// The same from a key event: with Shift held a digit key reports its symbol,
+// so the digit is read from where the key is.
+const trayForEvent = (event) => trayForKey(/^Digit[1-9]$/u.test(event.code ?? "") ? event.code.slice(5) : event.key);
+
 // "S 或 1" with one tray, "S 或 1 – 3" with three: the keys that save, as keys.
 const trayKeyHint = () => {
   const count = Math.min(TRAY_KEYS, (pictureTrays.list ?? []).length);

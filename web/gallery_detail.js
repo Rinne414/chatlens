@@ -79,11 +79,31 @@ VIEW_STEP_RESTORERS.media = (step, overlay) => {
   }
 };
 
-const stepGalleryDetail = (delta) => {
-  const index = app.gallery.detail?.index ?? -1;
-  if (index >= 0) {
-    openGalleryDetail(index + delta);
+// → on the last loaded picture loads the next page first, so the count beside
+// it (the place among everything found) never ends at a dead button.
+const stepGalleryDetail = async (delta) => {
+  const detail = app.gallery.detail;
+  const index = detail?.index ?? -1;
+  if (index < 0) {
+    return;
   }
+  const loaded = app.gallery.results?.items.length ?? 0;
+  if (delta > 0 && index + delta >= loaded && !(await loadGalleryNextPage() && app.gallery.detail?.md5 === detail.md5)) {
+    return;
+  }
+  openGalleryDetail(index + delta);
+};
+
+const galleryHasMoreAfter = (index) => {
+  const results = app.gallery.results;
+  return results !== null && app.gallery.similar === null && (index < results.items.length - 1 || results.items.length < results.total);
+};
+
+// A tile's box keeps focus after a click; only typing places count as typing.
+const galleryTypingFocus = () => {
+  const focused = document.activeElement;
+  return focused?.isContentEditable === true || focused?.tagName === "TEXTAREA" || focused?.tagName === "SELECT"
+    || (focused?.tagName === "INPUT" && !["checkbox", "radio", "range"].includes(focused.type));
 };
 
 const openChatAtPosting = (posting) => openMessagesView({
@@ -347,7 +367,7 @@ const galleryDetailOverlay = (detail) => {
       el("div", { class: "kb-overlay-nav" },
         detail.index >= 0 ? el("span", { class: "kb-meta" }, galleryDetailPosition(detail.index, items.length)) : null,
         el("button", { class: "btn small", type: "button", title: "上一张（←）", disabled: detail.index <= 0, onclick: () => stepGalleryDetail(-1) }, "←"),
-        el("button", { class: "btn small", type: "button", title: "下一张（→）", disabled: detail.index < 0 || detail.index >= items.length - 1, onclick: () => stepGalleryDetail(1) }, "→"),
+        el("button", { class: "btn small", type: "button", title: "下一张（→）", disabled: detail.index < 0 || !galleryHasMoreAfter(detail.index), onclick: () => stepGalleryDetail(1) }, "→"),
         el("button", { class: "btn small", type: "button", onclick: dismissGalleryDetail }, "关闭"))),
     el("div", { class: "kb-overlay-body" },
       el("div", { class: "kb-overlay-media" }, galleryDetailImage(detail)),
@@ -375,11 +395,7 @@ document.addEventListener("keydown", (event) => {
   if (app.view !== "media") {
     return;
   }
-  // A tile's box keeps focus after a click; only typing places count.
-  const focused = document.activeElement;
-  const typing = focused?.tagName === "TEXTAREA" || focused?.tagName === "SELECT"
-    || (focused?.tagName === "INPUT" && !["checkbox", "radio", "range"].includes(focused.type));
-  if (typing) {
+  if (galleryTypingFocus()) {
     return;
   }
   // 存图文件夹: S or 1 = the first tray, 2-9 the next ones; for the open
@@ -387,7 +403,7 @@ document.addEventListener("keydown", (event) => {
   const tray = event.ctrlKey || event.metaKey || event.altKey || event.repeat || document.querySelector(".cc-dialog-layer") !== null
     ? null
     : trayForKey(event.key);
-  if (tray !== null) {
+  if (tray !== null && !event.shiftKey) {
     const detail = app.gallery.detail;
     if (detail !== null && !(detail.item.gone && !detail.item.kept)) {
       event.preventDefault();
@@ -403,6 +419,13 @@ document.addEventListener("keydown", (event) => {
       saveSelectionByKey(tray);
       return;
     }
+    // Nothing opened and nothing selected: the picture under the mouse.
+    if (detail === null && pictureUi.viewer === null && app.gallery.selected.size === 0 && galleryHover.md5 !== null
+      && document.querySelector(".view-layer") === null && !paletteState.open) {
+      event.preventDefault();
+      saveToTrayAndTell([galleryHover.md5], tray.id);
+      return;
+    }
   }
   if (app.gallery.detail === null) {
     if (event.key === "Escape" && app.gallery.selecting && pictureUi.viewer === null && !event.defaultPrevented) {
@@ -413,6 +436,12 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape") {
     dismissGalleryDetail();
+  } else if ((event.key === "x" || event.key === "X") && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat
+    && pictureUi.viewer === null && document.querySelector(".cc-dialog-layer") === null) {
+    event.preventDefault();
+    const md5 = app.gallery.detail.item.md5;
+    toggleGalleryPick(md5);
+    galleryDetailPatch(md5, { notice: app.gallery.selected.has(md5) ? `已放进托盘（托盘里 ${briefNumber(app.gallery.selected.size)} 张），再按 X 拿出来` : "已从托盘拿出来" });
   } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
     event.preventDefault();
     stepGalleryDetail(event.key === "ArrowRight" ? 1 : -1);
