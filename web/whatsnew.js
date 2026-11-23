@@ -19,7 +19,7 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 const WHATS_NEW = [
   { title: "简报从上次看到的地方开始", detail: "看过简报一小时后，下一份只有那之后的新内容，不用再按「看完了」。日期旁边可以「回到上一份」，也可以改回按「看完了」才换。", view: "brief", selector: ".brief-window-mode" },
   { title: "答应过的事", detail: "你在群里答应别人的、别人请你做的、别人答应你的，简报最上面列出来，做完了打个勾。", view: "brief", selector: ".brief-commitments" },
-  { title: "画廊：一下就存到自己的文件夹", detail: "左边多了存图托盘：把图拖进去，或看图时按 S / 1–9，原图就存到那个文件夹。存过的图有记号，也可以只看还没存过的。", view: "media", selector: ".tray-dock" },
+  { title: "画廊：一下就存到自己的文件夹", detail: "拖动图片，下面会出现你的存图文件夹，放进去，或看图时按 S / 1–9，原图就存到那个文件夹。存过的图有记号，也可以只看还没存过的。", view: "media", selector: ".tray-dock" },
   { title: "找同一张图、用图找图", detail: "点开一张图能看到它还在哪些群、什么时候发过；画廊工具栏的「以图搜图」可以拿一张图去找库里相同或相近的。", view: "media", selector: ".gallery-toolbar" },
   { title: "聊天里看得到回复的是哪句", detail: "回复的消息上面有被回复的原话，点了跳过去再回来；点名字只看这个人；右上「@你」可以一条一条跳。", view: "messages", selector: "#view-messages" },
   { title: "个人页和角色卡", detail: "聊天里点名字再点「TA 的个人页」：你和 TA 的来往、TA 常说的话、回答过的问题；还可以让 AI 写一张角色卡。简报最下面有「我的页面」。", view: "brief", selector: ".brief-page" },

@@ -382,7 +382,7 @@ document.addEventListener("keydown", (event) => {
   if (typing) {
     return;
   }
-  // 存图托盘: S or 1 = the first tray, 2-9 the next ones; for the open
+  // 存图文件夹: S or 1 = the first tray, 2-9 the next ones; for the open
   // picture, or for the multi-selection.
   const tray = event.ctrlKey || event.metaKey || event.altKey || event.repeat || document.querySelector(".cc-dialog-layer") !== null
     ? null

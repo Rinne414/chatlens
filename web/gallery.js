@@ -328,7 +328,7 @@ const refreshGallerySelection = () => {
   renderTrayDock();
 };
 
-/* ---------- 存图托盘 (picture_trays.js) ---------- */
+/* ---------- 存图文件夹 (picture_trays.js) ---------- */
 
 const gallerySaved = { facetTimer: null, repaintPending: false };
 
@@ -470,7 +470,7 @@ const gallerySelectionNodes = () => {
   const loaded = app.gallery.results?.items ?? [];
   return [
     el("div", { class: "gallery-selection-row" },
-      el("strong", { class: "gallery-selection-count" }, `已选 ${briefNumber(count)} 张`),
+      el("strong", { class: "gallery-selection-count" }, `托盘 ${briefNumber(count)} 张`),
       el("button", {
         class: "btn small primary",
         type: "button",
@@ -494,9 +494,12 @@ const gallerySelectionNodes = () => {
       } }, "取消选择"),
       el("span", { class: "kb-results-spacer" }),
       el("button", { class: "btn small", type: "button", title: "退出多选（Esc），已选的会清空", onclick: leaveGallerySelection }, "退出多选")),
-    el("span", { class: "kb-meta" }, "按住 Shift 连选。"),
+    gallerySelectedTray(),
+    el("span", { class: "kb-meta gallery-key-hint" },
+      "鼠标停在图上：", el("kbd", { class: "tray-key" }, "空格"), " 看大图，", el("kbd", { class: "tray-key" }, "O"), " 看详情，",
+      el("kbd", { class: "tray-key" }, "X"), " 放进 / 拿出托盘；按住 ", el("kbd", { class: "tray-key" }, "Shift"), " 点图连选"),
     (pictureTrays.list ?? []).length === 0 ? null : el("span", { class: "kb-meta gallery-key-hint" },
-      "键盘：", trayKeyHint(), " 把选中的存到左边的托盘，", el("kbd", { class: "tray-key" }, "Esc"), " 退出多选"),
+      "键盘：", trayKeyHint(), " 把托盘里的存到左边的文件夹，", el("kbd", { class: "tray-key" }, "Esc"), " 退出多选"),
     gallerySaveTargetRow(),
     pictureExportStatus("gallery"),
     pictureKeepStatus("gallery"),
@@ -510,7 +513,7 @@ const saveGalleryDir = async (dir) => {
     notifyError(error);
   }
   refreshGallerySelection();
-  // The first 存图托盘 saves to this same folder.
+  // The first 存图文件夹 saves to this same folder.
   loadPictureTrays();
 };
 
@@ -558,7 +561,9 @@ const gallerySelectBox = (item) => el("label", {
 
 const galleryTile = (item, index) => {
   const tile = galleryTileNode(item, index);
-  // Dragged onto a 存图托盘, or (one picture) out to the desktop or a folder.
+  // Which picture the mouse is on (gallery_select_tray.js: 空格 / O / X).
+  tile.dataset.md5 = item.md5;
+  // Dragged onto a 存图文件夹, or (one picture) out to the desktop or a folder.
   tile.draggable = true;
   tile.addEventListener("pointerdown", () => prepareTrayDrag(item));
   tile.addEventListener("dragstart", (event) => startTrayDrag(event, item, galleryDragMd5s(item)));

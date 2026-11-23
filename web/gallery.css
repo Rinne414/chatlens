@@ -152,3 +152,20 @@ html.phone .tray-dock { display: none; }
 .wall-badge.similar { background: rgba(71, 85, 105, .92); }
 .wall-badge.similar.same { background: rgba(15, 120, 84, .92); }
 .wall-badge.similar.close { background: rgba(21, 101, 192, .9); }
+
+/* 托盘: the selected pictures, in the selection bar (gallery_select_tray.js) */
+.select-tray { display: flex; gap: 8px; padding: 4px 2px 8px; overflow-x: auto; overscroll-behavior-x: contain; }
+.select-tray.empty { padding: 6px 2px; }
+.select-tray-item { position: relative; flex: none; }
+.select-tray-thumb { display: block; width: 72px; height: 72px; padding: 0; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; background: var(--bg); cursor: zoom-in; }
+.select-tray-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.select-tray-thumb:hover, .select-tray-thumb:focus-visible { border-color: var(--accent); outline: none; }
+.select-tray-remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--panel); color: var(--ink); font: 700 13px/1 inherit; cursor: pointer; }
+.select-tray-remove:hover, .select-tray-remove:focus-visible { border-color: var(--risk); color: var(--risk); outline: none; }
+
+/* 大图: one picture alone on the screen */
+.quick-look { position: fixed; inset: 0; z-index: 390; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 10px; padding: 24px 24px 16px; background: rgba(10, 13, 18, .86); cursor: zoom-out; }
+.quick-look-image { max-width: 100%; max-height: calc(100vh - 96px); min-width: 120px; min-height: 120px; object-fit: contain; border-radius: 6px; background: center / contain no-repeat; }
+.quick-look-bar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 16px; color: #e6e8eb; font-size: 13px; }
+.quick-look-picked { padding: 1px 8px; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 650; }
+.quick-look-keys .tray-key { margin: 0 2px; background: transparent; color: #e6e8eb; border-color: rgba(255, 255, 255, .45); }

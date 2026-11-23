@@ -1,6 +1,6 @@
 "use strict";
 
-/* ---------- 存图托盘: one action saves a picture's original to a folder ----------
+/* ---------- 存图文件夹: one action saves a picture's original to a folder ----------
    A tray is a named folder (src/picture_trays.js). A picture gets there by a
    drop on the tray, the 存 button on a tile, a button or a number key in the
    big view, or the tray's own button for the multi-selection. The copies are
@@ -228,8 +228,8 @@ const changeTrays = async (body) => {
 const trayEditForm = (tray) => {
   const isNew = tray === null;
   const isFirst = tray?.id === pictureTrays.list?.[0]?.id;
-  const name = el("input", { type: "text", value: tray?.ownName ?? "", placeholder: "不填就用文件夹的名字", "aria-label": "托盘的名字", maxlength: "24" });
-  const dir = el("input", { type: "text", value: tray?.dir ?? "", placeholder: "例如 D:\\图片\\角色", "aria-label": "托盘的文件夹" });
+  const name = el("input", { type: "text", value: tray?.ownName ?? "", placeholder: "不填就用文件夹的名字", "aria-label": "名字", maxlength: "24" });
+  const dir = el("input", { type: "text", value: tray?.dir ?? "", placeholder: "例如 D:\\图片\\角色", "aria-label": "文件夹" });
   const close = () => {
     pictureTrays.editing = null;
     renderTrayDock();
@@ -256,7 +256,7 @@ const trayEditForm = (tray) => {
         type: "button",
         title: "只是从这里拿掉，文件夹和里面的图都不动",
         onclick: () => changeTrays({ action: "remove", id: tray.id }),
-      }, "移除托盘")));
+      }, "从这里拿掉")));
 };
 
 /* The first thing seen is a number and a name: the reader chose the folders
@@ -307,8 +307,8 @@ const showTrayDrop = (count) => {
   if (trays.length === 0) {
     return;
   }
-  document.body.append(el("div", { id: "tray-drop", class: "tray-drop", role: "group", "aria-label": "把图片放进一个托盘" },
-    el("p", { class: "tray-drop-title" }, count > 1 ? `把这 ${briefNumber(count)} 张放进哪个托盘` : "放进哪个托盘"),
+  document.body.append(el("div", { id: "tray-drop", class: "tray-drop", role: "group", "aria-label": "把图片放进一个文件夹" },
+    el("p", { class: "tray-drop-title" }, count > 1 ? `把这 ${briefNumber(count)} 张存到哪个文件夹` : "存到哪个文件夹"),
     el("div", { class: "tray-drop-grid" }, trays.map(trayDropTile))));
 };
 
@@ -336,13 +336,13 @@ const trayManageRow = (tray, index) => {
 
 const trayManageNodes = () => [
   el("div", { class: "tray-manage-head" },
-    el("h3", {}, "存图托盘"),
+    el("h3", {}, "存图文件夹"),
     el("button", { class: "btn small", type: "button", onclick: closeTrayManage }, "关闭")),
-  el("p", { class: "kb-meta" }, "拖图片时在屏幕下方出现；点开一张图或多选之后，按前面的数字也能存（第一个还可以按 S）。"),
+  el("p", { class: "kb-meta" }, "拖图片时在屏幕下方出现；点开一张图，或托盘里有图的时候，按前面的数字也能存（第一个还可以按 S）。"),
   el("ol", { class: "tray-rows" }, (pictureTrays.list ?? []).map(trayManageRow)),
   pictureTrays.editing === "new"
     ? el("div", { class: "tray-row editing" }, trayEditForm(null))
-    : el("button", { class: "btn small", type: "button", onclick: () => { pictureTrays.editing = "new"; renderTrayDock(); } }, "＋ 加一个托盘"),
+    : el("button", { class: "btn small", type: "button", onclick: () => { pictureTrays.editing = "new"; renderTrayDock(); } }, "＋ 加一个文件夹"),
 ];
 
 const openTrayManage = () => {
@@ -356,7 +356,7 @@ const openTrayManage = () => {
         closeTrayManage();
       }
     },
-  }, el("div", { class: "cc-dialog tray-manage", role: "dialog", "aria-label": "存图托盘" }, trayManageNodes()));
+  }, el("div", { class: "cc-dialog tray-manage", role: "dialog", "aria-label": "存图文件夹" }, trayManageNodes()));
   document.body.append(layer);
 };
 
@@ -394,7 +394,7 @@ const trayDockNodes = () => {
   const status = trays.map(trayStatusText).filter((text) => text !== "").at(-1) ?? "";
   return [
     el("div", { class: "tray-dock-head" },
-      el("strong", {}, "存图托盘"),
+      el("strong", {}, "存图文件夹"),
       el("span", { class: "kb-meta" }, `${trays.length} 个`),
       el("button", { class: "kb-linkish", type: "button", onclick: openTrayManage }, "管理")),
     selected.length === 0
@@ -407,7 +407,7 @@ const trayDockNodes = () => {
 // selected: () => md5s of the page's multi-selection.
 const trayDock = ({ selected = () => [] } = {}) => {
   trayDockOptions.selected = selected;
-  return el("aside", { id: "tray-dock", class: "tray-dock", "aria-label": "存图托盘" }, trayDockNodes());
+  return el("aside", { id: "tray-dock", class: "tray-dock", "aria-label": "存图文件夹" }, trayDockNodes());
 };
 
 const renderTrayDock = () => {
