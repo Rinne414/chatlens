@@ -8,7 +8,7 @@
    until the next one (per browser: localStorage). */
 
 // v0.0.20 used "2026-09-30" and came out the same day: a date would not do.
-const WHATS_NEW_RELEASE = "v0.0.32";
+const WHATS_NEW_RELEASE = "v0.0.33";
 const WHATS_NEW_KEY = "cc-whats-new-seen";
 const WHATS_NEW_FLASH_MS = 2400;
 const WHATS_NEW_GIVE_UP_MS = 4000;
@@ -17,14 +17,17 @@ const WHATS_NEW_FIND_STEP_MS = 150;
 // view: the page to open (null: stay); selector: what to outline; run: an
 // action instead ("palette", "keys"). An item with none of them is only text.
 const WHATS_NEW = [
-  { title: "页面之间能直接走过去了", detail: "句子里提到别的页面（画廊「留存的原图」、存储页、备份页、设置里的某一栏）现在都能点过去。备份页写明了留存的原图去了哪，各处提到文件夹的地方旁边有打开的按钮。", view: "backup", selector: "#backup-rescue" },
-  { title: "左栏分成了三组", detail: "聊天、图片、这台电脑。入口和顺序都没变，只是标出了哪几页是一类。", view: null, selector: "#nav" },
-  { title: "设置页有了目录", detail: "设置页最上面多了一排按钮，点了就跳到那一栏。长的说明只显示开头，后面点「展开说明」。", view: "settings", selector: ".page-index" },
-  { title: "提问和提示都在页面里了", detail: "确认和出错提示不再弹浏览器的小窗口：在页面里问，按 Esc 或点外面就是取消，会删东西的确认按钮是红色的。", view: null, selector: "" },
-  { title: "手机上长按能看到说明", detail: "鼠标停在按钮上才出现的说明，现在在手机上长按、用键盘 Tab 到也能看到。等待超过两秒会显示已经等了多久。", view: null, selector: "" },
-  { title: "「留存的原图」会说明自己了", detail: "开头写着一共留存多少张、占多少空间、存在哪个文件夹，以及原图是怎么进来的。点开一张图能看到它为什么被留存；左边「为什么留存」可以按原因筛选。", view: "media", selector: ".gallery-scope" },
-  { title: "不想留的原图可以取消留存", detail: "在「留存的原图」里点开图按「取消留存」，或「多选」后一起取消。文件先放到一边，可以放回；按「彻底删除」才真的删掉、腾出空间，删掉的图不会再被自动留存。", view: "media", selector: ".gallery-scope" },
-  { title: "可以关掉自动检查更新", detail: "设置 →「版本与更新」多了「自动检查更新」的开关，默认开着；关掉后只有你点「检查更新」才查。", view: "settings", selector: "#update-card" },
+  { title: "简报从上次看到的地方开始", detail: "看过简报一小时后，下一份只有那之后的新内容，不用再按「看完了」。日期旁边可以「回到上一份」，也可以改回按「看完了」才换。", view: "brief", selector: ".brief-window-mode" },
+  { title: "答应过的事", detail: "你在群里答应别人的、别人请你做的、别人答应你的，简报最上面列出来，做完了打个勾。", view: "brief", selector: ".brief-commitments" },
+  { title: "画廊：一下就存到自己的文件夹", detail: "左边多了存图托盘：把图拖进去，或看图时按 S / 1–9，原图就存到那个文件夹。存过的图有记号，也可以只看还没存过的。", view: "media", selector: ".tray-dock" },
+  { title: "找同一张图、用图找图", detail: "点开一张图能看到它还在哪些群、什么时候发过；画廊工具栏的「以图搜图」可以拿一张图去找库里相同或相近的。", view: "media", selector: ".gallery-toolbar" },
+  { title: "聊天里看得到回复的是哪句", detail: "回复的消息上面有被回复的原话，点了跳过去再回来；点名字只看这个人；右上「@你」可以一条一条跳。", view: "messages", selector: "#view-messages" },
+  { title: "个人页和角色卡", detail: "聊天里点名字再点「TA 的个人页」：你和 TA 的来往、TA 常说的话、回答过的问题；还可以让 AI 写一张角色卡。简报最下面有「我的页面」。", view: "brief", selector: ".brief-page" },
+  { title: "热点里看画师", detail: "热点页多了「画师」：这段时间群里的图，咒语写了哪些画师，谁变多了。", view: "trends", selector: "#view-trends .gallery-toolbar" },
+  { title: "问答库和资源库", detail: "回顾页搜索框旁边：群里问过的问题（可以只看没人回答的）、提到的新东西和链接，不用输入就能翻。搜不到时可以让 AI 换几种说法再搜。", view: "review", selector: ".review-search" },
+  { title: "告诉简报什么不重要", detail: "点开「值得知道的事」里的一件，可以标「不重要」或「讲错了」，它会从简报拿掉；也可以写一句话，让 AI 帮你盯一件事。", view: "brief", selector: ".thing-section" },
+  { title: "刷新能看进度、能停下", detail: "后台刷新时简报写着正在做哪一步、已经多久，旁边可以「停下这一轮」。任何页面按 ? 看这一页能用的键。主题多了「跟随系统」。", view: null, selector: "" },
+  { title: "咒语库：换写法、交给 ComfyUI", detail: "咒语可以复制成 NAI 或 WebUI 的强调写法；ComfyUI 做的图可以把工作流直接交给这台电脑上的 ComfyUI 排队。", view: "knowledge", selector: "#view-knowledge" },
 ];
 
 const whatsNewState = { hidden: false };
