@@ -11,6 +11,7 @@ const knowledge = require("./knowledge_ops");
 const { isLlmConfigured: llmConfigured, detailLevel } = require("../llm_route");
 const { profileFor } = require("../llm_profiles");
 const briefingStore = require("../briefing_store");
+const { selfUinsFromDataPath } = require("../message_store");
 const engine = require("../briefing_engine");
 const { buildBriefing } = require("../briefing_view");
 const { MAX_WORDS, normalizeWords } = require("../watch_words");
@@ -21,10 +22,7 @@ const knowledgeDbPath = path.join(state.toolRoot, "store", "knowledge.db");
 
 // On Windows the data path names the QQ account; used as a fallback identity
 // until the store has seen one of the user's own messages.
-const uinFromPath = (ntDbDir) => {
-  const match = String(ntDbDir ?? "").match(/[\\/](\d{5,})[\\/]nt_qq[\\/]/u);
-  return match === null ? [] : [match[1]];
-};
+const uinFromPath = selfUinsFromDataPath;
 
 const watchlistOf = (config) =>
   (config.watchlist ?? [])

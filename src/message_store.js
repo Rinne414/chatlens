@@ -646,6 +646,13 @@ const getSelfIdentity = (db, extraUins = []) => {
   return { uins: [...uins], names: [...new Set(names)] };
 };
 
+// On Windows the data path names the QQ account: a fallback identity until
+// the store has seen one of the user's own messages.
+const selfUinsFromDataPath = (ntDbDir) => {
+  const match = String(ntDbDir ?? "").match(/[\\/](\d{5,})[\\/]nt_qq[\\/]/u);
+  return match === null ? [] : [match[1]];
+};
+
 const escapeLike = (value) => String(value).replace(/[\\%_]/gu, (match) => `\\${match}`);
 
 // Messages (not sent by me) that @ me, reply to one of my messages, @all, or
@@ -726,6 +733,7 @@ const getMentions = (db, { fromUnix, toUnix, groupIds, identity }) => {
 };
 
 module.exports = {
+  selfUinsFromDataPath,
   getSelfIdentity,
   getMentions,
   openStore,

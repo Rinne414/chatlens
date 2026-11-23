@@ -23,7 +23,8 @@ const lateRows = require("../late_rows");
 const { REPAIR_STATE_KEY } = require("../repair_picture_text");
 const { backfillStarts, recordFailedExport } = require("../backfill_replies");
 const engine = require("../briefing_engine");
-const { callLlm, createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary } = require("../llm_summarizer");
+const { callLlm, createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary, shouldFallBack } = require("../llm_summarizer");
+const commitments = require("../commitments");
 const { notesSettings, syncNotes } = require("../vault_sync");
 const { runNotesAi, writeNotesStatus, recordSync } = require("../vault_ai");
 const digestEngine = require("../digest_engine");
@@ -293,6 +294,28 @@ const runDigests = async (db, client, { now, gate }) => {
   }
 };
 
+// 答应过的事 after the digests: my own recent messages and the ones addressed
+// to me are looked through for promises and requests (src/commitments.js).
+// Same pause, daily-cap and money gate as every other call; a failure only
+// warns, the briefing is already written.
+const runCommitments = async (db, client, { config, now, gate }) => {
+  try {
+    const identity = messageStore.getSelfIdentity(db, messageStore.selfUinsFromDataPath(config.ntDbDir));
+    return await commitments.runCommitmentPass(db, {
+      identity,
+      callLlm,
+      client,
+      model: () => currentModel(client),
+      gate: () => engine.allowSpend(db, now, { ...engine.DEFAULTS, ...gate }),
+      nowUnix: now,
+      shouldFallBack,
+    });
+  } catch (error) {
+    common.warn(`「答应过的事」没有整理：${error.message}`);
+    return { failed: 1, error: String(error.message).slice(0, 200) };
+  }
+};
+
 // Before v0.0.20 a refused AI account (e.g. an empty DeepSeek balance) used up
 // every chunk's attempts, and those messages were never summarized. Such
 // chunks get one more go, once; a detailed-level backlog goes into the job
@@ -451,12 +474,14 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
     const aiDown = map.routeDown !== null;
     const reduce = aiDown ? { skipped: "ai-down" } : await engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate });
     const digests = aiDown ? [] : await runDigests(db, client, { now, gate });
+    const promises = aiDown ? { skipped: "ai-down" } : await runCommitments(db, client, { config, now, gate });
     const notes = aiDown ? { skipped: "ai-down" } : await runNotesAiSafely(db, client, { config, now, gate });
     return {
       chunksCreated: created,
       map,
       reduce,
       digests,
+      commitments: promises,
       notes,
       // Detailed-level job chunks still queued (the console continues sooner while they last).
       jobQueued: redoStats(db).queued,

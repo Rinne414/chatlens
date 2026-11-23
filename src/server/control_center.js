@@ -22,6 +22,7 @@ const knowledge = require("./knowledge_ops");
 const readWorker = require("./read_worker");
 const pictureUnkeep = require("./picture_unkeep");
 const bookmarkOps = require("./bookmark_ops");
+const commitmentOps = require("./commitment_ops");
 const pictureRoutes = require("./picture_routes");
 const qqCollectionOps = require("./qq_collection_ops");
 const galleryOps = require("./gallery_ops");
@@ -1002,6 +1003,9 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (await commitmentOps.handleCommitmentApi(request, response, url, { sendJson, readBody })) {
+      return;
+    }
     if (await bookmarkOps.handleBookmarkApi(request, response, url, { sendJson, readBody })) {
       return;
     }

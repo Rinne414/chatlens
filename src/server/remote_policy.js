@@ -15,6 +15,8 @@ const REMOTE_API_ROUTES = new Set([
   "GET /api/rail",
   "GET /api/briefing",
   "GET /api/brief/things",
+  "GET /api/commitments",
+  "POST /api/commitments/status",
   "GET /api/background",
   "GET /api/job",
   "GET /api/run-detail",

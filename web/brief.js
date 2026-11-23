@@ -250,12 +250,16 @@ const openBriefView = async () => {
   if (!bookmarkState.keysLoaded) {
     loadBookmarkKeys().then(() => renderBriefWhenIdle());
   }
+  // Coming back to the page: the 「已拿掉 … 放回来」 line belongs to the last visit.
+  briefCommitments.justDropped = null;
+  loadBriefCommitments();
   if (await loadBriefing()) {
     renderBriefView();
   }
 };
 
 VIEW_RELOADERS.brief = async () => {
+  loadBriefCommitments();
   await loadBriefing({ fresh: true });
   renderBriefView();
 };
@@ -982,6 +986,7 @@ const renderBriefView = () => {
             shortcutPromptCard(),
             whatsNewCard(),
             briefMasthead(data),
+            briefCommitmentsSection(),
             briefMentions(data),
             briefWatch(data),
             briefThingsSection(),

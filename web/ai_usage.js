@@ -15,6 +15,7 @@ const AI_PURPOSE_LABELS = {
   quick: "选中消息的总结",
   things: "「值得知道的事」和群里的「重要的事」",
   digest: "日报、周报和月报",
+  commitments: "简报：找出答应过的事",
   ask: "问群聊的回答",
   redo: "用详细模式重做过去的摘要",
   probe: "检查 AI 服务能不能连上",

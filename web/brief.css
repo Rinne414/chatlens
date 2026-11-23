@@ -518,3 +518,21 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .setup-online summary { cursor: pointer; }
 .setup-online ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.7; }
 .ask-cost-note { margin: 0; }
+
+/* 答应过的事 (brief_commitments.js) */
+.brief-commitment-side + .brief-commitment-side { margin-top: 12px; }
+.brief-commitment-title { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.brief-commitment { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--for-you); border-radius: 10px; }
+.brief-commitment.owed { border-left-color: var(--line-strong); }
+.brief-commitment .brief-row-button { padding: 10px 12px 10px 4px; }
+.brief-commitment-tick { margin: 11px 8px 0 12px; width: 20px; height: 20px; border: 2px solid var(--line-strong); border-radius: 6px; background: var(--panel); color: #fff; font: 700 12px/1 inherit; cursor: pointer; display: grid; place-items: center; }
+.brief-commitment-tick:hover { border-color: var(--for-you); }
+.brief-commitment-tick[aria-pressed="true"] { background: var(--for-you); border-color: var(--for-you); }
+.brief-commitment-what { font-size: 14.5px; overflow-wrap: anywhere; }
+.brief-commitment .brief-quote { margin: 4px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.brief-commitment-drop { margin: 10px 12px 0 0; font-size: 12px; color: var(--muted); }
+.brief-commitment.done .brief-commitment-what { text-decoration: line-through; color: var(--muted); }
+.brief-commitment.done { border-left-color: var(--line-strong); }
+.brief-commitment-undo { margin: 8px 0 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px; }
+.brief-commitment-done { margin-top: 8px; display: grid; gap: 8px; font-size: 13px; justify-items: start; }
+.brief-commitment-done .brief-mention-list { width: 100%; }
