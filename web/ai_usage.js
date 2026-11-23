@@ -18,6 +18,7 @@ const AI_PURPOSE_LABELS = {
   commitments: "简报：找出答应过的事",
   interests: "简报：找你在意的事",
   ask: "问群聊的回答",
+  expand: "回顾搜索：换几种说法",
   persona: "个人页的角色卡",
   redo: "用详细模式重做过去的摘要",
   probe: "检查 AI 服务能不能连上",

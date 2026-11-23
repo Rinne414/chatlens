@@ -993,6 +993,11 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (url.pathname === "/api/review/expand" && (request.method === "GET" || request.method === "POST")) {
+      sendJson(response, 200, request.method === "GET" ? reviewOps.getExpand() : reviewOps.startExpand(await readBody(request)));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/review/search" && ["qa", "resource"].includes(url.searchParams.get("library"))) {
       sendJson(response, 200, await readWorker.call("reviewLibrary", {
         q: url.searchParams.get("q"),
@@ -1012,6 +1017,7 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
         fromUnix: url.searchParams.get("fromUnix"),
         toUnix: url.searchParams.get("toUnix"),
         more: url.searchParams.get("more") === "1",
+        also: url.searchParams.get("also"),
       }));
       return;
     }

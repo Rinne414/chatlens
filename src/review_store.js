@@ -321,6 +321,9 @@ const backfillDay = (db, { day, now, asDetailedJob = false, maxMessages }) => {
 const searchTerms = (query) =>
   [...new Set(String(query ?? "").trim().toLowerCase().split(/\s+/u).filter((term) => term.length > 0))].slice(0, MAX_TERMS);
 
+// Other ways of saying it that one search takes.
+const MAX_ALSO = 8;
+
 const escapeLike = (term) => term.replace(/[\\%_]/gu, (char) => `\\${char}`);
 
 const matchesAll = (terms, ...fields) => {
@@ -328,29 +331,35 @@ const matchesAll = (terms, ...fields) => {
   return terms.every((term) => text.includes(term));
 };
 
-// One chunk's partial -> the individual items that mention every term.
-const chunkHits = (partial, terms, chunk) => {
+const matchesAny = (terms, ...fields) => {
+  const text = fields.flat().filter((value) => typeof value === "string").join("\n").toLowerCase();
+  return terms.some((term) => text.includes(term));
+};
+
+// One chunk's partial -> the individual items that mention every term (any: one of them is enough).
+const chunkHits = (partial, terms, chunk, any = false) => {
+  const matches = (...fields) => (any ? matchesAny(terms, ...fields) : matchesAll(terms, ...fields));
   const base = { chunkId: chunk.chunkId, groupId: chunk.groupId, groupName: chunk.groupName || chunk.groupId };
   const at = (item) => hktToUnix(item.hkt ?? item.start) ?? chunk.startSentAt;
   const thingUrls = new Set((partial.newThings ?? []).map((item) => webUrl(item?.link)).filter((url) => url !== null));
   const hits = [
-    ...(partial.topics ?? []).filter((topic) => matchesAll(terms, topic.title, topic.summary, topic.details ?? []))
+    ...(partial.topics ?? []).filter((topic) => matches(topic.title, topic.summary, topic.details ?? []))
       .map((topic) => ({ kind: "topic", title: topic.title, text: topic.summary, sentAt: chunk.startSentAt })),
-    ...(partial.newThings ?? []).filter((item) => matchesAll(terms, item.name, item.detail))
+    ...(partial.newThings ?? []).filter((item) => matches(item.name, item.detail))
       .map((item) => ({ kind: "newThing", title: item.name, text: item.detail, sentAt: at(item), url: webUrl(item.link), by: item.speaker ?? null })),
     // a link already listed with the thing it belongs to is not listed again
-    ...(partial.links ?? []).filter((item) => webUrl(item?.url) !== null && !thingUrls.has(webUrl(item.url)) && matchesAll(terms, item.title, item.why, item.url))
+    ...(partial.links ?? []).filter((item) => webUrl(item?.url) !== null && !thingUrls.has(webUrl(item.url)) && matches(item.title, item.why, item.url))
       .map((item) => ({ kind: "link", title: item.title || item.url, text: item.why ?? "", sentAt: at(item), url: webUrl(item.url), by: null })),
-    ...(partial.qa ?? []).filter((item) => matchesAll(terms, item.question, item.answer))
+    ...(partial.qa ?? []).filter((item) => matches(item.question, item.answer))
       .map((item) => ({
         kind: "qa", title: item.question, text: item.answer ?? "", sentAt: at(item),
         // answered: as 简报 counts it (an answer the summary did not mark as unresolved)
         asker: item.asker ?? null, answerer: item.answerer ?? null, answered: Boolean(item.answer) && item.resolved !== false,
       })),
-    ...(partial.timeline ?? []).filter((item) => matchesAll(terms, item.title, item.summary))
+    ...(partial.timeline ?? []).filter((item) => matches(item.title, item.summary))
       .map((item) => ({ kind: "timeline", title: item.title, text: item.summary, sentAt: at(item) })),
   ];
-  if (hits.length === 0 && matchesAll(terms, partial.summary)) {
+  if (hits.length === 0 && matches(partial.summary)) {
     hits.push({ kind: "summary", title: "", text: partial.summary, sentAt: chunk.startSentAt });
   }
   return hits.map((hit) => ({ ...base, ...hit, day: dayOf(hit.sentAt) }));
@@ -372,9 +381,10 @@ const LIBRARY_PAGE = 200;
 const ALL_TIME = { fromUnix: null, toUnix: null };
 const inRange = (unix, { fromUnix, toUnix }) => (fromUnix === null || unix >= fromUnix) && (toUnix === null || unix < toUnix);
 
-// No terms: everything (a library being browsed).
-const searchSummaries = (db, terms, range = ALL_TIME) => {
-  const where = terms.map(() => "AND c.partial_json LIKE ? ESCAPE '\\'").join(" ");
+// No terms: everything (a library being browsed). any: one term is enough.
+const searchSummaries = (db, terms, range = ALL_TIME, any = false) => {
+  const likes = terms.map(() => "c.partial_json LIKE ? ESCAPE '\\'");
+  const where = likes.length === 0 ? "" : `AND (${likes.join(any ? " OR " : " AND ")})`;
   const chunks = db.prepare(`
     SELECT c.chunk_id AS chunkId, c.group_id AS groupId, COALESCE(n.name, '') AS groupName,
            c.start_sent_at AS startSentAt, c.end_sent_at AS endSentAt, c.partial_json AS partialJson
@@ -385,14 +395,14 @@ const searchSummaries = (db, terms, range = ALL_TIME) => {
   `).all(...terms.map((term) => `%${escapeLike(term)}%`), range.fromUnix ?? 0, range.toUnix ?? Number.MAX_SAFE_INTEGER);
   return chunks.flatMap((chunk) => {
     const partial = parsePartial(chunk.partialJson);
-    return partial === null ? [] : chunkHits(partial, terms, chunk).filter((hit) => inRange(hit.sentAt, range));
+    return partial === null ? [] : chunkHits(partial, terms, chunk, any).filter((hit) => inRange(hit.sentAt, range));
   });
 };
 
 // withDays: also the per-day counts (the first page); a further page of the
 // same search only needs its messages.
-const searchMessages = (db, terms, offset = 0, range = ALL_TIME, { withDays = true } = {}) => {
-  const where = `${terms.map(() => "m.text LIKE ? ESCAPE '\\'").join(" AND ")} AND m.sent_at >= ? AND m.sent_at < ?`;
+const searchMessages = (db, terms, offset = 0, range = ALL_TIME, { withDays = true, any = false } = {}) => {
+  const where = `(${terms.map(() => "m.text LIKE ? ESCAPE '\\'").join(any ? " OR " : " AND ")}) AND m.sent_at >= ? AND m.sent_at < ?`;
   const params = [...terms.map((term) => `%${escapeLike(term)}%`), range.fromUnix ?? 0, range.toUnix ?? Number.MAX_SAFE_INTEGER];
   const hits = db.prepare(`
     SELECT m.group_id AS groupId, COALESCE(n.name, '') AS groupName, m.row_id AS rowId, m.sent_at AS sentAt,
@@ -423,11 +433,16 @@ const searchMessages = (db, terms, offset = 0, range = ALL_TIME, { withDays = tr
 // it, LIBRARY_PAGE at a time from summaryOffset; answered ("yes" | "no")
 // keeps the questions that were, or were not, answered. readOnly: the
 // connection cannot create the tables (the read worker's).
-const search = (db, { query, messageOffset = 0, fromUnix = null, toUnix = null, messagesOnly = false, library = null, summaryOffset = 0, answered = null, readOnly = false }) => {
+// also: other ways of saying the same thing (「换几种说法再搜」); with them, a
+// hit needs any one of the words, typed or added.
+const search = (db, { query, messageOffset = 0, fromUnix = null, toUnix = null, messagesOnly = false, library = null, summaryOffset = 0, answered = null, readOnly = false, also = [] }) => {
   if (!readOnly) {
     briefingStore.ensureBriefingSchema(db);
   }
-  const terms = searchTerms(query);
+  const typed = searchTerms(query);
+  const added = typed.length === 0 ? [] : [...new Set(also.map((term) => String(term ?? "").trim().toLowerCase()).filter((term) => term.length >= 2 && !typed.includes(term)))].slice(0, MAX_ALSO);
+  const any = added.length > 0;
+  const terms = [...typed, ...added];
   const range = {
     fromUnix: Number.isFinite(fromUnix) ? fromUnix : null,
     toUnix: Number.isFinite(toUnix) ? toUnix : null,
@@ -438,10 +453,10 @@ const search = (db, { query, messageOffset = 0, fromUnix = null, toUnix = null, 
     return { terms, summaries: none, messages: none };
   }
   if (messagesOnly) {
-    return { terms, messages: only === null ? searchMessages(db, terms, messageOffset, range, { withDays: false }) : { items: [] } };
+    return { terms, messages: only === null ? searchMessages(db, terms, messageOffset, range, { withDays: false, any }) : { items: [] } };
   }
   const wanted = (hit) => only === null || (only(hit) && (library !== "qa" || answered === null || hit.answered === (answered === "yes")));
-  const summaryHits = searchSummaries(db, terms, range).filter(wanted).sort((left, right) => right.sentAt - left.sentAt);
+  const summaryHits = searchSummaries(db, terms, range, any).filter(wanted).sort((left, right) => right.sentAt - left.sentAt);
   const offset = only === null ? 0 : Math.max(0, Number.parseInt(summaryOffset, 10) || 0);
   const summaryDays = new Map();
   for (const hit of summaryHits) {
@@ -454,7 +469,8 @@ const search = (db, { query, messageOffset = 0, fromUnix = null, toUnix = null, 
       byDay: [...summaryDays.entries()].map(([day, count]) => ({ day, count })),
       items: only === null ? summaryHits : summaryHits.slice(offset, offset + LIBRARY_PAGE),
     },
-    messages: only === null ? searchMessages(db, terms, messageOffset, range) : none,
+    messages: only === null ? searchMessages(db, terms, messageOffset, range, { any }) : none,
+    also: added,
     library: only === null ? null : library,
   };
 };

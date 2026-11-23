@@ -36,6 +36,9 @@ const reviewState = {
   searchRange: "all",
   // null: the ordinary search. "qa" | "resource": that library.
   library: null,
+  // Other ways of saying the search words, from the AI (「换几种说法再搜」), and whether it is being asked.
+  also: [],
+  expanding: false,
   qaFilter: "all",
   searchFrom: null,
   searchTo: null,
@@ -257,6 +260,7 @@ const reviewSearchParams = (extra = {}) => {
     q: reviewState.query,
     ...(reviewState.library === null ? {} : { library: reviewState.library }),
     ...(reviewState.library === "qa" && reviewState.qaFilter !== "all" ? { answered: reviewState.qaFilter === "answered" ? "yes" : "no" } : {}),
+    ...(reviewState.library === null && reviewState.also.length > 0 ? { also: reviewState.also.join("\n") } : {}),
     ...extra,
   });
   const { fromUnix, toUnix } = reviewSearchRangeUnix();
@@ -310,6 +314,10 @@ const runReviewSearch = async (query) => {
   // the first; only the latest one's answer is shown.
   reviewState.searchTicket += 1;
   const ticket = reviewState.searchTicket;
+  // Other words go with the words they were made for.
+  if (String(query ?? "").trim() !== reviewState.query) {
+    reviewState.also = [];
+  }
   reviewState.query = String(query ?? "").trim();
   // A library lists everything when nothing is typed; the ordinary search needs a word.
   if (reviewState.query.length === 0 && reviewState.library === null) {
@@ -528,6 +536,72 @@ const loadMoreLibraryHits = async () => {
   renderReviewView();
 };
 
+// 「换几种说法再搜」: asks the AI how else the chats may have said it, then
+// searches for any of those words as well.
+const REVIEW_EXPAND_POLL_MS = 1200;
+const REVIEW_EXPAND_TRIES = 50;
+
+const expandReviewSearch = async () => {
+  const query = reviewState.query;
+  reviewState.expanding = true;
+  renderReviewView();
+  try {
+    await api("/api/review/expand", { method: "POST", body: JSON.stringify({ q: query }) });
+    let job = null;
+    for (let tries = 0; tries < REVIEW_EXPAND_TRIES; tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, REVIEW_EXPAND_POLL_MS));
+      job = (await api("/api/review/expand")).job;
+      if (job === null || job.status !== "running") {
+        break;
+      }
+    }
+    if (job?.status === "failed") {
+      throw new Error(job.error ?? "AI 没有回答");
+    }
+    if (job?.status !== "done") {
+      throw new Error("AI 太久没有回答，稍后再试。");
+    }
+    // The reader may have searched for something else meanwhile.
+    if (reviewState.query === query && reviewState.library === null) {
+      if (job.result.terms.length === 0) {
+        notify("AI 没有想到别的说法。");
+      } else {
+        reviewState.also = job.result.terms;
+        reviewState.expanding = false;
+        await runReviewSearch(query);
+        return;
+      }
+    }
+  } catch (error) {
+    notifyError(error);
+  }
+  reviewState.expanding = false;
+  renderReviewView();
+};
+
+// Under the results' heading: the button, or the words that were added.
+const reviewExpandLine = () => {
+  if (reviewState.library !== null || reviewState.query === "") {
+    return null;
+  }
+  if (reviewState.also.length > 0) {
+    return el("p", { class: "brief-meta review-also" }, "也搜了：", reviewState.also.join("、"), " ",
+      el("button", {
+        class: "linklike", type: "button",
+        onclick: () => {
+          reviewState.also = [];
+          runReviewSearch(reviewState.query);
+        },
+      }, "只搜我输入的"));
+  }
+  return el("p", { class: "brief-meta review-also" },
+    el("button", {
+      class: "linklike", type: "button", disabled: reviewState.expanding,
+      title: "群里可能用了别的说法（简称、英文名、外号）：让 AI 想几个，再一起搜。会调用一次你设置的 AI 服务，只发送你输入的搜索词。",
+      onclick: expandReviewSearch,
+    }, reviewState.expanding ? "AI 在想别的说法…" : "没找到想要的？换几种说法再搜"));
+};
+
 const moreHitsButton = (label, onclick) => el("button", { class: "btn small review-more", type: "button", onclick }, label);
 
 const reviewResults = () => {
@@ -550,6 +624,7 @@ const reviewResults = () => {
     el("header", { class: "review-results-head" },
       el("h2", {}, reviewResultsName()),
       reviewSearchRangeControl(),
+      reviewExpandLine(),
       reviewState.library === "qa"
         ? el("div", { class: "wall-modes", role: "group", "aria-label": "只看" }, REVIEW_QA_FILTERS.map(([key, label]) => el("button", {
           class: `wall-mode ${reviewState.qaFilter === key ? "active" : ""}`,

@@ -240,3 +240,24 @@ test("the two libraries list one kind of note without a search word, and search 
   assert.ok(review.search(db, { query: "教程" }).summaries.items.some((hit) => hit.kind === "link"));
   db.close();
 });
+
+test("with other ways of saying it, any one of the words is enough; without them every typed word is needed", () => {
+  const db = seed();
+  // the fixture's summary talks about "int8" and never says "量化"
+  assert.equal(review.search(db, { query: "量化" }).summaries.total, 0);
+  const widened = review.search(db, { query: "量化", also: ["int8", "INT8", "量化", "x"] });
+  assert.deepEqual(widened.also, ["int8"], "repeats, the typed word and one-letter words are dropped");
+  assert.ok(widened.summaries.total > 0);
+  assert.deepEqual(widened.terms, ["量化", "int8"]);
+  // raw messages too
+  const raw = review.search(db, { query: "没有人说过的词", also: ["flux"] });
+  assert.ok(raw.messages.total > 0);
+  // nothing typed: the added words alone do not search
+  assert.equal(review.search(db, { query: "", also: ["flux"] }).messages.total, 0);
+  db.close();
+});
+
+test("the AI's other ways of saying it are tidied before use", () => {
+  const { cleanTerms } = require("../src/search_expand");
+  assert.deepEqual(cleanTerms({ terms: ["LoRA", "lora", " 模型微调 ", "a", "炼丹", "x".repeat(40), "炼丹", null] }, "lora 训练"), ["模型微调", "炼丹"]);
+});

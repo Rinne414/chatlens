@@ -40,6 +40,7 @@ const REMOTE_API_ROUTES = new Set([
   "GET /api/review/calendar",
   "GET /api/review/day",
   "GET /api/review/search",
+  "GET /api/review/expand",
   "GET /api/digest",
   "GET /api/digests",
   "GET /api/ask",
@@ -85,6 +86,7 @@ const REMOTE_API_ROUTES = new Set([
   "POST /api/review/backfill",
   "POST /api/digest/generate",
   "POST /api/ask",
+  "POST /api/review/expand",
   // a 角色卡 is asked for and thrown away from the person's page, like a question
   "POST /api/persona",
   "POST /api/persona/delete",

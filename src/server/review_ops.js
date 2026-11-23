@@ -8,6 +8,7 @@ const background = require("./background");
 const { isLlmConfigured: llmConfigured } = require("../llm_route");
 const engine = require("../briefing_engine");
 const review = require("../review_store");
+const aiJobs = require("./ai_jobs");
 const { summarizeUsage } = require("../llm_usage");
 const { priceTable } = require("../llm_pricing");
 
@@ -62,7 +63,21 @@ const backfill = ({ day }) => {
 
 const numberOrNull = (value) => (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value));
 
-const search = ({ q, messageOffset = 0, fromUnix = null, toUnix = null, more = false, library = null }) => {
+// 「换几种说法再搜」: one AI call for other ways of saying the search words (src/search_expand.js).
+const startExpand = ({ q }) => {
+  const query = String(q ?? "").trim().slice(0, MAX_QUERY_LENGTH);
+  if (query === "") {
+    throw new Error("先输入要搜的词。");
+  }
+  if (!llmConfigured(state.loadConfig())) {
+    throw new Error("还没有配置 AI 服务：请在「设置」页登录 Grok 或保存 LLM API key。");
+  }
+  return aiJobs.startJob("expand", { script: "search_expand.js", args: ["{input}", "{output}"], input: { query }, meta: { query } });
+};
+
+const getExpand = () => ({ job: aiJobs.snapshot("expand") });
+
+const search = ({ q, messageOffset = 0, fromUnix = null, toUnix = null, more = false, library = null, also = "" }) => {
   const query = String(q ?? "").slice(0, MAX_QUERY_LENGTH);
   return review.search(state.getStore(), {
     query,
@@ -71,7 +86,8 @@ const search = ({ q, messageOffset = 0, fromUnix = null, toUnix = null, more = f
     toUnix: numberOrNull(toUnix),
     messagesOnly: more === true,
     library,
+    also: String(also ?? "").split("\n").filter(Boolean),
   });
 };
 
-module.exports = { getCalendar, getDay, backfill, search };
+module.exports = { getCalendar, getDay, backfill, search, startExpand, getExpand };
