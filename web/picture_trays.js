@@ -49,6 +49,13 @@ const trayForKey = (key) => {
   return /^[1-9]$/u.test(key) ? pictureTrays.list?.[Number(key) - 1] ?? null : null;
 };
 
+// "S 或 1" with one tray, "S 或 1 – 3" with three: the keys that save, as keys.
+const trayKeyHint = () => {
+  const count = Math.min(TRAY_KEYS, (pictureTrays.list ?? []).length);
+  const key = (label) => el("kbd", { class: "tray-key" }, label);
+  return [key("S"), " 或 ", key("1"), count > 1 ? [" – ", key(String(count))] : null];
+};
+
 const trayJob = (id) => {
   if (!pictureTrays.jobs.has(id)) {
     pictureTrays.jobs.set(id, { chain: Promise.resolve(), running: false, done: 0, total: 0, last: "" });
