@@ -34,6 +34,7 @@ const briefThingsOps = require("./brief_things_ops");
 const vaultOps = require("./vault_ops");
 const picturePass = require("./picture_pass");
 const summaryFeedback = require("../summary_feedback");
+const interestStore = require("../interests");
 const { queueOnComfy, graphOf } = require("../comfy_queue");
 const knowledgeExport = require("../knowledge_export");
 const { createRemoteDevices } = require("./remote_devices");
@@ -879,6 +880,21 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
     if (request.method === "POST" && url.pathname === "/api/update/apply") {
       sendJson(response, 200, await update.applyUpdate());
       return;
+    }
+
+    if (url.pathname === "/api/interests" || url.pathname === "/api/interests/delete") {
+      const db = state.getStore();
+      if (request.method === "GET" && url.pathname === "/api/interests") {
+        sendJson(response, 200, { interests: interestStore.interestsWithHits(db) });
+        return;
+      }
+      if (request.method === "POST") {
+        const body = await readBody(request);
+        sendJson(response, 200, url.pathname === "/api/interests"
+          ? interestStore.addInterest(db, { text: body.text, now: Math.floor(Date.now() / 1000) })
+          : { deleted: interestStore.removeInterest(db, body.id) });
+        return;
+      }
     }
 
     if (url.pathname === "/api/feedback" || url.pathname === "/api/feedback/delete") {

@@ -16,6 +16,7 @@ const AI_PURPOSE_LABELS = {
   things: "「值得知道的事」和群里的「重要的事」",
   digest: "日报、周报和月报",
   commitments: "简报：找出答应过的事",
+  interests: "简报：找你在意的事",
   ask: "问群聊的回答",
   persona: "个人页的角色卡",
   redo: "用详细模式重做过去的摘要",

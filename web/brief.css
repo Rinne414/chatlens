@@ -567,3 +567,12 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .thing-feedback-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
 .thing-feedback-list li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 .thing-feedback-list .tag { flex: none; }
+
+/* 简报: 你在意的事 (brief_interests.js) */
+.interest { margin: 0 0 12px; }
+.interest-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-bottom: 4px; }
+.interest-hits { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.interest-hits .brief-row-button { display: grid; gap: 2px; text-align: left; }
+.interest-summary { color: var(--muted); }
+.brief-interests .brief-watch-form { display: flex; flex: none; max-width: 640px; }
+.interest-invite { margin: 6px 0 14px; }

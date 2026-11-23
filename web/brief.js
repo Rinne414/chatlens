@@ -1072,6 +1072,7 @@ const renderBriefView = () => {
             briefMasthead(data),
             briefCommitmentsSection(),
             briefMentions(data),
+            briefInterestsSection(data),
             briefWatch(data),
             briefThingsSection(),
             digestHomeSection(),

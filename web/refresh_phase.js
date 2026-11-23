@@ -25,6 +25,7 @@ const REFRESH_PHASES = {
   merge: "AI 合并各群的总结",
   digests: "AI 写各群总览",
   commitments: "AI 找答应过的事",
+  interests: "AI 找你在意的事",
   notes: "更新笔记库",
   fingerprints: "算图片指纹",
 };

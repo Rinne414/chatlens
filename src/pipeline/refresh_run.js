@@ -26,6 +26,7 @@ const engine = require("../briefing_engine");
 const briefWindow = require("../brief_window");
 const { callLlm, createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary, shouldFallBack } = require("../llm_summarizer");
 const commitments = require("../commitments");
+const interests = require("../interests");
 const pictureSimilar = require("../picture_similar");
 const { notesSettings, syncNotes } = require("../vault_sync");
 const { runNotesAi, writeNotesStatus, recordSync } = require("../vault_ai");
@@ -337,6 +338,22 @@ const runCommitments = async (db, client, { config, now, gate }) => {
   }
 };
 
+// 「你在意的事」: nothing written, nothing asked.
+const runInterests = async (db, client, { now, gate }) => {
+  try {
+    return await interests.runInterestPass(db, {
+      callLlm,
+      client,
+      gate: () => engine.allowSpend(db, now, { ...engine.DEFAULTS, ...gate }),
+      nowUnix: now,
+      shouldFallBack,
+    });
+  } catch (error) {
+    common.warn(`「你在意的事」没有找：${error.message}`);
+    return { failed: 1, error: String(error.message).slice(0, 200) };
+  }
+};
+
 // Before v0.0.20 a refused AI account (e.g. an empty DeepSeek balance) used up
 // every chunk's attempts, and those messages were never summarized. Such
 // chunks get one more go, once; a detailed-level backlog goes into the job
@@ -502,6 +519,7 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
     const reduce = aiDown ? { skipped: "ai-down" } : await step("merge", () => engine.reduceBriefs(db, client, groupIds, { now, force, log: common.info, ...gate }));
     const digests = aiDown ? [] : await step("digests", () => runDigests(db, client, { now, gate }));
     const promises = aiDown ? { skipped: "ai-down" } : await step("commitments", () => runCommitments(db, client, { config, now, gate }));
+    const wanted = aiDown ? { skipped: "ai-down" } : await step("interests", () => runInterests(db, client, { now, gate }));
     const notes = aiDown ? { skipped: "ai-down" } : await step("notes", () => runNotesAiSafely(db, client, { config, now, gate }));
     return {
       chunksCreated: created,
@@ -509,6 +527,7 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
       reduce,
       digests,
       commitments: promises,
+      interests: wanted,
       notes,
       // Detailed-level job chunks still queued (the console continues sooner while they last).
       jobQueued: redoStats(db).queued,
