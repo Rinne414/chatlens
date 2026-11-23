@@ -541,7 +541,7 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .digest-fold-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
 .digest-fold-row:empty { display: none; }
 
-/* SAMPLE (sample-brief-top): the update note is one line until opened; the headline is a pair of jumps */
+/* the update note is one line until opened; the headline is a pair of jumps */
 .whats-new.folded { padding: 8px 14px; margin-bottom: 14px; }
 .whats-new.folded .whats-new-head { margin-bottom: 0; }
 .whats-new.folded .whats-new-head strong { font-size: 13.5px; }
@@ -549,3 +549,11 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .brief-headline-jump { border: 0; background: none; padding: 0; font: inherit; color: inherit; letter-spacing: inherit; cursor: pointer; }
 .brief-headline-jump:hover, .brief-headline-jump:focus-visible { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; outline: none; }
 .brief-headline-gap { display: inline-block; width: 1.1em; }
+
+/* where the briefing starts: one step back, and auto / manual (brief.js briefWindowControls) */
+.brief-window { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-left: 12px; letter-spacing: 0; text-transform: none; }
+.brief-window-back { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; border-bottom: 1px dashed var(--line-strong); }
+.brief-window-back:hover, .brief-window-back:focus-visible { color: var(--accent); border-bottom-color: var(--accent); outline: none; }
+.brief-window-mode { max-width: 100%; padding: 1px 4px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.brief-window-mode:hover, .brief-window-mode:focus-visible { border-color: var(--line-strong); outline: none; }
+.brief-window-mode option { background: var(--panel); color: var(--ink); }

@@ -13,6 +13,7 @@ const { profileFor } = require("../llm_profiles");
 const briefingStore = require("../briefing_store");
 const { selfUinsFromDataPath } = require("../message_store");
 const engine = require("../briefing_engine");
+const briefWindow = require("../brief_window");
 const { buildBriefing } = require("../briefing_view");
 const { MAX_WORDS, normalizeWords } = require("../watch_words");
 const { summarizeUsage } = require("../llm_usage");
@@ -93,6 +94,7 @@ const briefingStamp = (db, config, nowUnix) => {
   const refresh = background.getStatus();
   const facts = [
     briefingStore.getState(db, "briefing_since", null),
+    briefWindow.windowInfo(db),
     db.prepare("SELECT MAX(rowid) AS n FROM messages").get().n,
     db.prepare("SELECT COUNT(*) AS n, MAX(updated_at) AS at, TOTAL(length(chunk_key)) AS keys FROM group_briefs").get(),
     db.prepare("SELECT status, redo, COUNT(*) AS n, MAX(summarized_at) AS at FROM summary_chunks GROUP BY status, redo").all(),
@@ -115,7 +117,7 @@ const getBriefing = ({ known = null } = {}) => {
   const config = state.loadConfig();
   const db = briefingStore.ensureBriefingSchema(state.getStore());
   const stamp = briefingStamp(db, config, Math.floor(Date.now() / 1000));
-  return known !== null && known === stamp ? { unchanged: true, stamp } : { ...briefingNow(), stamp };
+  return known !== null && known === stamp ? { unchanged: true, stamp } : { ...briefingNow(), window: briefWindow.windowInfo(db), stamp };
 };
 
 // "重试": summaries that were given up on go back into the queue (at the
@@ -134,8 +136,38 @@ const markSeen = ({ seenUnix }) => {
   const db = briefingStore.ensureBriefingSchema(state.getStore());
   const now = Math.floor(Date.now() / 1000);
   const value = Number.isFinite(Number(seenUnix)) ? Math.min(Number(seenUnix), now) : now;
-  engine.markBriefingSeen(db, value);
+  briefWindow.markSeen(db, { value, now });
   return { windowStart: value };
+};
+
+// The briefing page was opened: with the start on 自动 and after a while away,
+// the briefing now begins where the last one had got to.
+// What a look at the briefing is measured against. Without summaries being
+// made (no AI, 自动 AI 总结 off, refresh off) nothing is waited for.
+const lookContext = (config) => {
+  const settings = background.getStatus().settings ?? {};
+  return {
+    now: Math.floor(Date.now() / 1000),
+    groupIds: watchlistOf(config).map((item) => item.groupId),
+    summarizing: llmConfigured(config) && settings.autoSummarize !== false && settings.enabled !== false,
+  };
+};
+
+const visit = () => {
+  const db = briefingStore.ensureBriefingSchema(state.getStore());
+  const moved = briefWindow.visit(db, lookContext(state.loadConfig()));
+  return { moved, ...briefWindow.windowInfo(db) };
+};
+
+// { mode: "auto" | "manual" } or { restore: true } (back to the start before this one).
+const setWindow = ({ mode, restore } = {}) => {
+  const db = briefingStore.ensureBriefingSchema(state.getStore());
+  const moved = restore === true ? briefWindow.restorePrevious(db) : false;
+  if (mode !== undefined) {
+    briefWindow.setMode(db, String(mode));
+  }
+  briefWindow.recordLook(db, lookContext(state.loadConfig()));
+  return { moved, ...briefWindow.windowInfo(db) };
 };
 
 const afterTick = async ({ ok, result }) => {
@@ -154,4 +186,4 @@ const afterTick = async ({ ok, result }) => {
   });
 };
 
-module.exports = { getBriefing, markSeen, retryFailed, saveWatchWords, afterTick, watchlistOf, watchWordsOf, uinFromPath, newestMessageAt };
+module.exports = { getBriefing, markSeen, visit, setWindow, retryFailed, saveWatchWords, afterTick, watchlistOf, watchWordsOf, uinFromPath, newestMessageAt };

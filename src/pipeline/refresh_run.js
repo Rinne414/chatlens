@@ -23,6 +23,7 @@ const lateRows = require("../late_rows");
 const { REPAIR_STATE_KEY } = require("../repair_picture_text");
 const { backfillStarts, recordFailedExport } = require("../backfill_replies");
 const engine = require("../briefing_engine");
+const briefWindow = require("../brief_window");
 const { callLlm, createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary, shouldFallBack } = require("../llm_summarizer");
 const commitments = require("../commitments");
 const pictureSimilar = require("../picture_similar");
@@ -487,6 +488,8 @@ const runBriefing = async ({ config, groupIds, now, force }) => {
     const gate = { ...engineOptions(config, route.primary.detail), spendCheck: moneyBudgetCheck(db, config, now) };
     requeueAccountFailuresOnce(db, { now, asJob: route.primary.detail === "detailed" });
     requeueDeclinedOnce(db, { now });
+    // Before anything is summarized: the summaries are for the briefing the reader opens next.
+    briefWindow.settle(db, { now });
     const created = engine.closeChunks(db, groupIds, { now, force, ...gate });
     common.progress(`briefing-chunks:${created}`);
     const map = await engine.mapPendingChunks(db, client, { now, log: common.info, ...gate });

@@ -843,6 +843,16 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (request.method === "POST" && (url.pathname === "/api/briefing/visit" || url.pathname === "/api/briefing/window")) {
+      const result = url.pathname === "/api/briefing/visit" ? briefing.visit() : briefing.setWindow(await readBody(request));
+      // A new start means the groups' summaries are put together again.
+      if (result.moved) {
+        background.runNow({ force: false });
+      }
+      sendJson(response, 200, result);
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/briefing/retry-failed") {
       sendJson(response, 200, briefing.retryFailed());
       return;

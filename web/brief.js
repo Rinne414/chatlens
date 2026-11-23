@@ -197,6 +197,7 @@ document.addEventListener?.("focusout", (event) => {
 
 document.addEventListener?.("visibilitychange", async () => {
   if (!document.hidden && app.view === "brief" && Date.now() - briefState.loadedAt > BRIEF_STALE_MS) {
+    await briefVisit();
     if (await loadBriefing()) {
       renderBriefWhenIdle();
     }
@@ -253,9 +254,66 @@ const openBriefView = async () => {
   // Coming back to the page: the 「已拿掉 … 放回来」 line belongs to the last visit.
   briefCommitments.justDropped = null;
   loadBriefCommitments();
+  await briefVisit();
   if (await loadBriefing()) {
     renderBriefView();
   }
+};
+
+// Tells the server the briefing is being read. With the start on 自动 and
+// after a while away, the briefing then begins where the last one got to.
+const briefVisit = async () => {
+  try {
+    await api("/api/briefing/visit", { method: "POST", body: "{}" });
+  } catch {
+    // The briefing still loads with the start it had.
+  }
+};
+
+// While the briefing stays on screen it is still being read: without this
+// the start would move under the reader an hour after they opened it.
+const BRIEF_VISIT_BEAT_MS = 10 * 60 * 1000;
+setInterval(() => {
+  if (app.view === "brief" && !document.hidden) {
+    briefVisit();
+  }
+}, BRIEF_VISIT_BEAT_MS);
+
+const briefSetWindow = async (change, notice) => {
+  briefState.busy = true;
+  renderBriefView();
+  try {
+    await api("/api/briefing/window", { method: "POST", body: JSON.stringify(change) });
+    briefState.notice = notice;
+  } catch (error) {
+    briefState.notice = error.message;
+  }
+  briefState.busy = false;
+  await loadBriefing({ fresh: true });
+  renderBriefView();
+};
+
+// Beside the date line: one step back, and who moves the start.
+const briefWindowControls = (data) => {
+  const info = data.window ?? { mode: "manual", previousStart: null };
+  const older = info.previousStart !== null && info.previousStart < data.windowStart;
+  return el("span", { class: "brief-window" },
+    info.previousStart === null ? null : el("button", {
+      class: "brief-window-back",
+      type: "button",
+      disabled: briefState.busy,
+      onclick: () => briefSetWindow({ restore: true }, older ? "回到了上一份。各群的总结要重新整理一下，稍等会出现。" : "回到了新的一份。各群的总结要重新整理一下，稍等会出现。"),
+    }, older ? `回到上一份（自 ${briefWhen(info.previousStart)} 起）` : `回到新的一份（自 ${briefWhen(info.previousStart)} 起）`),
+    el("select", {
+      class: "brief-window-mode",
+      "aria-label": "简报从哪里开始",
+      disabled: briefState.busy,
+      onchange: (event) => briefSetWindow({ mode: event.target.value }, event.target.value === "auto"
+        ? "以后每次打开简报，都从上次看到的地方开始。"
+        : "以后按「看完了」才换新的一份。"),
+    },
+      el("option", { value: "auto", selected: info.mode === "auto" }, "每次打开，从上次看到的地方开始"),
+      el("option", { value: "manual", selected: info.mode !== "auto" }, "按「看完了」才换新的一份")));
 };
 
 VIEW_RELOADERS.brief = async () => {
@@ -441,7 +499,9 @@ const briefMasthead = (data) => {
   const volume = [`${briefNumber(data.totals.groups)} 个群`, `${briefNumber(total)} 条新消息`];
   const days = Math.floor((data.now - data.windowStart) / 86400);
   return el("section", { class: "brief-mast" },
-    el("p", { class: "brief-dateline" }, `${briefDateLine(data.now)} · 自 ${briefWhen(data.windowStart)} 起${days >= 3 ? `（${days} 天）` : ""}`),
+    el("p", { class: "brief-dateline" },
+      `${briefDateLine(data.now)} · 自 ${briefWhen(data.windowStart)} 起${days >= 3 ? `（${days} 天）` : ""}`,
+      briefWindowControls(data)),
     total === 0
       ? el("h2", { class: "brief-headline quiet" }, "上次看完之后，还没有新消息")
       : yours.length > 0
