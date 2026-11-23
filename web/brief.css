@@ -540,3 +540,12 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 /* 朗读 beside 展开全文 (digest.js) */
 .digest-fold-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
 .digest-fold-row:empty { display: none; }
+
+/* SAMPLE (sample-brief-top): the update note is one line until opened; the headline is a pair of jumps */
+.whats-new.folded { padding: 8px 14px; margin-bottom: 14px; }
+.whats-new.folded .whats-new-head { margin-bottom: 0; }
+.whats-new.folded .whats-new-head strong { font-size: 13.5px; }
+.whats-new-actions { display: flex; gap: 6px; }
+.brief-headline-jump { border: 0; background: none; padding: 0; font: inherit; color: inherit; letter-spacing: inherit; cursor: pointer; }
+.brief-headline-jump:hover, .brief-headline-jump:focus-visible { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; outline: none; }
+.brief-headline-gap { display: inline-block; width: 1.1em; }

@@ -99,11 +99,24 @@ const whatsNewCard = () => {
   if (whatsNewState.hidden || whatsNewSeen()) {
     return null;
   }
-  return el("section", { class: "whats-new", "aria-label": "这次更新的新东西" },
+  // One line until opened: the news about the program never outweighs the
+  // news from the groups.
+  const open = whatsNewState.open === true;
+  return el("section", { class: open ? "whats-new" : "whats-new folded", "aria-label": "这次更新的新东西" },
     el("div", { class: "whats-new-head" },
       el("strong", {}, `这次更新的新东西（${WHATS_NEW.length} 项）`),
-      el("button", { class: "btn small ghost", type: "button", onclick: dismissWhatsNew }, "知道了")),
-    el("ul", { class: "whats-new-list" }, WHATS_NEW.map((item) => el("li", {},
+      el("span", { class: "whats-new-actions" },
+        el("button", {
+          class: "btn small ghost",
+          type: "button",
+          "aria-expanded": String(open),
+          onclick: () => {
+            whatsNewState.open = !open;
+            renderBriefView();
+          },
+        }, open ? "收起" : "看看有什么"),
+        el("button", { class: "btn small ghost", type: "button", onclick: dismissWhatsNew }, "知道了"))),
+    !open ? null : el("ul", { class: "whats-new-list" }, WHATS_NEW.map((item) => el("li", {},
       !whatsNewActionable(item)
         ? el("div", { class: "whats-new-item" }, el("b", {}, item.title), el("span", {}, item.detail))
         : el("button", { class: "whats-new-item", type: "button", onclick: () => whatsNewGo(item), title: "去看看" },

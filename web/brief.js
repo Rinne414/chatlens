@@ -431,22 +431,35 @@ const briefMasthead = (data) => {
     data.highlights.newThings.length > 0 ? [`${data.highlights.newThings.length} 个新东西`, ".brief-highlights"] : null,
     data.highlights.qa.length > 0 ? [`${data.highlights.qa.length} 个问答`, ".brief-highlights"] : null,
   ].filter(Boolean);
+  const jump = (selector) => () => $(`#view-brief ${selector}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const promised = briefCommitments.data?.open.length ?? 0;
+  // What is about the reader leads; how much was said in all comes after.
+  const yours = [
+    promised > 0 ? [promised, " 件答应过的事", ".brief-commitments"] : null,
+    mentionCount > 0 ? [mentionCount, " 条和你有关", ".brief-for-you"] : null,
+  ].filter(Boolean);
+  const volume = [`${briefNumber(data.totals.groups)} 个群`, `${briefNumber(total)} 条新消息`];
+  const days = Math.floor((data.now - data.windowStart) / 86400);
   return el("section", { class: "brief-mast" },
-    el("p", { class: "brief-dateline" }, `${briefDateLine(data.now)} · 自 ${briefWhen(data.windowStart)} 起`),
+    el("p", { class: "brief-dateline" }, `${briefDateLine(data.now)} · 自 ${briefWhen(data.windowStart)} 起${days >= 3 ? `（${days} 天）` : ""}`),
+    total === 0
+      ? el("h2", { class: "brief-headline quiet" }, "上次看完之后，还没有新消息")
+      : yours.length > 0
+        ? el("h2", { class: "brief-headline" }, yours.map(([count, label, selector], index) => [
+            index > 0 ? el("span", { class: "brief-headline-gap" }, "  ") : null,
+            el("button", { class: "brief-headline-jump", type: "button", onclick: jump(selector) },
+              el("span", { class: "brief-figure" }, briefNumber(count)), label),
+          ]))
+        : el("h2", { class: "brief-headline" },
+            el("span", { class: "brief-figure" }, briefNumber(data.totals.groups)), " 个群  ",
+            el("span", { class: "brief-figure" }, briefNumber(total)), " 条新消息"),
     total > 0
-      ? el("h2", { class: "brief-headline" },
-          el("span", { class: "brief-figure" }, briefNumber(data.totals.groups)), " 个群  ",
-          el("span", { class: "brief-figure" }, briefNumber(total)), " 条新消息")
-      : el("h2", { class: "brief-headline quiet" }, "上次看完之后，还没有新消息"),
-    counts.length > 0
-      ? el("p", { class: "brief-lede" }, counts.map(([label, selector], index) => [
-          index > 0 ? " · " : null,
-          el("button", {
-            class: "brief-lede-jump",
-            type: "button",
-            onclick: () => $(`#view-brief ${selector}`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
-          }, label),
-        ]))
+      ? el("p", { class: "brief-lede" },
+          yours.length > 0 ? `${volume.join(" · ")}` : null,
+          counts.filter(([, selector]) => selector !== ".brief-for-you" || yours.length === 0).map(([label, selector], index) => [
+            index > 0 || yours.length > 0 ? " · " : null,
+            el("button", { class: "brief-lede-jump", type: "button", onclick: jump(selector) }, label),
+          ]))
       : null,
     briefStatusLine(data),
     el("div", { class: "brief-actions" },
