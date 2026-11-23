@@ -164,9 +164,12 @@ html.phone .tray-dock { display: none; }
 .select-tray-remove:hover, .select-tray-remove:focus-visible { border-color: var(--risk); color: var(--risk); outline: none; }
 
 /* 大图: one picture alone on the screen */
-.quick-look { position: fixed; inset: 0; z-index: 390; display: grid; grid-template-rows: minmax(0, 1fr) auto; place-items: center; gap: 10px; padding: 24px 24px 16px; background: rgba(10, 13, 18, .86); cursor: zoom-out; }
+.quick-look { position: fixed; inset: 0; z-index: 390; display: grid; grid-template-rows: minmax(0, 1fr) auto; place-items: center; gap: 10px; padding: 24px 24px 16px; background: rgba(10, 13, 18, .86); overflow: hidden; }
 .quick-look-image { max-width: 100%; max-height: 100%; min-width: 120px; min-height: 120px; object-fit: contain; border-radius: 6px; background: center / contain no-repeat; }
-.quick-look-bar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 16px; color: #e6e8eb; font-size: 13px; }
+.quick-look-image { cursor: zoom-in; touch-action: none; user-select: none; -webkit-user-drag: none; will-change: transform; }
+.quick-look-image.zoomed { cursor: grab; }
+.quick-look-image.dragging { cursor: grabbing; }
+.quick-look-bar { position: relative; z-index: 1; padding: 4px 12px; border-radius: 8px; background: rgba(10, 13, 18, .72); display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 16px; color: #e6e8eb; font-size: 13px; }
 .quick-look-picked { padding: 1px 8px; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 650; }
 .quick-look-notice { flex-basis: 100%; order: -1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; color: #fff; font-weight: 650; }
 .quick-look-keys .tray-key { margin: 0 2px; background: transparent; color: #e6e8eb; border-color: rgba(255, 255, 255, .45); }

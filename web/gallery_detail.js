@@ -419,13 +419,6 @@ document.addEventListener("keydown", (event) => {
       saveSelectionByKey(tray);
       return;
     }
-    // Nothing opened and nothing selected: the picture under the mouse.
-    if (detail === null && pictureUi.viewer === null && app.gallery.selected.size === 0 && galleryHover.md5 !== null
-      && document.querySelector(".view-layer") === null && !paletteState.open) {
-      event.preventDefault();
-      saveToTrayAndTell([galleryHover.md5], tray.id);
-      return;
-    }
   }
   if (app.gallery.detail === null) {
     if (event.key === "Escape" && app.gallery.selecting && pictureUi.viewer === null && !event.defaultPrevented) {

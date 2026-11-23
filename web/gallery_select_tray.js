@@ -41,6 +41,7 @@ const gallerySelectedTray = () => {
 /* --- 大图 --- */
 
 const closeGalleryQuickLook = () => {
+  resetGalleryLookZoom();
   Object.assign(galleryQuickLook, { md5: null, among: null, notice: "" });
   document.getElementById("quick-look")?.remove();
 };
@@ -72,14 +73,10 @@ const renderGalleryQuickLook = () => {
   const key = (label) => el("kbd", { class: "tray-key" }, label);
   document.body.append(el("div", {
     id: "quick-look", class: "quick-look", role: "dialog", "aria-label": "大图",
-    onclick: (event) => {
-      if (event.target.closest("button") === null) {
-        dismissGalleryQuickLook();
-      }
-    },
+    onclick: clickGalleryQuickLook,
   },
   // The small one shows at once; the big one draws over it when it has arrived.
-  el("img", { class: "quick-look-image", src: pictureUrl(md5, "preview"), alt: "", style: `background-image:url("${pictureUrl(md5, "thumb")}")` }),
+  galleryQuickLookImage(md5),
   el("div", { class: "quick-look-bar" },
     el("span", {}, galleryQuickLookCount(list.indexOf(md5), list)),
     selected ? el("span", { class: "quick-look-picked" }, "在托盘里") : null,
@@ -93,6 +90,9 @@ const renderGalleryQuickLook = () => {
 // among: the md5s to walk through instead of the wall (the 托盘's pictures).
 const openGalleryQuickLook = (md5, among = null) => {
   const opening = galleryQuickLook.md5 === null;
+  if (md5 !== galleryQuickLook.md5) {
+    resetGalleryLookZoom();
+  }
   Object.assign(galleryQuickLook, { md5, among: opening ? among : galleryQuickLook.among, notice: opening ? "" : galleryQuickLook.notice });
   renderGalleryQuickLook();
   openOverlayEntry({ kind: "gallery-look", key: md5 }, closeGalleryQuickLook);
