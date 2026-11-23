@@ -19,6 +19,7 @@ const HANDLERS = {
   groupInsights: ["./group_ops", "getGroupInsightsReadOnly"],
   groupPerson: ["./group_ops", "getGroupPersonReadOnly"],
   personAcross: ["./group_ops", "getPersonAcrossReadOnly"],
+  personExtras: ["./group_ops", "getPersonExtrasReadOnly"],
   gallery: ["./gallery_ops", "runHeavyGalleryQuery"],
 };
 

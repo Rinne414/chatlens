@@ -33,6 +33,8 @@ const REMOTE_API_ROUTES = new Set([
   "GET /api/group/person",
   "GET /api/group/person/messages",
   "GET /api/person-across",
+  "GET /api/person/extras",
+  "GET /api/person/me",
   "GET /api/review/calendar",
   "GET /api/review/day",
   "GET /api/review/search",

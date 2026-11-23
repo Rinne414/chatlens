@@ -275,3 +275,17 @@ html[data-theme="dark"] .gp-rel, html[data-theme="dark"] .pp-page {
   .pp-msgs button { grid-template-columns: 1fr; gap: 2px; }
   .rel-card { top: auto; bottom: 52px; }
 }
+
+/* 个人页: 你和 TA, names, repeated phrases, answers (person_extras.js) */
+.px-counts { margin: 0 0 8px; }
+.px-recent, .px-names, .px-answers { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.px-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: baseline; width: 100%; padding: 5px 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.px-row:hover, .px-row:focus-visible, .px-answer:hover, .px-answer:focus-visible { background: var(--bg); outline: none; }
+.px-way { font-size: 12px; font-weight: 700; white-space: nowrap; color: var(--muted); }
+.px-way.toMe { color: var(--accent); }
+.px-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.px-names li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.px-phrases { display: flex; flex-wrap: wrap; gap: 6px; }
+.px-phrases small { color: var(--muted); }
+.px-answer { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.chat-speaker-chip .chat-speaker-page { font-size: 12.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }

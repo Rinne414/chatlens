@@ -182,6 +182,10 @@ const chatSpeakerChip = () => {
   }
   return el("span", { class: "chat-speaker-chip" },
     `只看 ${speaker.name || speaker.uin} 的消息`,
+    el("button", {
+      class: "chat-speaker-page", type: "button", title: "TA 的发言、来往的人、常说的话",
+      onclick: () => openPersonView(speaker.uin, app.msg.groupId),
+    }, "TA 的个人页 →"),
     el("button", { type: "button", "aria-label": "看所有人的消息", title: "看所有人的消息", onclick: () => setChatSpeaker(null) }, "×"));
 };
 

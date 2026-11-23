@@ -405,6 +405,21 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/person/me") {
+      sendJson(response, 200, groupOps.getMe());
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/person/extras") {
+      sendJson(response, 200, await readWorker.call("personExtras", {
+        uin: url.searchParams.get("uin") ?? "",
+        groupId: url.searchParams.get("groupId") ?? "",
+        fromUnix: url.searchParams.get("fromUnix"),
+        toUnix: url.searchParams.get("toUnix"),
+      }));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/group/person/messages") {
       sendJson(response, 200, groupOps.getPersonMessages(url.searchParams));
       return;

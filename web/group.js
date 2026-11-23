@@ -39,6 +39,8 @@ app.groupPage = {
   personAll: false,
   personGroupFilter: "",
   personData: null,
+  personExtras: null,
+  personExtrasError: null,
   // What personData was loaded for (group_person.js personRequestKey, as JSON).
   personDataKey: null,
   personLoading: false,

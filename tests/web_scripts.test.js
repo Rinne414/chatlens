@@ -656,7 +656,7 @@ test("Ctrl+K: pages, groups and words match every word typed, and any text can g
 
   // Nothing typed: every page, command, group and word; no search hand-offs.
   const all = labels("");
-  assert.equal(all.length, 3 + 3 + 2 + 1);
+  assert.equal(all.length, 3 + 4 + 2 + 1);
   assert.ok(all.includes("键盘快捷键"));
   assert.ok(!all.some((label) => label.startsWith("在回顾里搜")));
 

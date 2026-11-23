@@ -11,6 +11,8 @@ const briefingStore = require("../briefing_store");
 const { groupInsights, timelineBetween } = require("../group_insights");
 const { personProfile, personMessages } = require("../group_person");
 const { personAcross } = require("../person_across");
+const { personExtras } = require("../person_extras");
+const messageStore = require("../message_store");
 
 const knowledgePath = () => path.join(state.toolRoot, "store", "knowledge.db");
 
@@ -70,6 +72,22 @@ const getPersonAcrossReadOnly = ({ uin, fromUnix, toUnix }) => {
   }
 };
 
+// More about one person (names, repeated phrases, 你和 TA, answers), for
+// the read worker. No groupId: across every group.
+const getPersonExtrasReadOnly = ({ uin, groupId, fromUnix, toUnix }) => {
+  const range = { fromUnix: Number(fromUnix), toUnix: Number(toUnix) };
+  if (!Number.isFinite(range.fromUnix) || !Number.isFinite(range.toUnix)) {
+    throw new Error("fromUnix and toUnix are required");
+  }
+  const db = new Database(path.join(state.toolRoot, "store", "messages.db"), { readonly: true, fileMustExist: true });
+  try {
+    const selfUins = messageStore.getSelfIdentity(db, messageStore.selfUinsFromDataPath(state.loadConfig().ntDbDir)).uins;
+    return personExtras(db, { uin: String(uin ?? ""), groupId: groupId ? String(groupId) : null, ...range, selfUins });
+  } finally {
+    db.close();
+  }
+};
+
 // all=1: from every group (the page's 「所有群」 view).
 const getPersonMessages = (params) => personMessages(state.getStore(), {
   groupId: params.get("all") === "1" ? null : params.get("groupId") ?? "",
@@ -81,4 +99,15 @@ const getPersonMessages = (params) => personMessages(state.getStore(), {
   limit: Number(params.get("limit")) || undefined,
 });
 
-module.exports = { getGroupInsights, getGroupInsightsReadOnly, getGroupTimeline, getGroupPersonReadOnly, getPersonAcrossReadOnly, getPersonMessages };
+// Who the reader is and the group they spoke in most: where 「我的页面」 opens.
+const getMe = () => {
+  const db = state.getStore();
+  const uin = messageStore.getSelfIdentity(db, messageStore.selfUinsFromDataPath(state.loadConfig().ntDbDir)).uins[0] ?? null;
+  // That account's own busiest group (someone with two accounts has two).
+  const group = uin === null ? undefined : db.prepare(`
+    SELECT group_id AS groupId FROM messages WHERE is_self = 1 AND speaker_uin = ? GROUP BY group_id ORDER BY COUNT(*) DESC LIMIT 1
+  `).get(uin);
+  return { uin, groupId: group?.groupId ?? null };
+};
+
+module.exports = { getMe, getGroupInsights, getGroupInsightsReadOnly, getGroupTimeline, getGroupPersonReadOnly, getPersonAcrossReadOnly, getPersonExtrasReadOnly, getPersonMessages };

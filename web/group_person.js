@@ -98,8 +98,11 @@ const loadPersonData = async () => {
 };
 
 const loadPersonPage = () => {
+  // Another person or another range: what the last one's extras said goes.
+  replaceGroupPage({ personExtras: null, personExtrasError: null });
   loadPersonMessages();
   loadPersonData();
+  loadPersonExtras();
 };
 
 // Back to a page already shown (same person, group, kind and range): draw
@@ -110,7 +113,7 @@ const showPersonPage = (patch, step) => {
   replaceGroupPage({ choosing: false, ...patch });
   const kept = app.groupPage.personData !== null && app.groupPage.personDataKey === JSON.stringify(personRequestKey());
   if (!kept) {
-    replaceGroupPage({ personData: null, personDataKey: null, personMessages: null });
+    replaceGroupPage({ personData: null, personDataKey: null, personMessages: null, personExtras: null });
   }
   // Back / forward restore the scroll position themselves; a click starts at the top.
   if (!viewHistory.restoring) {
@@ -119,6 +122,7 @@ const showPersonPage = (patch, step) => {
   markViewStep(step);
   if (kept) {
     loadPersonData();
+    loadPersonExtras();
     return;
   }
   loadPersonPage();
@@ -400,6 +404,6 @@ const groupPersonPage = () => {
   return el("div", { class: `gp-page pp-page ${page.personLoading ? "is-loading" : ""}` },
     personHeader(data),
     el("div", { class: "gp-grid" },
-      el("div", { class: "gp-col" }, personTrend(data, names), personMessageList(data, names)),
-      el("div", { class: "gp-col" }, personChanges(data), personHours(data), personPartners(data), personOtherGroups(data))));
+      el("div", { class: "gp-col" }, personTrend(data, names), personExtrasMain(data), personMessageList(data, names)),
+      el("div", { class: "gp-col" }, personChanges(data), personHours(data), personPartners(data), personExtrasSide(data), personOtherGroups(data))));
 };

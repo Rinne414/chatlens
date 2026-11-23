@@ -1036,6 +1036,8 @@ const briefFooter = (data) => {
     " · ",
     el("button", { class: "linklike", onclick: () => openView("settings") }, "AI 用量与后台设置"),
     " · ",
+    el("button", { class: "linklike", onclick: openMyPage, title: "你自己在所有群的发言、来往的人、常说的话" }, "我的页面"),
+    " · ",
     el("button", { class: "linklike", onclick: toggleKeyHelp, title: "j / k 移动 · o 打开 · s 收藏 · Ctrl+K 搜索" }, "键盘快捷键（?）"));
 };
 
