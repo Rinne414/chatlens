@@ -13,6 +13,7 @@ const picturePass = require("./picture_pass");
 const service = require("./picture_service");
 const exportOps = require("./picture_export_ops");
 const unkeepOps = require("./picture_unkeep");
+const { fingerprintOfSmallGray } = require("../picture_similar");
 
 const IMAGE_TYPES = { ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
 const STATE_TEXT = {
@@ -141,6 +142,11 @@ const handlePictureApi = async (request, response, url, { sendJson, sendError, r
       return true;
     case "POST /api/pictures/save-dir":
       sendJson(response, 200, exportOps.setSaveDir(await readBody(request)));
+      return true;
+    case "POST /api/pictures/fingerprint":
+      // A picture of the user's own, already shrunk to 32x32 grey values by
+      // the page: only its fingerprint is worked out, nothing is stored.
+      sendJson(response, 200, fingerprintOfSmallGray((await readBody(request)).gray));
       return true;
     case "GET /api/pictures/trays":
       sendJson(response, 200, exportOps.getTrays());

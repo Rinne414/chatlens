@@ -253,6 +253,19 @@ const pageRows = (db, filter, { sort, limit, offset }) => db.prepare(`
   LIMIT @limit OFFSET @offset
 `).all({ ...filter.args, limit, offset });
 
+// The same row shape as a page of the wall, for pictures picked by md5
+// (similar pictures): every posting counts, whatever the wall's filter is.
+const rowsOfMd5s = (db, md5s) => db.prepare(`
+  SELECT p.md5, MIN(p.sent_at) AS firstAt, MAX(p.sent_at) AS lastAt,
+         COUNT(*) AS posts, COUNT(DISTINCT p.group_id) AS groups,
+         MAX(p.width) AS width, MAX(p.height) AS height, MAX(p.size) AS size,
+         MAX(p.format) AS format, MAX(p.sticker) AS sticker, MAX(p.expires_at) AS expiresAt,
+         CASE WHEN MIN(p.file_name) <> '' THEN MAX(p.file_name) ELSE '' END AS fileName
+  FROM pictures p
+  WHERE p.md5 IN (SELECT value FROM json_each(@md5s))
+  GROUP BY p.md5
+`).all({ md5s: JSON.stringify(md5s) });
+
 // Every posting of the page's pictures, oldest first: the first is where the
 // picture came from, and the filter decides which posting the tile shows.
 const occurrencesOf = (db, md5s) => db.prepare(`
@@ -358,6 +371,18 @@ const describe = (row, occurrences, file, knowledge, options) => {
 
 const DEFAULT_OPTIONS = { groupId: "", sender: "", kind: "images", ai: false, q: "", shape: "", size: "", prompt: false, asked: false, file: false, kept: false, unsaved: false, why: "", removed: false };
 
+// Wall items for a list of md5s, in the order given (the ones with no
+// posting on record are left out).
+const picturesByMd5 = (db, md5s) => {
+  const byMd5 = new Map(rowsOfMd5s(db, md5s).map((row) => [row.md5, row]));
+  const rows = md5s.map((md5) => byMd5.get(md5)).filter((row) => row !== undefined);
+  return describeRows(db, rows, { ...DEFAULT_OPTIONS, fromUnix: 0, toUnix: Number.MAX_SAFE_INTEGER });
+};
+
+// Every posting of several files of one picture, oldest first, each saying
+// which file it was.
+const postingsOf = (db, md5s) => occurrencesOf(db, md5s).map((row) => ({ ...posting(row), md5: row.md5 }));
+
 const listPictures = (db, options) => {
   const sort = SORTS.has(options.sort) ? options.sort : "recent";
   const normalized = { ...DEFAULT_OPTIONS, ...options };
@@ -366,6 +391,10 @@ const listPictures = (db, options) => {
   const offset = Math.max(0, Number.parseInt(options.offset ?? 0, 10) || 0);
   const rows = pageRows(db, filter, { sort, limit, offset });
   const total = db.prepare(`SELECT COUNT(DISTINCT p.md5) AS n FROM pictures p ${filter.join} WHERE ${filter.where}`).get(filter.args).n;
+  return { total, items: describeRows(db, rows, normalized) };
+};
+
+const describeRows = (db, rows, normalized) => {
   const md5s = rows.map((row) => row.md5);
   const byMd5 = new Map(md5s.map((md5) => [md5, []]));
   for (const row of occurrencesOf(db, md5s)) {
@@ -374,14 +403,11 @@ const listPictures = (db, options) => {
   const files = filesOf(db, md5s);
   const knowledge = knowledgeOf(db, md5s);
   const saved = savedOf(db, md5s);
-  return {
-    total,
-    items: rows.map((row) => ({
-      ...describe(row, byMd5.get(row.md5), files.get(row.md5), knowledge.get(row.md5), normalized),
-      savedAt: saved.get(row.md5)?.savedAt ?? 0,
-      savedDir: saved.get(row.md5)?.savedDir ?? "",
-    })),
-  };
+  return rows.map((row) => ({
+    ...describe(row, byMd5.get(row.md5), files.get(row.md5), knowledge.get(row.md5), normalized),
+    savedAt: saved.get(row.md5)?.savedAt ?? 0,
+    savedDir: saved.get(row.md5)?.savedDir ?? "",
+  }));
 };
 
 // Counts for the sidebar under the current filter. Each dimension is counted
@@ -615,4 +641,4 @@ const spreadPictures = (db, { fromUnix, toUnix }) => db.prepare(`
 
 const rangeForDays = (days, nowUnix) => ({ fromUnix: nowUnix - days * DAY_SECONDS, toUnix: nowUnix + 60 });
 
-module.exports = { listPictures, galleryFacets, pictureDetail, messageContext, spreadPictures, rangeForDays, hasKnowledge, keptSummary };
+module.exports = { picturesByMd5, postingsOf, listPictures, galleryFacets, pictureDetail, messageContext, spreadPictures, rangeForDays, hasKnowledge, keptSummary };

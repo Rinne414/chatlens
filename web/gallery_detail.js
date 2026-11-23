@@ -200,6 +200,7 @@ const galleryDetailActions = (detail) => {
       ? el("button", { class: "btn small", type: "button", onclick: () => downloadPictureWorkflow(item.md5).catch((error) => notifyError(error)) }, "下载工作流")
       : null,
     shown === null ? null : el("button", { class: "btn small", type: "button", onclick: () => openChatAtPosting(shown) }, "在消息里看"),
+    el("button", { class: "btn small", type: "button", title: "在画廊里列出和这张图一样或很像的图", onclick: () => openGallerySimilar({ md5: item.md5 }) }, "找相似的图"),
     item.inLibrary
       ? el("button", { class: "btn small", type: "button", onclick: () => openKnowledgeDetailByHash(item.md5).catch((error) => notifyError(error)) }, "在咒语库打开")
       : null,
@@ -212,21 +213,30 @@ const galleryDetailActions = (detail) => {
       }, "只看这个人的图"));
 };
 
+// The picture's story: where it was posted, including the times it went
+// round as a different file of the same picture (story, from its fingerprint).
 const gallerySpread = (detail) => {
-  const occurrences = detail.data ? detail.data.occurrences : [detail.item.origin, detail.item.shown].filter(Boolean);
+  const story = detail.data?.story ?? null;
+  const together = story !== null && story.files > 1;
+  const occurrences = together
+    ? story.postings
+    : detail.data ? detail.data.occurrences : [detail.item.origin, detail.item.shown].filter(Boolean);
   if (occurrences.length === 0) {
     return null;
   }
   const groups = new Set(occurrences.map((item) => item.groupId)).size;
   return el("section", { class: "gallery-spread" },
-    el("span", { class: "kb-prompt-label" },
-      occurrences.length === 1 ? "发在" : `传播：${groups} 个群 · ${occurrences.length} 次`),
+    el("span", { class: "kb-prompt-label", title: together ? "同一张图被压缩、转存后是不同的文件；这里把它们算在一起" : "" },
+      occurrences.length === 1
+        ? "发在"
+        : `传播：${groups} 个群 · ${occurrences.length} 次${together ? ` · ${story.files} 个不同的文件` : ""}`),
     el("ol", {}, occurrences.slice(0, 40).map((posting, index) => el("li", {},
       el("button", { class: "gallery-spread-row", type: "button", title: "在消息里看这一次", onclick: () => openChatAtPosting(posting) },
         index === 0 && occurrences.length > 1 ? el("span", { class: "kb-badge ok" }, "首发") : null,
         el("span", { class: "gallery-spread-time" }, unixToHkt(posting.sentAt).slice(5, 16)),
         el("strong", {}, posting.groupName || pictureGroupName(posting.groupId)),
-        el("span", { class: "kb-meta" }, posting.speaker || "")))),
+        el("span", { class: "kb-meta" }, posting.speaker || ""),
+        together && posting.md5 !== detail.item.md5 ? el("span", { class: "kb-badge", title: "这一次发的是同一张图的另一个文件" }, "另一个文件") : null))),
     occurrences.length > 40 ? el("li", { class: "kb-meta" }, `还有 ${occurrences.length - 40} 次`) : null));
 };
 

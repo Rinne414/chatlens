@@ -56,7 +56,7 @@ const openGalleryKept = () => {
     ...galleryKeptPatch(true),
     removed: false, why: "",
     groupId: "", sender: "", senderLabel: "", q: "", shape: "", size: "", ai: false, prompt: false, asked: false, file: false,
-    kind: "images", detail: null,
+    kind: "images", detail: null, similar: null,
   });
   showView("media");
   galleryNav.dismissed = false;

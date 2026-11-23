@@ -61,6 +61,9 @@ app.gallery = {
   asked: false,
   file: false,
   unsaved: false,
+  // The wall shows pictures that look like one picture (gallery_similar.js):
+  // { md5 } or { hash, label }; null = the ordinary wall.
+  similar: null,
   results: null,
   facets: null,
   facetsKey: "",
@@ -147,6 +150,10 @@ const loadGalleryFacets = async () => {
 };
 
 const loadGallery = async ({ append = false } = {}) => {
+  if (app.gallery.similar !== null) {
+    await loadGallerySimilar();
+    return;
+  }
   const requestId = app.gallery.requestId + 1;
   const offset = append ? (app.gallery.results?.items.length ?? 0) : 0;
   replaceGallery({ requestId, loading: true, loadingMore: append, error: null });
@@ -196,14 +203,15 @@ const applyGalleryFilter = (patch) => {
   if (app.gallery.detail !== null) {
     dismissOverlay(closeGalleryDetail);
   }
-  replaceGallery({ ...patch, detail: null });
+  // Picking a filter goes back to the ordinary wall.
+  replaceGallery({ similar: null, ...patch, detail: null });
   renderGalleryDetailLayer();
   loadGallery();
 };
 
 const loadMoreGallery = () => {
   const tab = app.gallery;
-  if (tab.loading || tab.loadingMore || tab.results === null || tab.results.items.length >= tab.results.total) {
+  if (tab.similar !== null || tab.loading || tab.loadingMore || tab.results === null || tab.results.items.length >= tab.results.total) {
     return;
   }
   loadGallery({ append: true });
@@ -235,6 +243,7 @@ const openGalleryRange = ({ groupId, fromUnix, toUnix }) => {
   replaceGallery({
     range: { fromUnix, toUnix },
     until: null,
+    similar: null,
     groupId: /^\d+$/u.test(String(groupId ?? "")) ? String(groupId) : "",
     sender: "",
     senderLabel: "",
@@ -271,7 +280,7 @@ const galleryEntries = () => {
   let day = null;
   for (const [itemIndex, item] of items.entries()) {
     const itemDay = galleryDayKey(item.lastAt);
-    if (app.gallery.sort === "recent" && itemDay !== day) {
+    if (app.gallery.sort === "recent" && app.gallery.similar === null && itemDay !== day) {
       day = itemDay;
       entries.push({ kind: "header", height: GALLERY_HEADER_HEIGHT, day });
     }
@@ -283,6 +292,7 @@ const galleryEntries = () => {
 const galleryBadges = (item) => {
   const days = daysUntilExpiry(item.expiresAt);
   return [
+    gallerySimilarBadge(item),
     item.generator !== ""
       ? { text: generatorLabel(item.generator), tone: GENERATOR_TONES[item.generator] ?? "ai" }
       : item.ai ? { text: "AI 图", tone: "ai" } : null,
@@ -804,6 +814,9 @@ const galleryCountText = () => {
   if (tab.loading && !tab.loadingMore) {
     return "正在读取…";
   }
+  if (tab.similar !== null) {
+    return tab.results === null ? "" : `${briefNumber(gallerySimilarUi.info?.total ?? tab.results.total)} 张相似的`;
+  }
   return tab.results === null ? "" : `共 ${briefNumber(tab.results.total)} 张`;
 };
 
@@ -840,6 +853,9 @@ const galleryWall = () => {
     return el("div", { class: "wall-empty" }, waiting("读取中…", "图片很多时要几秒到十几秒，页面可以照常用"));
   }
   if (tab.results.items.length === 0) {
+    if (tab.similar !== null) {
+      return el("div", { class: "wall-empty" }, gallerySimilarUi.info?.noFingerprint ? "没有可以比的。" : "没有找到相似的图。");
+    }
     if (tab.kept) {
       return el("div", { class: "wall-empty" }, galleryKeptEmptyText());
     }
@@ -873,17 +889,21 @@ const renderMediaView = () => {
   const typed = focused?.id === "gallery-search" ? { value: focused.value, caret: focused.selectionStart } : null;
   setChildren(root, el("section", { class: tab.selecting ? "panel kb-page gallery-page selecting" : "panel kb-page gallery-page" },
     galleryToolbar(),
+    gallerySimilarPanel(),
+    gallerySimilarHead(),
     galleryKeptHead(),
-    galleryConditions(),
+    // The chips and the counts describe the ordinary wall, not the similar pictures.
+    tab.similar === null ? galleryConditions() : null,
     el("div", { class: "kb-layout" },
       el("details", { class: "kb-facets", open: window.innerWidth > KB_MOBILE_WIDTH },
         el("summary", {}, "筛选"),
         trayDock({ selected: () => [...app.gallery.selected] }),
-        el("div", { id: "gallery-facets-body", class: "kb-facets-body" }, galleryFacetSections())),
+        tab.similar === null ? el("div", { id: "gallery-facets-body", class: "kb-facets-body" }, galleryFacetSections()) : null),
       el("div", { class: tab.loading && !tab.loadingMore ? "kb-results is-loading" : "kb-results" },
         el("div", { class: "kb-results-head" },
           el("strong", { id: "gallery-count", class: "kb-count" }, galleryCountText()),
           el("span", { class: "kb-results-spacer" }),
+          gallerySimilarButton(),
           el("button", {
             class: tab.selecting ? "btn small active desktop-action" : "btn small primary desktop-action",
             type: "button",

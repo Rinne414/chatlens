@@ -12,6 +12,7 @@ const state = require("./toolkit_state");
 const gallery = require("../gallery_store");
 const pictureService = require("./picture_service");
 const { removedDirFor } = require("../media_removed");
+const similar = require("../picture_similar");
 
 const storePath = () => path.join(state.toolRoot, "store", "messages.db");
 const knowledgePath = () => path.join(state.toolRoot, "store", "knowledge.db");
@@ -127,7 +128,74 @@ const facets = (params) => {
   return result;
 };
 
-const detail = (params) => withReadOnlyStore((db) => gallery.pictureDetail(db, String(params.get("md5") ?? "").toLowerCase()));
+/* ---------- picture fingerprints (src/picture_similar.js) ---------- */
+
+// All fingerprints stay loaded between requests; they are read again only
+// after new ones were made.
+const fingerprints = { stamp: null, index: null };
+const fingerprintIndex = (db) => {
+  const stamp = similar.indexStamp(db);
+  if (fingerprints.stamp !== stamp) {
+    fingerprints.index = similar.loadIndex(db);
+    fingerprints.stamp = stamp;
+  }
+  return fingerprints.index;
+};
+
+// The picture's story: every posting of every file that is the same picture
+// (the file itself included), oldest first. null when it has no fingerprint.
+const storyOf = (db, md5) => {
+  const own = similar.hashOfMd5(db, md5);
+  if (own === null || own.hash === "") {
+    return null;
+  }
+  const close = similar.nearest(fingerprintIndex(db), own.hash, { maxBits: similar.SAME_BITS }).map((item) => item.md5);
+  const shapes = new Map(gallery.picturesByMd5(db, [md5, ...close]).map((item) => [item.md5, item]));
+  const others = close.filter((other) => other !== md5 && sameShape(shapes.get(md5), shapes.get(other)));
+  return others.length === 0 ? { files: 1, postings: [] } : { files: others.length + 1, postings: gallery.postingsOf(db, [md5, ...others]) };
+};
+
+// A fingerprint match alone was wrong for about 1 pair in 200 (measured on
+// 578 pairs); the same picture as another file also keeps its proportions.
+const SHAPE_TOLERANCE = 0.04;
+const sameShape = (left, right) => {
+  if (!left || !right || !(left.width > 0 && left.height > 0 && right.width > 0 && right.height > 0)) {
+    return true;
+  }
+  const ratio = (left.width / left.height) / (right.width / right.height);
+  return Math.abs(ratio - 1) <= SHAPE_TOLERANCE;
+};
+
+const detail = (params) => withReadOnlyStore((db) => {
+  const md5 = String(params.get("md5") ?? "").toLowerCase();
+  const picture = gallery.pictureDetail(db, md5);
+  return picture === null ? null : { ...picture, story: storyOf(db, md5) };
+});
+
+const SIMILAR_LIMIT = 1000;
+
+// Pictures that look like one already stored (md5) or like a fingerprint the
+// page got for a picture of the user's (hash), closest first.
+const similarPictures = (params) => withReadOnlyStore((db) => {
+  const md5 = String(params.get("md5") ?? "").toLowerCase();
+  const own = md5 === "" ? null : similar.hashOfMd5(db, md5);
+  const hash = md5 === "" ? String(params.get("hash") ?? "").toLowerCase() : own?.hash ?? "";
+  const coverage = similar.coverage(db);
+  if (!similar.HEX.test(hash)) {
+    // state: why this picture has no fingerprint ("" = not looked at yet).
+    return { total: 0, items: [], coverage, noFingerprint: md5 === "" ? "bad-hash" : own?.state || "pending" };
+  }
+  const found = similar.nearest(fingerprintIndex(db), hash, { maxBits: similar.SEARCH_BITS });
+  const bits = new Map(found.map((item) => [item.md5, item.bits]));
+  const listed = gallery.picturesByMd5(db, found.slice(0, SIMILAR_LIMIT).map((item) => item.md5));
+  const asked = listed.find((item) => item.md5 === md5);
+  const items = listed.map((item) => {
+    const closeness = similar.closeness(bits.get(item.md5));
+    // "The same picture" also has to have the same proportions.
+    return { ...item, closeness: closeness === "same" && !sameShape(asked, item) ? "close" : closeness, itself: item.md5 === md5 };
+  });
+  return { total: found.length, items, coverage, noFingerprint: null };
+});
 
 // What the removed originals really take on disk (some have no posting to
 // read a size from); the folder is small next to the kept ones.
@@ -166,7 +234,7 @@ const handleGalleryApi = (request, response, url, { sendJson, sendError }) => {
   if (request.method !== "GET") {
     return false;
   }
-  const routes = { "/api/gallery": list, "/api/gallery/facets": facets, "/api/gallery/picture": detail, "/api/gallery/context": context, "/api/gallery/kept-summary": keptSummary };
+  const routes = { "/api/gallery": list, "/api/gallery/facets": facets, "/api/gallery/picture": detail, "/api/gallery/context": context, "/api/gallery/kept-summary": keptSummary, "/api/gallery/similar": similarPictures };
   const handler = routes[url.pathname];
   if (handler === undefined) {
     return false;

@@ -25,6 +25,7 @@ const { backfillStarts, recordFailedExport } = require("../backfill_replies");
 const engine = require("../briefing_engine");
 const { callLlm, createClient, currentModel, currentDetail, setUsageRecorder, isDeclinedSummary, shouldFallBack } = require("../llm_summarizer");
 const commitments = require("../commitments");
+const pictureSimilar = require("../picture_similar");
 const { notesSettings, syncNotes } = require("../vault_sync");
 const { runNotesAi, writeNotesStatus, recordSync } = require("../vault_ai");
 const digestEngine = require("../digest_engine");
@@ -291,6 +292,25 @@ const runDigests = async (db, client, { now, gate }) => {
   } catch (error) {
     common.warn(`总览/周报生成失败：${error.message}`);
     return [];
+  }
+};
+
+// Picture fingerprints (src/picture_similar.js) for pictures that have a
+// thumbnail and none yet: a share of each refresh's time after the briefing
+// is written, so a library of a hundred thousand is worked through over a
+// few refreshes.
+const FINGERPRINT_SECONDS = 40;
+const FINGERPRINT_LIMIT = 20000;
+const fingerprintPictures = (now) => {
+  const db = messageStore.openStore(common.storeDbPath);
+  const until = Date.now() + FINGERPRINT_SECONDS * 1000;
+  try {
+    return pictureSimilar.hashPending(db, path.dirname(common.storeDbPath), { limit: FINGERPRINT_LIMIT, deadline: () => Date.now() >= until, nowUnix: now });
+  } catch (error) {
+    common.warn(`图片指纹没有算完：${error.message}`);
+    return { failed: true };
+  } finally {
+    db.close();
   }
 };
 
@@ -668,6 +688,7 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
     ? await timed("briefing", () => runBriefing({ config, groupIds, now, force: values.force === true }))
     : { skipped: syncOnly ? "sync-only" : "disabled" };
   const notes = syncOnly ? { skipped: "sync-only" } : await timed("notes", () => syncNotesAfterRefresh(config, now));
+  const fingerprints = syncOnly ? { skipped: "sync-only" } : await timed("fingerprints", async () => fingerprintPictures(now));
 
   common.result("refreshResult", JSON.stringify({
     syncOnly,
@@ -678,6 +699,7 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
     lateFound,
     recovery,
     filePreviews,
+    fingerprints,
     textRepair,
     replyBackfill,
     // Where each group's window began: older messages of this tick came

@@ -122,3 +122,16 @@ html.phone .tray-dock { display: none; }
 .gallery-page.selecting .wall-save { display: none; }
 .wall-badge.saved { background: rgba(55, 65, 81, .9); }
 .gallery-detail-saved { overflow-wrap: anywhere; }
+
+/* 相似的图 / 以图搜图 (gallery_similar.js) */
+.gallery-similar-drop { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 12px; padding: 16px 18px; border: 2px dashed var(--line-strong); border-radius: 12px; background: var(--panel); transition: border-color var(--dur), background var(--dur); }
+.gallery-similar-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.gallery-similar-drop-text { display: grid; gap: 2px; flex: 1; min-width: 240px; }
+.gallery-similar-file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.gallery-similar-note { width: 100%; margin: 0; font-size: 13px; color: var(--risk, #b3261e); }
+.gallery-similar-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); }
+.gallery-similar-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; }
+.gallery-similar-text { display: grid; gap: 2px; flex: 1; min-width: 220px; font-size: 13px; }
+.wall-badge.similar { background: rgba(71, 85, 105, .92); }
+.wall-badge.similar.same { background: rgba(15, 120, 84, .92); }
+.wall-badge.similar.close { background: rgba(21, 101, 192, .9); }
