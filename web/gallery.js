@@ -494,7 +494,7 @@ const gallerySelectionNodes = () => {
       } }, "取消选择"),
       el("span", { class: "kb-results-spacer" }),
       el("button", { class: "btn small", type: "button", title: "退出多选（Esc），已选的会清空", onclick: leaveGallerySelection }, "退出多选")),
-    el("span", { class: "kb-meta" }, "点图选中，按住 Shift 连选。「另存到文件夹」复制一份到你的文件夹，「留存原图」存进本程序；腾讯只保留原图 31 天。"),
+    el("span", { class: "kb-meta" }, "按住 Shift 连选。"),
     (pictureTrays.list ?? []).length === 0 ? null : el("span", { class: "kb-meta gallery-key-hint" },
       "键盘：", trayKeyHint(), " 把选中的存到左边的托盘，", el("kbd", { class: "tray-key" }, "Esc"), " 退出多选"),
     gallerySaveTargetRow(),
@@ -528,9 +528,12 @@ const gallerySaveTargetRow = () => {
       target.saveDir === null ? null : el("button", { class: "btn small", type: "button", onclick: () => saveGalleryDir("") }, "改回每次新建文件夹"),
       el("button", { class: "btn small", type: "button", onclick: () => { replaceGallery({ editingSaveDir: false }); refreshGallerySelection(); } }, "取消"));
   }
+  // The folder is the reader's own choice: its name is enough here, the whole path is one hover or 「更改」 away.
+  const whole = target.saveDir ?? `${target.fallbackRoot}\\picture-export-<时间>`;
+  const name = target.saveDir === null ? "每次新建一个文件夹" : String(target.saveDir).split(/[\\/]+/u).filter(Boolean).at(-1) ?? target.saveDir;
   return el("div", { class: "gallery-save-target" },
     el("span", {}, "另存到："),
-    el("code", {}, target.saveDir ?? `${target.fallbackRoot}\\picture-export-<时间>（每次新建一个文件夹）`),
+    el("strong", { title: whole }, name),
     el("button", { class: "btn small", type: "button", onclick: () => { replaceGallery({ editingSaveDir: true }); refreshGallerySelection(); } },
       target.saveDir === null ? "改成固定文件夹" : "更改"));
 };

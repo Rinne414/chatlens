@@ -192,15 +192,12 @@ const startTrayDrag = (event, item, md5s) => {
     setTimeout(() => count.remove(), 0);
   }
   pictureTrays.dragging = true;
-  document.getElementById("tray-dock")?.classList.add("dragging");
+  showTrayDrop(md5s.length);
 };
 
 const endTrayDrag = () => {
   pictureTrays.dragging = false;
-  document.getElementById("tray-dock")?.classList.remove("dragging");
-  for (const node of document.querySelectorAll(".tray.over")) {
-    node.classList.remove("over");
-  }
+  hideTrayDrop();
   pictureTrays.onDragEnd();
 };
 
@@ -262,11 +259,11 @@ const trayEditForm = (tray) => {
       }, "移除托盘")));
 };
 
-// The end of the path is what tells two trays apart; the whole path is in the title.
-const trayPathLabel = (folder) => {
-  const parts = String(folder).split(/[\\/]+/u).filter((part) => part !== "");
-  return parts.length <= 3 ? folder : `…\\${parts.slice(-2).join("\\")}`;
-};
+/* The first thing seen is a number and a name: the reader chose the folders
+   and knows which is which. Where each one is on the disk, and the buttons to
+   change it, are one step away in 「管理」. */
+
+const trayKeyOf = (index) => (index < TRAY_KEYS ? String(index + 1) : "");
 
 const trayStatusText = (tray) => {
   const job = pictureTrays.jobs.get(tray.id);
@@ -276,54 +273,117 @@ const trayStatusText = (tray) => {
   return job.running ? `正在存 ${briefNumber(job.done)} / ${briefNumber(job.total)}…` : job.last;
 };
 
-const trayNode = (tray, index, { selected = [] } = {}) => {
-  if (pictureTrays.editing === tray.id) {
-    return el("div", { class: "tray editing" }, trayEditForm(tray));
-  }
-  const key = index < TRAY_KEYS ? String(index + 1) : "";
-  const status = trayStatusText(tray);
-  return el("div", {
-    class: "tray",
-    dataset: { tray: tray.id },
-    ondragover: (event) => {
-      if (event.dataTransfer.types.includes(TRAY_DRAG_TYPE)) {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
-        event.currentTarget.classList.add("over");
-      }
-    },
-    ondragleave: (event) => {
-      if (!event.currentTarget.contains(event.relatedTarget)) {
-        event.currentTarget.classList.remove("over");
-      }
-    },
-    ondrop: (event) => {
+/* --- while pictures are being dragged: where they can be dropped --- */
+
+const trayDropTile = (tray, index) => el("div", {
+  class: "tray-drop-tile",
+  dataset: { tray: tray.id },
+  ondragover: (event) => {
+    if (event.dataTransfer.types.includes(TRAY_DRAG_TYPE)) {
       event.preventDefault();
-      const md5s = draggedMd5s(event);
-      endTrayDrag();
-      saveToTrayAndTell(md5s, tray.id);
-    },
+      event.dataTransfer.dropEffect = "copy";
+      event.currentTarget.classList.add("over");
+    }
   },
-  el("div", { class: "tray-head" },
-    key === "" ? null : el("kbd", { class: "tray-key", title: index === 0 ? "看大图或多选时按 1 或 S，存到这里" : `看大图或多选时按 ${key}，存到这里` }, key),
-    el("strong", { class: "tray-name" }, tray.name),
-    el("button", {
-      class: "kb-linkish",
-      type: "button",
-      title: tray.path,
-      onclick: () => api("/api/pictures/export/open", { method: "POST", body: JSON.stringify({ folder: `tray:${tray.id}` }) }).catch((error) => notifyError(error)),
-    }, "打开"),
-    el("button", { class: "kb-linkish", type: "button", onclick: () => { pictureTrays.editing = tray.id; renderTrayDock(); } }, "改")),
-  el("code", { class: "tray-path", title: tray.path }, trayPathLabel(tray.path)),
-  selected.length === 0
-    ? null
-    : el("button", { class: "btn small primary tray-take", type: "button", onclick: () => saveToTrayAndTell(selected, tray.id) },
-      `存入已选的 ${briefNumber(selected.length)} 张`),
-  status === "" ? null : el("span", { class: "tray-status", "aria-live": "polite" }, status));
+  ondragleave: (event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      event.currentTarget.classList.remove("over");
+    }
+  },
+  ondrop: (event) => {
+    event.preventDefault();
+    const md5s = draggedMd5s(event);
+    endTrayDrag();
+    saveToTrayAndTell(md5s, tray.id);
+  },
+},
+el("span", { class: "tray-drop-number" }, trayKeyOf(index) || "·"),
+el("span", { class: "tray-drop-name" }, tray.name));
+
+// Comes up from the bottom when a drag starts and goes when it ends.
+const showTrayDrop = (count) => {
+  hideTrayDrop();
+  const trays = pictureTrays.list ?? [];
+  if (trays.length === 0) {
+    return;
+  }
+  document.body.append(el("div", { id: "tray-drop", class: "tray-drop", role: "group", "aria-label": "把图片放进一个托盘" },
+    el("p", { class: "tray-drop-title" }, count > 1 ? `把这 ${briefNumber(count)} 张放进哪个托盘` : "放进哪个托盘"),
+    el("div", { class: "tray-drop-grid" }, trays.map(trayDropTile))));
 };
+
+const hideTrayDrop = () => {
+  document.getElementById("tray-drop")?.remove();
+};
+
+/* --- 管理: names, folders, add and remove --- */
+
+const trayManageRow = (tray, index) => {
+  if (pictureTrays.editing === tray.id) {
+    return el("li", { class: "tray-row editing" }, trayEditForm(tray));
+  }
+  return el("li", { class: "tray-row" },
+    el("kbd", { class: "tray-key" }, trayKeyOf(index) || "·"),
+    el("div", { class: "tray-row-text" },
+      el("strong", {}, tray.name),
+      el("code", { class: "tray-path" }, tray.path)),
+    el("button", {
+      class: "btn small", type: "button",
+      onclick: () => api("/api/pictures/export/open", { method: "POST", body: JSON.stringify({ folder: `tray:${tray.id}` }) }).catch((error) => notifyError(error)),
+    }, "打开文件夹"),
+    el("button", { class: "btn small", type: "button", onclick: () => { pictureTrays.editing = tray.id; renderTrayDock(); } }, "改"));
+};
+
+const trayManageNodes = () => [
+  el("div", { class: "tray-manage-head" },
+    el("h3", {}, "存图托盘"),
+    el("button", { class: "btn small", type: "button", onclick: closeTrayManage }, "关闭")),
+  el("p", { class: "kb-meta" }, "拖图片时在屏幕下方出现；点开一张图或多选之后，按前面的数字也能存（第一个还可以按 S）。"),
+  el("ol", { class: "tray-rows" }, (pictureTrays.list ?? []).map(trayManageRow)),
+  pictureTrays.editing === "new"
+    ? el("div", { class: "tray-row editing" }, trayEditForm(null))
+    : el("button", { class: "btn small", type: "button", onclick: () => { pictureTrays.editing = "new"; renderTrayDock(); } }, "＋ 加一个托盘"),
+];
+
+const openTrayManage = () => {
+  if (document.getElementById("tray-manage") !== null) {
+    return;
+  }
+  const layer = el("div", {
+    id: "tray-manage", class: "cc-dialog-layer tray-manage-layer",
+    onclick: (event) => {
+      if (event.target === event.currentTarget) {
+        closeTrayManage();
+      }
+    },
+  }, el("div", { class: "cc-dialog tray-manage", role: "dialog", "aria-label": "存图托盘" }, trayManageNodes()));
+  document.body.append(layer);
+};
+
+const closeTrayManage = () => {
+  pictureTrays.editing = null;
+  document.getElementById("tray-manage")?.remove();
+};
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.getElementById("tray-manage") !== null) {
+    event.stopImmediatePropagation();
+    event.preventDefault();
+    closeTrayManage();
+  }
+}, true);
+
+/* --- the line in the filter column --- */
 
 // selected(): the md5s a tray's own button would save (the page's multi-selection).
 const trayDockOptions = { selected: () => [] };
+
+// One chip per tray while pictures are selected: its number and its name.
+const trayTakeChip = (tray, index, selected) => el("button", {
+  class: "tray-chip", type: "button",
+  title: `把选中的 ${briefNumber(selected.length)} 张存到「${tray.name}」`,
+  onclick: () => saveToTrayAndTell(selected, tray.id),
+}, trayKeyOf(index) === "" ? null : el("kbd", { class: "tray-key" }, trayKeyOf(index)), el("span", {}, tray.name));
 
 const trayDockNodes = () => {
   const trays = pictureTrays.list;
@@ -331,28 +391,34 @@ const trayDockNodes = () => {
     return [];
   }
   const selected = trayDockOptions.selected();
+  const status = trays.map(trayStatusText).filter((text) => text !== "").at(-1) ?? "";
   return [
     el("div", { class: "tray-dock-head" },
       el("strong", {}, "存图托盘"),
-      el("span", { class: "kb-meta" }, "把图片拖进来，原图就存进文件夹。点开一张图或多选之后，按托盘上的数字也行（第一个还可以按 S）")),
-    trays.map((tray, index) => trayNode(tray, index, { selected })),
-    pictureTrays.editing === "new"
-      ? el("div", { class: "tray editing" }, trayEditForm(null))
-      : el("button", { class: "kb-linkish tray-add", type: "button", onclick: () => { pictureTrays.editing = "new"; renderTrayDock(); } }, "＋ 加一个托盘"),
+      el("span", { class: "kb-meta" }, `${trays.length} 个`),
+      el("button", { class: "kb-linkish", type: "button", onclick: openTrayManage }, "管理")),
+    selected.length === 0
+      ? el("span", { class: "kb-meta tray-dock-how" }, "拖动图片就能存")
+      : el("div", { class: "tray-chips", role: "group", "aria-label": `把选中的 ${selected.length} 张存到` }, trays.map((tray, index) => trayTakeChip(tray, index, selected))),
+    status === "" ? null : el("span", { class: "tray-status", "aria-live": "polite" }, status),
   ];
 };
 
 // selected: () => md5s of the page's multi-selection.
 const trayDock = ({ selected = () => [] } = {}) => {
   trayDockOptions.selected = selected;
-  return el("aside", { id: "tray-dock", class: pictureTrays.dragging ? "tray-dock dragging" : "tray-dock", "aria-label": "存图托盘" }, trayDockNodes());
+  return el("aside", { id: "tray-dock", class: "tray-dock", "aria-label": "存图托盘" }, trayDockNodes());
 };
 
 const renderTrayDock = () => {
-  const node = document.getElementById("tray-dock");
+  const dock = document.getElementById("tray-dock");
+  if (dock !== null) {
+    setChildren(dock, trayDockNodes());
+  }
   // A form being typed in is not rebuilt by a save that finishes meanwhile.
-  if (node !== null && !(pictureTrays.editing !== null && node.contains(document.activeElement) && document.activeElement.tagName === "INPUT")) {
-    setChildren(node, trayDockNodes());
+  const manage = document.querySelector("#tray-manage .tray-manage");
+  if (manage !== null && !(pictureTrays.editing !== null && manage.contains(document.activeElement) && document.activeElement.tagName === "INPUT")) {
+    setChildren(manage, trayManageNodes());
   }
 };
 
