@@ -33,6 +33,7 @@ const topicThingsOps = require("./topic_things_ops");
 const briefThingsOps = require("./brief_things_ops");
 const vaultOps = require("./vault_ops");
 const picturePass = require("./picture_pass");
+const { queueOnComfy, graphOf } = require("../comfy_queue");
 const knowledgeExport = require("../knowledge_export");
 const { createRemoteDevices } = require("./remote_devices");
 const { createRemoteGateway } = require("./remote_gateway");
@@ -608,13 +609,30 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    // The picture's own ComfyUI graph, queued on this computer's ComfyUI.
+    if (request.method === "POST" && url.pathname === "/api/knowledge/comfy-queue") {
+      const hash = String((await readBody(request)).hash ?? "").toLowerCase();
+      const chunks = picturePass.workflow(hash);
+      if (chunks === null) {
+        sendError(response, 404, "这张图没有保存的工作流。");
+        return;
+      }
+      try {
+        sendJson(response, 200, await queueOnComfy({ chunks, baseUrl: state.loadConfig().comfyUrl }));
+      } catch (error) {
+        sendError(response, 502, error.message);
+      }
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/knowledge/image") {
       const image = knowledge.imageByHash(state.toolRoot, url.searchParams.get("hash"));
       if (image === null) {
         sendError(response, 404, "Not found");
         return;
       }
-      sendJson(response, 200, image);
+      // canQueue: the picture carries a graph ComfyUI can run as it is (「在本机 ComfyUI 排队」).
+      sendJson(response, 200, { ...image, canQueue: image.generator === "comfyui" && graphOf(picturePass.workflow(String(image.hash ?? "").toLowerCase())) !== null });
       return;
     }
 

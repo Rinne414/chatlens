@@ -227,7 +227,30 @@ const copyToClipboard = async (text, label) => {
   }
 };
 
-const promptBlock = (text, label, { truncated = false, clamp = true } = {}) => {
+// 「复制成 NAI 写法」 / 「复制成 WebUI 写法」: the same prompt with its emphasis
+// marks rewritten for the other kind of program (prompt_convert.js). Offered
+// only where the whole prompt is at hand and the prompt has marks to rewrite.
+const promptConvertButton = (text, label, generator) => {
+  const style = promptStyleOf(text, generator ?? "");
+  if (style === null) {
+    return null;
+  }
+  const toNai = style === "sd";
+  const converted = toNai ? promptToNai(text) : promptToSd(text);
+  if (converted === text.trim()) {
+    return null;
+  }
+  return el("button", {
+    class: "btn small",
+    type: "button",
+    title: toNai
+      ? "强调改成 NovelAI 的写法：(词:1.2) → 1.2::词::，去掉 LoRA 标记"
+      : "强调改成 WebUI / ComfyUI 的写法：1.2::词:: → (词:1.2)，词里的括号加反斜杠",
+    onclick: () => copyToClipboard(converted, `${label}（${toNai ? "NAI" : "WebUI"} 写法）`),
+  }, toNai ? "复制成 NAI 写法" : "复制成 WebUI 写法");
+};
+
+const promptBlock = (text, label, { truncated = false, clamp = true, generator = null } = {}) => {
   if (typeof text !== "string" || text.trim().length === 0) {
     return null;
   }
@@ -245,10 +268,12 @@ const promptBlock = (text, label, { truncated = false, clamp = true } = {}) => {
       // rather than silently copying a partial prompt.
       truncated
         ? el("span", { class: "kb-meta" }, "点图看完整")
-        : el("button", {
-          class: "btn small",
-          onclick: () => copyToClipboard(text, label),
-        }, "复制")),
+        : el("span", { class: "kb-prompt-actions" },
+          el("button", {
+            class: "btn small",
+            onclick: () => copyToClipboard(text, label),
+          }, "复制"),
+          generator === null ? null : promptConvertButton(text, label, generator))),
     el("p", { class: shouldClamp ? "kb-prompt-text clamped" : "kb-prompt-text" }, shown));
 };
 
@@ -873,8 +898,8 @@ const renderKnowledgeDetail = () => {
 };
 
 const knowledgeDetailInfo = (item, params) => [
-  promptBlock(item.prompt, "咒语", { clamp: false }),
-  promptBlock(item.negativePrompt, "负面咒语", { clamp: false }),
+  promptBlock(item.prompt, "咒语", { clamp: false, generator: item.generator ?? "" }),
+  promptBlock(item.negativePrompt, "负面咒语", { clamp: false, generator: item.generator ?? "" }),
   el("div", { class: "kb-detail-grid" },
     detailRow("模型", item.checkpoint),
     detailRow("模型 hash", item.modelHash),
@@ -905,6 +930,19 @@ const knowledgeDetailInfo = (item, params) => [
   knowledgeRelated(item),
 ];
 
+// Hands the picture's own workflow to the ComfyUI on this computer.
+const queueOnLocalComfy = async (item) => {
+  if (!await confirmInPage("把这张图的工作流交给这台电脑上的 ComfyUI 排队？\n它会照原样再出一张，要用到显卡；缺的模型或节点 ComfyUI 会说出来。", { confirmLabel: "排队" })) {
+    return;
+  }
+  try {
+    const result = await api("/api/knowledge/comfy-queue", { method: "POST", body: JSON.stringify({ hash: item.hash }) });
+    notify(`已经排进 ComfyUI${result.number === null ? "" : `（队列第 ${result.number} 号）`}。到 ComfyUI 的窗口看进度。`);
+  } catch (error) {
+    notifyError(error);
+  }
+};
+
 const knowledgePictureActions = (item) => {
   if (!PICTURE_MD5.test(String(item.hash ?? ""))) {
     return null;
@@ -926,6 +964,13 @@ const knowledgePictureActions = (item) => {
         class: "btn small",
         onclick: () => downloadPictureWorkflow(item.hash).catch((error) => notifyError(error)),
       }, "下载工作流")
+      : null,
+    item.canQueue === true
+      ? el("button", {
+        class: "btn small desktop-action",
+        title: "把这张图自带的工作流交给这台电脑上开着的 ComfyUI 排队，照原样再出一张",
+        onclick: () => queueOnLocalComfy(item),
+      }, "在本机 ComfyUI 排队")
       : null,
     item.hasFile
       ? null

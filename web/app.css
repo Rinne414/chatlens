@@ -1127,3 +1127,6 @@ html.phone .cc-notices { bottom: 84px; }
 .place-link { text-decoration: underline; text-underline-offset: 2px; }
 .backup-rescue-where { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 #view-settings > .card { scroll-margin-top: 62px; }
+
+/* 咒语: 复制 beside 复制成另一种写法 (knowledge.js promptConvertButton) */
+.kb-prompt-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }

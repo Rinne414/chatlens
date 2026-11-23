@@ -348,8 +348,8 @@ test("knowledge overlay does not re-clamp the prompt the card promised in full",
   // Cards say 点图看完整 after a 320-char slice. If the overlay also slices,
   // clicking a thumb still shows the same truncated prompt.
   const source = fs.readFileSync(path.join(WEB, "knowledge.js"), "utf8");
-  assert.match(source, /promptBlock\(item\.prompt,\s*"咒语",\s*\{\s*clamp:\s*false\s*\}\)/u);
-  assert.match(source, /promptBlock\(item\.negativePrompt,\s*"负面咒语",\s*\{\s*clamp:\s*false\s*\}\)/u);
+  assert.match(source, /promptBlock\(item\.prompt,\s*"咒语",\s*\{\s*clamp:\s*false[^}]*\}\)/u);
+  assert.match(source, /promptBlock\(item\.negativePrompt,\s*"负面咒语",\s*\{\s*clamp:\s*false[^}]*\}\)/u);
   assert.match(
     source,
     /const shouldClamp = clamp && \(truncated \|\| text\.length > PROMPT_CLAMP_CHARS\)/u,
