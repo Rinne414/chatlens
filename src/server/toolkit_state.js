@@ -424,14 +424,20 @@ const getStoreMessages = (query) => {
     limit: Number.parseInt(query.limit ?? "300", 10),
     search: typeof query.q === "string" ? query.q : undefined,
     mediaOnly: query.media === "1",
+    speakerUin: typeof query.speaker === "string" ? query.speaker : "",
   });
+  // What each reply quotes, so the chat can show it and jump to it.
+  const quoted = messageStore.repliedMessages(db, groupId, result.messages);
 
   // Picture facts for media rows, so the chat can show every picture (the
   // console fetches it from Tencent when QQ never saved it).
   const byRow = pictureStore.picturesForRows(db, groupId, result.messages.filter((message) => message.isMedia === 1).map((message) => message.rowId));
-  const messages = result.messages.map((message) => (byRow.has(message.rowId)
-    ? { ...message, pictures: byRow.get(message.rowId).map(({ rowId, seq, ...picture }) => picture) }
-    : message));
+  const messages = result.messages.map(({ replyToSeq, ...message }) => ({
+    ...message,
+    ...(byRow.has(message.rowId) ? { pictures: byRow.get(message.rowId).map(({ rowId, seq, ...picture }) => picture) } : {}),
+    // isReply: it quotes something, even when the quoted message is too old to be found.
+    ...(replyToSeq ? { isReply: true, replyTo: quoted.get(message.rowId) ?? null } : {}),
+  }));
 
   return {
     ...result,
@@ -441,6 +447,24 @@ const getStoreMessages = (query) => {
     // So the chat can mark what is addressed to you.
     selfUins: messageStore.getSelfIdentity(db).uins,
   };
+};
+
+// Where in one group I was @ed or replied to lately, oldest first, for the
+// chat's 「上一条 / 下一条 @你」.
+const CHAT_MENTION_DAYS = 30;
+const getChatMentions = (query) => {
+  const groupId = String(query.groupId ?? "");
+  if (!/^\d+$/u.test(groupId)) {
+    throw new Error("groupId is required");
+  }
+  const db = getStore();
+  const now = Math.floor(Date.now() / 1000);
+  const identity = messageStore.getSelfIdentity(db, messageStore.selfUinsFromDataPath(loadConfig().ntDbDir));
+  const mentions = messageStore.getMentions(db, { fromUnix: now - CHAT_MENTION_DAYS * 86400, toUnix: now + 60, groupIds: [groupId], identity })
+    .filter((item) => item.kind === "at" || item.kind === "reply")
+    .map((item) => ({ rowId: item.rowId, sentAt: item.sentAt }))
+    .reverse();
+  return { days: CHAT_MENTION_DAYS, mentions };
 };
 
 // Before the briefing's first "看完了" (or on a store without it) nothing is
@@ -856,6 +880,7 @@ module.exports = {
   getRunDetail,
   isPathAllowedToOpen,
   getStoreMessages,
+  getChatMentions,
   resolvePasteCursor,
   getStoreOverview,
   getStoreTimeline,

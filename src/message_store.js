@@ -210,12 +210,63 @@ const ingestExport = (db, exportData, runId) => {
   return { inserted };
 };
 
-const queryMessages = (db, { groupId, fromUnix, toUnix, afterSentAt, afterRowId, beforeSentAt, beforeRowId, limit, search, mediaOnly = false }) => {
+// How far back the message a reply quotes is looked for.
+const REPLY_LOOKBACK_SECONDS = 30 * 86400;
+const REPLY_QUOTE_CHARS = 120;
+
+// The messages a page's replies quote: Map of row id (the reply) -> { rowId,
+// sentAt, speaker, text, isMedia } (the quoted one). One pass over the stretch
+// before the page instead of a lookup per reply (there is no index by msg_seq).
+// A reply whose original is older than the lookback, or was never stored, is
+// simply absent.
+const repliedMessages = (db, groupId, messages) => {
+  const replies = messages.filter((message) => message.replyToSeq);
+  if (replies.length === 0) {
+    return new Map();
+  }
+  const first = Math.min(...replies.map((message) => message.sentAt));
+  const last = Math.max(...replies.map((message) => message.sentAt));
+  const originals = new Map(db.prepare(`
+    SELECT msg_seq AS seq, row_id AS rowId, sent_at AS sentAt, speaker, text, is_media AS isMedia
+    FROM messages
+    WHERE group_id = @groupId AND sent_at >= @from AND sent_at <= @to
+      AND msg_seq IN (SELECT value FROM json_each(@seqs))
+    ORDER BY sent_at
+  `).all({
+    groupId: String(groupId),
+    from: first - REPLY_LOOKBACK_SECONDS,
+    to: last,
+    seqs: JSON.stringify([...new Set(replies.map((message) => message.replyToSeq))]),
+  }).map((row) => [row.seq, row]));
+  const found = new Map();
+  for (const reply of replies) {
+    const original = originals.get(reply.replyToSeq);
+    // A sequence number can come round again: the quoted message is never newer than the reply.
+    if (original !== undefined && original.sentAt <= reply.sentAt && original.rowId !== reply.rowId) {
+      const chars = [...original.text];
+      found.set(reply.rowId, {
+        rowId: original.rowId,
+        sentAt: original.sentAt,
+        speaker: original.speaker,
+        text: chars.length > REPLY_QUOTE_CHARS ? `${chars.slice(0, REPLY_QUOTE_CHARS).join("")}…` : original.text,
+        isMedia: original.isMedia,
+      });
+    }
+  }
+  return found;
+};
+
+const queryMessages = (db, { groupId, fromUnix, toUnix, afterSentAt, afterRowId, beforeSentAt, beforeRowId, limit, search, mediaOnly = false, speakerUin = "" }) => {
   const conditions = ["group_id = @groupId"];
   if (mediaOnly) {
     conditions.push("is_media = 1");
   }
   const params = { groupId: String(groupId) };
+  // One person's messages, by QQ number (a name can be shared or change).
+  if (/^\d{5,}$/u.test(String(speakerUin))) {
+    conditions.push("speaker_uin = @speakerUin");
+    params.speakerUin = String(speakerUin);
+  }
 
   if (Number.isFinite(fromUnix)) {
     conditions.push("sent_at >= @fromUnix");
@@ -246,7 +297,7 @@ const queryMessages = (db, { groupId, fromUnix, toUnix, afterSentAt, afterRowId,
   const rows = db
     .prepare(`
       SELECT group_id AS groupId, row_id AS rowId, sent_at AS sentAt, speaker, text, is_media AS isMedia, media_kinds AS mediaKinds, speaker_uin AS speakerUin,
-             at_uins AS atUins, at_all AS atAll, reply_to_uin AS replyToUin, is_self AS isSelf
+             at_uins AS atUins, at_all AS atAll, reply_to_uin AS replyToUin, reply_to_seq AS replyToSeq, is_self AS isSelf
       FROM messages
       WHERE ${conditions.join(" AND ")}
       ORDER BY sent_at ${order}, row_id ${order}
@@ -733,6 +784,7 @@ const getMentions = (db, { fromUnix, toUnix, groupIds, identity }) => {
 };
 
 module.exports = {
+  repliedMessages,
   selfUinsFromDataPath,
   getSelfIdentity,
   getMentions,

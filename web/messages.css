@@ -72,3 +72,21 @@
    layout folds them behind 「选项」 (phone.css). */
 .chat-tools-actions, .chat-tools { display: contents; }
 .btn.chat-tools-toggle { display: none; }
+
+/* 消息: quotes, one person's messages, @你 steps, the way back (messages_reading.js) */
+.reply-quote { display: flex; gap: 6px; align-items: baseline; width: 100%; max-width: 46ch; margin: 0 0 4px; padding: 3px 8px; border: 0; border-left: 3px solid var(--line-strong); border-radius: 4px; background: var(--bg); color: var(--muted); font: inherit; font-size: .88em; line-height: 1.5; text-align: left; overflow: hidden; }
+button.reply-quote { cursor: pointer; }
+button.reply-quote:hover, button.reply-quote:focus-visible { border-left-color: var(--accent); color: var(--ink); outline: none; }
+.reply-quote strong { flex: none; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.reply-quote span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-quote.lost { font-style: italic; }
+.msg-row .reply-quote { display: inline-flex; width: auto; max-width: 34ch; margin: 0 8px 0 0; vertical-align: bottom; }
+.chat-speaker-button { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.chat-speaker-button:hover, .chat-speaker-button:focus-visible { color: var(--accent); text-decoration: underline; outline: none; }
+.chat-speaker-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 12.5px; font-weight: 600; }
+.chat-speaker-chip button { border: 0; background: none; color: inherit; font: inherit; font-size: 15px; line-height: 1; padding: 0 4px; cursor: pointer; }
+.chat-mention-nav { display: inline-flex; align-items: center; gap: 4px; }
+.chat-mention-nav:empty { display: none; }
+.chat-mention-count { margin-right: 2px; padding: 1px 7px; border-radius: 6px; background: var(--risk-soft); color: var(--risk); font-size: 12px; font-weight: 700; }
+.chat-reading-bar { position: absolute; left: 50%; bottom: 14px; z-index: 4; display: flex; gap: 6px; transform: translateX(-50%); padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
+.chat-reading-bar:empty { display: none; }

@@ -149,3 +149,32 @@ test("a reply some minutes after my question is news unless I spoke again after 
     db.close();
   }
 });
+
+test("a page of messages says what each reply quotes, and one person's messages can be asked for alone", () => {
+  const db = openTemp();
+  try {
+    messageStore.ingestExport(db, exportOf([
+      msg(1, 1100, { text: "谁有这个 LoRA", senderUin: "33333", senderName: "Bob" }),
+      msg(2, 1200, { text: "我有，晚点发", replyTo: { uin: "33333", seq: "501", sentAt: 1100 } }),
+      msg(3, 1300, { text: "回一条没存到的", replyTo: { uin: "444", seq: "9999", sentAt: 900 } }),
+      msg(4, 1400, { text: "x".repeat(300), senderUin: "33333", senderName: "Bob" }),
+      msg(5, 1500, { text: "太长了", replyTo: { uin: "33333", seq: "504", sentAt: 1400 } }),
+    ]), "run-1");
+    const page = messageStore.queryMessages(db, { groupId: "1001", limit: 50 }).messages;
+    const quoted = messageStore.repliedMessages(db, "1001", page);
+    assert.deepEqual([...quoted.keys()], ["2", "5"]);
+    assert.deepEqual({ ...quoted.get("2") }, { rowId: "1", sentAt: 1100, speaker: "Bob", text: "谁有这个 LoRA", isMedia: 0 });
+    assert.equal([...quoted.get("5").text].length, 121);
+    // A page that starts after the quoted message still finds it.
+    const later = messageStore.queryMessages(db, { groupId: "1001", fromUnix: 1150, limit: 50 }).messages;
+    assert.equal(messageStore.repliedMessages(db, "1001", later).get("2").rowId, "1");
+    assert.equal(messageStore.repliedMessages(db, "1001", page.filter((message) => !message.replyToSeq)).size, 0);
+
+    const bob = messageStore.queryMessages(db, { groupId: "1001", limit: 50, speakerUin: "33333" }).messages;
+    assert.deepEqual(bob.map((message) => message.rowId), ["1", "4"]);
+    // Not a QQ number: ignored rather than matched against anything.
+    assert.equal(messageStore.queryMessages(db, { groupId: "1001", limit: 50, speakerUin: "1 OR 1=1" }).messages.length, 5);
+  } finally {
+    db.close();
+  }
+});

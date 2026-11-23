@@ -318,6 +318,11 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/messages/mentions") {
+      sendJson(response, 200, state.getChatMentions(Object.fromEntries(url.searchParams)));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/store-overview") {
       sendJson(response, 200, state.getStoreOverview());
       return;

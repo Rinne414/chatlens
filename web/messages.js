@@ -106,6 +106,9 @@ const buildMessagesQuery = (reset) => {
   if (msg.mediaOnly) {
     params.set("media", "1");
   }
+  if (chatReading.speaker !== null) {
+    params.set("speaker", chatReading.speaker.uin);
+  }
   if (!reset && msg.items.length > 0) {
     const last = msg.items.at(-1);
     params.set("afterSentAt", String(last.sentAt));
@@ -253,6 +256,9 @@ const loadOlderMessages = async () => {
     if (msg.mediaOnly) {
       params.set("media", "1");
     }
+    if (chatReading.speaker !== null) {
+      params.set("speaker", chatReading.speaker.uin);
+    }
     const result = await api(`/api/messages?${params}`);
     if (isStaleLoad(generation, groupId)) {
       return NO_PAGE;
@@ -291,6 +297,9 @@ const loadNewestPage = async () => {
     }
     if (msg.mediaOnly) {
       params.set("media", "1");
+    }
+    if (chatReading.speaker !== null) {
+      params.set("speaker", chatReading.speaker.uin);
     }
     const result = await api(`/api/messages?${params}`);
     if (isStaleLoad(generation, groupId)) {
@@ -332,6 +341,8 @@ const openChat = async ({ groupId, groupName, fromUnix, toUnix, fromLastRead, or
   msg.mode = "chat";
   msg.groupId = groupId;
   msg.groupName = groupName ?? msg.overview?.groups?.find((group) => group.groupId === groupId)?.name ?? groupId;
+  resetChatReading();
+  loadChatMentions();
   msg.q = "";
   msg.items = [];
   msg.coverage = null;
@@ -506,6 +517,12 @@ const scheduleAutoRead = (sentAt, rowId) => {
   // an open-but-backgrounded chat used to mark messages read that the user
   // never saw, making "从上次已读" skip past them.
   if (document.hidden) {
+    return;
+  }
+  // Nor while looking somewhere else than where the reading stopped: a jump
+  // to a quoted message or to an @, or one person's messages alone, would
+  // move the mark past everything not read in between.
+  if (chatReadingHoldsReadMark()) {
     return;
   }
   const seen = msgObservers.maxSeen;
@@ -809,6 +826,7 @@ const chatMessageNode = (item, inSelection, mediaFiles) => {
       onSelectMessage(item);
     },
   },
+    replyQuoteNode(item),
     body,
     el("time", {}, unixToHkt(item.sentAt).slice(11, 16)));
 };
@@ -834,8 +852,8 @@ const compactMessageNode = (item, inSelection) => {
     },
   },
     el("time", {}, unixToHkt(item.sentAt).slice(5, 16)),
-    el("span", { class: "msg-speaker" }, item.speaker),
-    el("span", { class: "msg-text" }, displayText(item)));
+    chatSpeakerName(item, "msg-speaker"),
+    el("span", { class: "msg-text" }, replyQuoteNode(item), displayText(item)));
 };
 
 // Chat nodes for `items`, continuing after `prev` (the message rendered just
@@ -887,7 +905,7 @@ const buildChatNodes = (items, { prev = null, openBody = null, dividerPlaced = a
         && bubbleBody !== null;
       if (!sameGroup) {
         bubbleBody = el("div", { class: "bg-col" },
-          el("div", { class: "bg-head" }, item.speaker, el("time", {}, shortTime(item.sentAt))));
+          el("div", { class: "bg-head" }, chatSpeakerName(item, "bg-name"), el("time", {}, shortTime(item.sentAt))));
         nodes.push(el("div", { class: "bubble-group" },
           avatarEl(item.speaker, item.speaker, "sm", userAvatarUrl(item.speakerUin)), bubbleBody));
       }
@@ -1062,6 +1080,7 @@ const renderChat = () => {
           "aria-pressed": String(msg.mediaOnly),
           onclick: toggleMediaOnly,
         }, "只看图片"),
+        chatMentionNav(),
         el("button", {
           class: msg.panel ? "btn small active" : "btn small",
           type: "button",
@@ -1073,6 +1092,7 @@ const renderChat = () => {
       rangeStatus,
       el("div", { class: "row" },
         chatRangeChips(),
+        chatSpeakerChip(),
         el("input", {
           type: "text",
           placeholder: "跳到时间 例如 2026-07-04 14:30",
@@ -1115,7 +1135,7 @@ const renderChat = () => {
 
   setChildren($("#view-messages"), header,
     el("div", { class: msg.panel ? "chat-body with-panel" : "chat-body" },
-      el("div", { class: "chat-wrap" }, list, toBottom),
+      el("div", { class: "chat-wrap" }, list, chatReadingBar(), toBottom),
       msg.panel ? el("aside", { id: "chat-panel", class: "chat-panel" }, chatPanelBody()) : null),
     selectionBar);
   setupChatObservers(list);
