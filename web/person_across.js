@@ -82,6 +82,6 @@ const personAcrossPage = (data) => {
     personAcrossHeader(data),
     personAcrossNetwork(data),
     el("div", { class: "gp-grid" },
-      el("div", { class: "gp-col" }, personTrend(data, names), personExtrasMain(data), personMessageList(data, names)),
+      el("div", { class: "gp-col" }, personTrend(data, names), personaSection(data), personExtrasMain(data), personMessageList(data, names)),
       el("div", { class: "gp-col" }, personAcrossGroups(data), personChanges(data), personHours(data), personAcrossPartners(data), personExtrasSide(data))));
 };

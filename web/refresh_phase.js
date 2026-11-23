@@ -5,6 +5,7 @@
 
 // The refresh's step names (src/pipeline/refresh_run.js) in the reader's words.
 const REFRESH_PHASES = {
+  mirror: "同步聊天数据库",
   export: "读取新消息",
   lateExport: "读取新消息",
   recoveryExport: "读取新消息",

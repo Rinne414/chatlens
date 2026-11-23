@@ -588,6 +588,8 @@ const refreshIn = async (workDir, { config, values, groupIds, starts, earliest, 
   };
 
   let mirrorMs = 0;
+  // The first and often the longest step (minutes on a large database).
+  common.progress("phase:mirror");
   try {
     await common.withFreshMirror(config, "background", async (mirror) => {
       mirrorMs = mirror.elapsedMs;

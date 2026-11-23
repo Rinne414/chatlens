@@ -14,6 +14,7 @@ const llmOps = require("./llm_ops");
 const grokOps = require("./grok_ops");
 const digestOps = require("./digest_ops");
 const askOps = require("./ask_ops");
+const personaOps = require("./persona_ops");
 const reviewOps = require("./review_ops");
 const knowledgeAigc = require("./knowledge_aigc");
 const backupOps = require("./backup_ops");
@@ -402,6 +403,21 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
         fromUnix: url.searchParams.get("fromUnix"),
         toUnix: url.searchParams.get("toUnix"),
       }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/persona") {
+      sendJson(response, 200, personaOps.startPersona(await readBody(request)));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/persona") {
+      sendJson(response, 200, personaOps.getPersona({ uin: url.searchParams.get("uin") }));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/persona/delete") {
+      sendJson(response, 200, personaOps.deletePersona(await readBody(request)));
       return;
     }
 

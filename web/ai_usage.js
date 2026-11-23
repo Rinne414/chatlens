@@ -17,6 +17,7 @@ const AI_PURPOSE_LABELS = {
   digest: "日报、周报和月报",
   commitments: "简报：找出答应过的事",
   ask: "问群聊的回答",
+  persona: "个人页的角色卡",
   redo: "用详细模式重做过去的摘要",
   probe: "检查 AI 服务能不能连上",
   "notes-aliases": "笔记库：认出不同写法的同一个东西",

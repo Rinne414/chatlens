@@ -103,6 +103,7 @@ const loadPersonPage = () => {
   loadPersonMessages();
   loadPersonData();
   loadPersonExtras();
+  loadPersona(app.groupPage.person);
 };
 
 // Back to a page already shown (same person, group, kind and range): draw
@@ -123,6 +124,7 @@ const showPersonPage = (patch, step) => {
   if (kept) {
     loadPersonData();
     loadPersonExtras();
+    loadPersona(app.groupPage.person);
     return;
   }
   loadPersonPage();
@@ -404,6 +406,6 @@ const groupPersonPage = () => {
   return el("div", { class: `gp-page pp-page ${page.personLoading ? "is-loading" : ""}` },
     personHeader(data),
     el("div", { class: "gp-grid" },
-      el("div", { class: "gp-col" }, personTrend(data, names), personExtrasMain(data), personMessageList(data, names)),
+      el("div", { class: "gp-col" }, personTrend(data, names), personaSection(data), personExtrasMain(data), personMessageList(data, names)),
       el("div", { class: "gp-col" }, personChanges(data), personHours(data), personPartners(data), personExtrasSide(data), personOtherGroups(data))));
 };
