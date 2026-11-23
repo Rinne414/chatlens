@@ -150,7 +150,7 @@ const cleanCard = (raw, known) => {
     voice: {
       tone: text(raw.voice?.tone, 400),
       sentences: text(raw.voice?.sentences, 600),
-      catchphrases: list(raw.voice?.catchphrases).map((item) => text(item, 40)).filter(Boolean).slice(0, 8),
+      catchphrases: list(raw.voice?.catchphrases).map((item) => text(item, 40)).filter((item) => item !== "" && !/^nt_\d+$/u.test(item)).slice(0, 8),
     },
     stances: points.stances.slice(0, MAX_POINTS),
     attitudes: points.attitudes.slice(0, MAX_POINTS),

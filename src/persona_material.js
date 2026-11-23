@@ -27,7 +27,8 @@ const MAX_BATCHES = 6;
 
 const length = (text) => [...String(text ?? "")].length;
 const clip = (text) => {
-  const chars = [...String(text ?? "").replace(/\s+/gu, " ").trim()];
+  // A sticker's stand-in ("nt_1") is not something the person said.
+  const chars = [...String(text ?? "").replace(/\bnt_\d+\b/gu, " ").replace(/\s+/gu, " ").trim()];
   return chars.length > LINE_MAX_CHARS ? `${chars.slice(0, LINE_MAX_CHARS).join("")}…` : chars.join("");
 };
 // Sticker and picture placeholders say nothing about how someone talks.
