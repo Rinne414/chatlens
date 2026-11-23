@@ -144,7 +144,7 @@ const saveToTray = (md5s, trayId) => {
     const text = trayResultText(tray, result);
     job.last = text;
     if (result.made.length > 0) {
-      pictureTrays.lastSave = { trayId: tray.id, name: tray.name, items: result.made };
+      pictureTrays.lastSave = { trayId: tray.id, name: tray.name, items: result.made, at: Date.now() };
     }
     return { text, failed: result.error !== null || result.saved.length === 0 };
   });
@@ -160,7 +160,18 @@ const saveToTray = (md5s, trayId) => {
 /* --- taking the last save back --- */
 
 const TRAY_UNDO_BATCH = 200;
-const TRAY_UNDO_KEPT = { changed: "存了之后被改过", "too-old": "存了超过一小时", "not-ours": "不是这次存的" };
+// Ctrl+Z long after a save would be a surprise: the last save can be taken back this long.
+const TRAY_UNDO_MS = 5 * 60 * 1000;
+const TRAY_UNDO_KEPT = { changed: "存了之后被改过或换过", "too-old": "存了超过一小时", "not-ours": "不是这次存的", busy: "正被别的程序占用，可以再撤销一次" };
+
+// The last save while it can still be taken back, else null.
+const undoableTraySave = () => {
+  const last = pictureTrays.lastSave;
+  if (last !== null && Date.now() - last.at > TRAY_UNDO_MS) {
+    pictureTrays.lastSave = null;
+  }
+  return pictureTrays.lastSave;
+};
 
 const trayUndoText = (name, results) => {
   const gone = results.filter((item) => item.status === "undone" || item.status === "gone").length;
@@ -177,7 +188,7 @@ const trayUndoText = (name, results) => {
 // Removes the copies the last save made from their folder. Resolves to the
 // sentence that says what happened (null when there was nothing to take back).
 const undoLastTraySave = async () => {
-  const last = pictureTrays.lastSave;
+  const last = undoableTraySave();
   if (last === null) {
     return null;
   }
@@ -191,7 +202,13 @@ const undoLastTraySave = async () => {
   } catch (error) {
     notifyError(error);
   }
-  const text = results.length === 0 ? "没有撤销成。" : trayUndoText(last.name, results);
+  // What was not reached (the request failed) or was busy can be tried again.
+  const answered = new Map(results.map((item) => [`${item.md5}/${item.file}`, item.status]));
+  const again = last.items.filter((item) => [undefined, "busy"].includes(answered.get(`${item.md5}/${item.file}`)));
+  if (again.length > 0) {
+    pictureTrays.lastSave = { ...last, items: again };
+  }
+  const text = results.length === 0 ? "没有撤销成，可以再试一次。" : trayUndoText(last.name, results);
   const job = pictureTrays.jobs.get(last.trayId);
   if (job !== undefined) {
     job.last = text;
@@ -459,7 +476,7 @@ const trayDockNodes = () => {
       ? el("span", { class: "kb-meta tray-dock-how" }, "拖动图片就能存")
       : el("div", { class: "tray-chips", role: "group", "aria-label": `把选中的 ${selected.length} 张存到` }, trays.map((tray, index) => trayTakeChip(tray, index, selected))),
     status === "" ? null : el("span", { class: "tray-status", "aria-live": "polite" }, status,
-      pictureTrays.lastSave === null ? null : [" ", el("button", {
+      undoableTraySave() === null ? null : [" ", el("button", {
         class: "kb-linkish", type: "button", title: "把刚才存的从文件夹里拿走（Ctrl+Z）", onclick: undoLastTraySave,
       }, "撤销")]),
   ];

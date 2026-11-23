@@ -181,6 +181,8 @@ const loadGallery = async ({ append = false } = {}) => {
       results: { total: page.total, items: [...previous, ...page.items.filter((item) => !seen.has(item.md5))] },
       loading: false,
       loadingMore: false,
+      // The date rail asks for its days again after a load from the start (gallery_rail.js).
+      ...(append ? {} : { loadedAt: Date.now() }),
     });
     if (append && app.view === "media" && wallSetEntries(GALLERY_WALL_KEY, galleryEntries())) {
       updateGalleryTexts();

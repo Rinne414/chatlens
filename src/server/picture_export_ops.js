@@ -20,7 +20,7 @@ const { promptFor, sidecarText } = require("../knowledge_export");
 const { newFolderName, isFolderName, extensionOf, fileStem, uniqueName } = require("../picture_export");
 const { validateTargetDir } = require("./backup_ops");
 const trayList = require("../picture_trays");
-const { undoSave } = require("../picture_save_undo");
+const { undoSave, noteMade } = require("../picture_save_undo");
 
 const MAX_PER_REQUEST = 10;
 const MD5 = /^[a-f0-9]{32}$/u;
@@ -111,7 +111,10 @@ const exportOne = async (directory, md5, { once = false } = {}) => {
     const name = uniqueName(directory, fileStem(md5, firstPosting(md5)), extensionOf(source.filePath));
     fs.copyFileSync(source.filePath, path.join(directory, name), fs.constants.COPYFILE_EXCL);
     noteSaved(md5, directory, name);
-    return { md5, status: "exported", file: name, prompt: writeSidecar(directory, name, md5), previewOnly: source.previewOnly === true };
+    const prompt = writeSidecar(directory, name, md5);
+    // What exactly was written, so an undo removes it only while it is still that.
+    noteMade(directory, name, { sidecar: prompt });
+    return { md5, status: "exported", file: name, prompt, previewOnly: source.previewOnly === true };
   } finally {
     if (source.temporary) {
       fs.rmSync(source.filePath, { force: true });

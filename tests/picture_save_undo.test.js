@@ -8,22 +8,26 @@ const test = require("node:test");
 const messageStore = require("../src/message_store");
 const pictureStore = require("../src/picture_store");
 const gallery = require("../src/gallery_store");
-const { undoSave, UNDO_WINDOW_SECONDS } = require("../src/picture_save_undo");
+const { undoSave, noteMade, UNDO_WINDOW_SECONDS } = require("../src/picture_save_undo");
 
 const A = "a".repeat(32);
 const B = "b".repeat(32);
 const NOW = Math.floor(Date.now() / 1000);
 
-// A store and a folder of the user's with one picture saved into it just now.
-const withSavedPicture = (work) => {
+// A store and a folder of the user's with one picture (and its prompt file)
+// saved into it just now, the way the export does it.
+const withSavedPicture = (work, { sidecar = true } = {}) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "undo-"));
   const folder = path.join(root, "好图");
   fs.mkdirSync(folder);
   const db = messageStore.openStore(path.join(root, "messages.db"));
   try {
     fs.writeFileSync(path.join(folder, "pic.png"), "picture");
-    fs.writeFileSync(path.join(folder, "pic.txt"), "prompt");
+    if (sidecar) {
+      fs.writeFileSync(path.join(folder, "pic.txt"), "prompt");
+    }
     pictureStore.recordSave(db, { md5: A, dir: folder, file: "pic.png", savedAt: NOW });
+    noteMade(folder, "pic.png", { sidecar });
     work({ db, folder });
   } finally {
     db.close();
@@ -32,10 +36,11 @@ const withSavedPicture = (work) => {
 };
 
 const marks = (db) => pictureStore.savesOf(db, A).length;
+const undo = (db, folder, extra = {}) => undoSave(db, { md5: A, dir: folder, file: "pic.png", nowUnix: NOW + 30, ...extra });
 
 test("a save just made is taken back: the copy, its prompt file and the mark", () => {
   withSavedPicture(({ db, folder }) => {
-    assert.equal(undoSave(db, { md5: A, dir: folder, file: "pic.png", nowUnix: NOW + 30 }), "undone");
+    assert.equal(undo(db, folder), "undone");
     assert.deepEqual(fs.readdirSync(folder), []);
     assert.equal(marks(db), 0);
   });
@@ -44,9 +49,9 @@ test("a save just made is taken back: the copy, its prompt file and the mark", (
 test("a file the user put there, or another picture's name, is never removed", () => {
   withSavedPicture(({ db, folder }) => {
     fs.writeFileSync(path.join(folder, "mine.png"), "mine");
-    assert.equal(undoSave(db, { md5: A, dir: folder, file: "mine.png", nowUnix: NOW + 30 }), "not-ours");
-    assert.equal(undoSave(db, { md5: B, dir: folder, file: "pic.png", nowUnix: NOW + 30 }), "not-ours");
-    assert.equal(undoSave(db, { md5: A, dir: path.dirname(folder), file: "pic.png", nowUnix: NOW + 30 }), "not-ours");
+    assert.equal(undo(db, folder, { file: "mine.png" }), "not-ours");
+    assert.equal(undo(db, folder, { md5: B }), "not-ours");
+    assert.equal(undo(db, path.dirname(folder)), "not-ours");
     assert.deepEqual(fs.readdirSync(folder).sort(), ["mine.png", "pic.png", "pic.txt"]);
     assert.equal(marks(db), 1);
   });
@@ -54,37 +59,75 @@ test("a file the user put there, or another picture's name, is never removed", (
 
 test("a name that points outside the folder is refused", () => {
   withSavedPicture(({ db, folder }) => {
-    fs.writeFileSync(path.join(path.dirname(folder), "outside.png"), "x");
+    const outside = path.join(path.dirname(folder), "outside.png");
+    fs.writeFileSync(outside, "x");
     pictureStore.recordSave(db, { md5: A, dir: folder, file: "..\\outside.png", savedAt: NOW });
-    assert.equal(undoSave(db, { md5: A, dir: folder, file: "..\\outside.png", nowUnix: NOW + 30 }), "not-ours");
-    assert.equal(undoSave(db, { md5: A, dir: folder, file: "../outside.png", nowUnix: NOW + 30 }), "not-ours");
-    assert.ok(fs.existsSync(path.join(path.dirname(folder), "outside.png")));
+    noteMade(path.dirname(folder), "outside.png");
+    assert.equal(undo(db, folder, { file: "..\\outside.png" }), "not-ours");
+    assert.equal(undo(db, folder, { file: "../outside.png" }), "not-ours");
+    assert.ok(fs.existsSync(outside));
   });
 });
 
-test("a copy edited after the save, or saved long ago, stays", () => {
+test("a copy changed in any way after the save stays, even with an old file time", () => {
+  // Edited: another size.
   withSavedPicture(({ db, folder }) => {
-    assert.equal(undoSave(db, { md5: A, dir: folder, file: "pic.png", nowUnix: NOW + UNDO_WINDOW_SECONDS + 1 }), "too-old");
-    const later = new Date((NOW + 600) * 1000);
-    fs.utimesSync(path.join(folder, "pic.png"), later, later);
-    assert.equal(undoSave(db, { md5: A, dir: folder, file: "pic.png", nowUnix: NOW + 700 }), "changed");
-    assert.ok(fs.existsSync(path.join(folder, "pic.png")));
+    fs.writeFileSync(path.join(folder, "pic.png"), "picture, edited");
+    assert.equal(undo(db, folder), "changed");
+  });
+  // Replaced by a file of the same size with an older time.
+  withSavedPicture(({ db, folder }) => {
+    fs.writeFileSync(path.join(folder, "pic.png"), "PICTURE");
+    const earlier = new Date((NOW - 5000) * 1000);
+    fs.utimesSync(path.join(folder, "pic.png"), earlier, earlier);
+    assert.equal(undo(db, folder), "changed");
+    assert.equal(fs.readFileSync(path.join(folder, "pic.png"), "utf8"), "PICTURE");
     assert.equal(marks(db), 1);
   });
 });
 
-test("a prompt file written at another time is left; a copy already deleted only loses its mark", () => {
+test("a save from long ago, or one this run of the console did not make, stays", () => {
   withSavedPicture(({ db, folder }) => {
-    const earlier = new Date((NOW - 5000) * 1000);
-    fs.utimesSync(path.join(folder, "pic.txt"), earlier, earlier);
-    assert.equal(undoSave(db, { md5: A, dir: folder, file: "pic.png", nowUnix: NOW + 30 }), "undone");
-    assert.deepEqual(fs.readdirSync(folder), ["pic.txt"]);
+    assert.equal(undo(db, folder, { nowUnix: NOW + UNDO_WINDOW_SECONDS + 1 }), "too-old");
+    assert.ok(fs.existsSync(path.join(folder, "pic.png")));
   });
   withSavedPicture(({ db, folder }) => {
+    // The mark is there, but nothing noted the file being written (a restart since).
+    fs.writeFileSync(path.join(folder, "old.png"), "old");
+    pictureStore.recordSave(db, { md5: A, dir: folder, file: "old.png", savedAt: NOW });
+    assert.equal(undo(db, folder, { file: "old.png" }), "changed");
+    assert.ok(fs.existsSync(path.join(folder, "old.png")));
+  });
+});
+
+test("a prompt file the save did not write, or that was edited, is left", () => {
+  // The user's own text file of the same name, there before the save.
+  withSavedPicture(({ db, folder }) => {
+    fs.writeFileSync(path.join(folder, "pic.txt"), "my notes");
+    assert.equal(undo(db, folder), "undone");
+    assert.deepEqual(fs.readdirSync(folder), ["pic.txt"]);
+  }, { sidecar: false });
+  // Written by the save, edited since.
+  withSavedPicture(({ db, folder }) => {
+    fs.writeFileSync(path.join(folder, "pic.txt"), "prompt, with my notes");
+    assert.equal(undo(db, folder), "undone");
+    assert.deepEqual(fs.readdirSync(folder), ["pic.txt"]);
+  });
+});
+
+test("a copy already deleted only loses its mark; one that cannot be removed changes nothing", () => {
+  withSavedPicture(({ db, folder }) => {
     fs.rmSync(path.join(folder, "pic.png"));
-    assert.equal(undoSave(db, { md5: A, dir: folder, file: "pic.png", nowUnix: NOW + 30 }), "gone");
+    assert.equal(undo(db, folder), "gone");
     assert.equal(marks(db), 0);
     assert.ok(fs.existsSync(path.join(folder, "pic.txt")));
+  });
+  withSavedPicture(({ db, folder }) => {
+    // A folder now sits where the copy was: removing it as a file fails.
+    fs.rmSync(path.join(folder, "pic.png"));
+    fs.mkdirSync(path.join(folder, "pic.png"));
+    assert.equal(undo(db, folder), "changed");
+    assert.equal(marks(db), 1);
   });
 });
 

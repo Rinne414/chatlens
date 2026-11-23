@@ -15,10 +15,18 @@ const GALLERY_REVEAL_TRIES = 8;
 const GALLERY_REVEAL_TOP = 160;
 
 // md5: the framed picture. range: [from, to] item indexes a Shift click would add.
-const galleryCursor = { md5: null, range: null };
+// anchor: the md5 a run of Shift + arrows started from.
+const galleryCursor = { md5: null, range: null, anchor: null };
 
 // What 空格 / O / X act on: the framed picture, else the one under the mouse.
-const galleryCurrentMd5 = () => galleryCursor.md5 ?? galleryHover.md5;
+// A frame whose picture left the wall (another filter) is no frame.
+const galleryCurrentMd5 = () => {
+  if (galleryCursor.md5 !== null && galleryIndexOf(galleryCursor.md5) < 0) {
+    galleryCursor.md5 = null;
+    galleryCursor.anchor = null;
+  }
+  return galleryCursor.md5 ?? galleryHover.md5;
+};
 
 const galleryTileOf = (md5) =>
   [...document.querySelectorAll("#view-media .wall-tile")].find((node) => node.dataset.md5 === md5) ?? null;
@@ -57,6 +65,7 @@ const markGalleryTile = (tile, item, index) => {
 };
 
 const clearGalleryCursor = () => {
+  galleryCursor.anchor = null;
   if (galleryCursor.md5 !== null) {
     galleryCursor.md5 = null;
     paintGalleryCursor();
@@ -155,14 +164,16 @@ const setGalleryCursor = (md5) => {
 
 /* --- Shift + arrows: what is passed over goes into the 托盘 --- */
 
+// The run starts at the picture framed when Shift was first used (not at a
+// picture picked earlier somewhere else), and goes to the one moved to.
 const extendGallerySelection = (fromMd5, toMd5) => {
   const items = app.gallery.results?.items ?? [];
-  const from = items.findIndex((item) => item.md5 === fromMd5);
+  galleryCursor.anchor = galleryCursor.anchor ?? fromMd5;
+  const anchor = items.findIndex((item) => item.md5 === galleryCursor.anchor);
   const to = items.findIndex((item) => item.md5 === toMd5);
-  if (from < 0 || to < 0) {
+  if (anchor < 0 || to < 0) {
     return;
   }
-  const anchor = app.gallery.selecting && app.gallery.lastPicked !== null ? app.gallery.lastPicked : from;
   const picked = items.slice(Math.min(anchor, to), Math.max(anchor, to) + 1);
   if (!app.gallery.selecting) {
     replaceGallery({ selecting: true, lastPicked: anchor, selected: new Set([...app.gallery.selected, ...picked.map((item) => item.md5)]) });
@@ -194,6 +205,8 @@ const moveGalleryCursor = async (key, extend) => {
   }
   if (extend) {
     extendGallerySelection(from, target);
+  } else {
+    galleryCursor.anchor = null;
   }
   setGalleryCursor(target);
 };
@@ -202,7 +215,7 @@ const moveGalleryCursor = async (key, extend) => {
 
 const galleryWallKeysFree = (event) => app.view === "media" && !event.ctrlKey && !galleryKeyBlocked(event)
   && galleryQuickLook.md5 === null && app.gallery.detail === null && document.querySelector(".view-layer") === null
-  && document.getElementById("gallery-compare") === null
+  && document.getElementById("gallery-compare") === null && keyHelp.node === null
   // A slider or a radio in focus keeps its own arrow keys.
   && !(document.activeElement?.tagName === "INPUT" && ["range", "radio"].includes(document.activeElement.type));
 
@@ -215,7 +228,9 @@ document.addEventListener("keydown", (event) => {
     moveGalleryCursor(event.key, event.shiftKey);
     return;
   }
-  if (event.key === "Enter" && galleryCursor.md5 !== null && !event.repeat) {
+  // Enter on a focused button stays that button's own.
+  const onControl = document.activeElement !== null && document.activeElement !== document.body && document.activeElement.closest("#view-media .wall") === null;
+  if (event.key === "Enter" && !onControl && galleryCurrentMd5() !== null && galleryCursor.md5 !== null && !event.repeat) {
     const index = galleryIndexOf(galleryCursor.md5);
     if (index >= 0) {
       event.preventDefault();
@@ -258,4 +273,5 @@ window.addEventListener("blur", () => setGalleryRange(null));
 VIEW_LEAVE_HOOKS.push(() => {
   galleryCursor.md5 = null;
   galleryCursor.range = null;
+  galleryCursor.anchor = null;
 });

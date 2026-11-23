@@ -90,7 +90,18 @@ VIEW_LEAVE_HOOKS.push(closeGalleryCompare);
 // Loaded before the wall's own keys: while the pictures are side by side no
 // key reaches the wall behind them.
 document.addEventListener("keydown", (event) => {
-  if (app.view !== "media" || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+  if (app.view !== "media") {
+    return;
+  }
+  // The search palette, a dialog or a text box above it keep their own keys.
+  const above = paletteState.open || document.querySelector(".cc-dialog-layer") !== null || galleryTypingFocus();
+  if (galleryCompare.open && !above && event.ctrlKey && ["a", "A", "z", "Z"].includes(event.key)) {
+    // Not for the wall behind the pictures.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
+  if (above || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
     return;
   }
   const isC = event.key === "c" || event.key === "C";
@@ -108,9 +119,9 @@ document.addEventListener("keydown", (event) => {
     }
     return;
   }
-  if (isC && !event.repeat && !paletteState.open && !galleryTypingFocus() && canCompareGallery() && app.gallery.selecting
+  if (isC && !event.repeat && canCompareGallery() && app.gallery.selecting
     && galleryQuickLook.md5 === null && app.gallery.detail === null && pictureUi.viewer === null
-    && document.querySelector(".view-layer, .cc-dialog-layer") === null) {
+    && document.querySelector(".view-layer") === null) {
     event.preventDefault();
     openGalleryCompare();
   }

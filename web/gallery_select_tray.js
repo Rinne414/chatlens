@@ -125,7 +125,7 @@ const saveGalleryQuickLook = (tray, thenNext) => {
       notify(outcome.text, { isError: outcome.failed });
       return;
     }
-    galleryQuickLook.notice = outcome.failed || pictureTrays.lastSave === null ? outcome.text : `${outcome.text}（Ctrl+Z 撤销）`;
+    galleryQuickLook.notice = outcome.failed || undoableTraySave() === null ? outcome.text : `${outcome.text}（Ctrl+Z 撤销）`;
     renderGalleryQuickLook();
   };
   galleryQuickLook.notice = `正在存到「${tray.name}」…`;
@@ -228,7 +228,7 @@ document.addEventListener("keydown", (event) => {
       if (!event.repeat) {
         selectAllLoadedGallery();
       }
-    } else if (key === "z" && !event.shiftKey && pictureTrays.lastSave !== null) {
+    } else if (key === "z" && !event.shiftKey && undoableTraySave() !== null) {
       // Takes back the last save into a 存图文件夹 (picture_trays.js).
       event.preventDefault();
       if (!event.repeat) {

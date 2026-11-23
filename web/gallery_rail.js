@@ -11,7 +11,8 @@ const GALLERY_RAIL_DAYS_MAX = 45;
 const GALLERY_RAIL_SCROLL_MS = 150;
 
 // key: the filter the days belong to. days: [{ day: "2026-11-24", n }] newest first.
-const galleryRail = { key: "", days: null, timer: null };
+// stamp: which load of the wall the days were asked for (a reload asks again).
+const galleryRail = { key: "", days: null, timer: null, stamp: -1 };
 
 const galleryRailShown = () => app.gallery.sort === "recent" && app.gallery.similar === null && window.innerWidth > KB_MOBILE_WIDTH;
 
@@ -22,7 +23,10 @@ const galleryRailParams = () => {
   for (const name of ["fromUnix", "toUnix", "days"]) {
     params.delete(name);
   }
-  if (bounds.days === undefined) {
+  if (app.gallery.range === null && app.gallery.days === 0) {
+    // Everything recorded: said as such, or the question would change every second.
+    params.set("days", "0");
+  } else if (bounds.days === undefined) {
     params.set("fromUnix", String(bounds.fromUnix));
     params.set("toUnix", String(bounds.toUnix));
   } else {
@@ -120,20 +124,28 @@ const loadGalleryRail = async () => {
     return;
   }
   const key = galleryRailParams();
-  if (galleryRail.key === key) {
+  // The same filter is asked again when the wall itself was loaded anew
+  // (刷新, new pictures): the days may have changed.
+  const stamp = app.gallery.loadedAt ?? 0;
+  if (galleryRail.key === key && galleryRail.stamp === stamp) {
     return;
   }
+  const sameFilter = galleryRail.key === key;
   galleryRail.key = key;
-  galleryRail.days = null;
+  galleryRail.stamp = stamp;
+  if (!sameFilter) {
+    // Another filter's days are not this one's.
+    galleryRail.days = null;
+  }
   try {
     const answer = await api(`/api/gallery/days?${key}`);
-    if (galleryRail.key === key) {
+    if (galleryRail.key === key && galleryRail.stamp === stamp) {
       galleryRail.days = answer.days;
     }
   } catch {
     // A console that has not been restarted since this was added has no such
-    // list: the wall simply has no rail then.
-    if (galleryRail.key === key) {
+    // list: the wall has no rail until the wall is loaded again.
+    if (galleryRail.key === key && galleryRail.stamp === stamp) {
       galleryRail.days = [];
     }
   }
@@ -145,9 +157,10 @@ const galleryRailNode = () => {
   if (!galleryRailShown()) {
     return null;
   }
+  // Asked first: another filter's days are dropped before anything is drawn from them.
+  loadGalleryRail();
   const node = el("nav", { id: "gallery-rail", class: "gallery-rail", "aria-label": "按日期跳" }, galleryRailNodes());
   node.hidden = node.childElementCount === 0;
-  loadGalleryRail();
   // The wall mounts after this page is put together: the day in view is known then.
   requestAnimationFrame(() => markGalleryRailCurrent());
   return node;
