@@ -116,6 +116,42 @@ const galleryDetailMeta = (detail) => {
   ].filter((part) => part !== "").join(" · ");
 };
 
+// Where this picture was already saved to (the newest copy; the rest in the title).
+const galleryDetailSaved = (detail) => {
+  const saves = detail.data ? detail.data.saves ?? [] : [];
+  if (saves.length === 0) {
+    return detail.item.savedAt > 0 ? el("p", { class: "kb-meta gallery-detail-saved" }, `已存过：${unixToHkt(detail.item.savedAt).slice(0, 16)}`) : null;
+  }
+  return el("p", {
+    class: "kb-meta gallery-detail-saved",
+    title: saves.map((save) => `${unixToHkt(save.savedAt).slice(0, 16)}  ${save.dir}\\${save.file}`).join("\n"),
+  }, `已存过${saves.length > 1 ? ` ${saves.length} 次` : ""}：${unixToHkt(saves[0].savedAt).slice(0, 16)} 存到 ${saves[0].dir}`);
+};
+
+const saveGalleryDetailToTray = async (detail, tray) => {
+  const md5 = detail.item.md5;
+  galleryDetailPatch(md5, { notice: `正在存到「${tray.name}」…` });
+  const outcome = await saveToTray([md5], tray.id);
+  galleryDetailPatch(md5, { notice: outcome.text });
+  if (!outcome.failed) {
+    api(`/api/gallery/picture?md5=${md5}`).then((data) => galleryDetailPatch(md5, { data })).catch(() => {});
+  }
+};
+
+// One button per tray; the number is the key that does the same.
+const galleryDetailTrayButtons = (detail) => {
+  const item = detail.item;
+  if (item.gone && !item.kept) {
+    return null;
+  }
+  return (pictureTrays.list ?? []).map((tray, index) => el("button", {
+    class: index === 0 ? "btn small primary" : "btn small",
+    type: "button",
+    title: `把原图存到 ${tray.path}${index < TRAY_KEYS ? `（按 ${index + 1}${index === 0 ? " 或 S" : ""}）` : ""}`,
+    onclick: () => saveGalleryDetailToTray(detail, tray),
+  }, `存到「${tray.name}」`, index < TRAY_KEYS ? el("kbd", { class: "tray-key" }, String(index + 1)) : null));
+};
+
 const galleryDetailActions = (detail) => {
   const item = detail.item;
   const shown = item.shown ?? item.origin;
@@ -124,11 +160,12 @@ const galleryDetailActions = (detail) => {
     detail.size === "original" || (item.gone && !item.kept) || item.fileName
       ? null
       : el("button", { class: "btn small primary", type: "button", title: item.kept ? "显示留存在本程序里的原图" : "向腾讯的图片服务器取原图来看（会联网）；只是看，不会留存", onclick: () => galleryDetailPatch(item.md5, { size: "original", notice: item.kept ? "" : "正在向腾讯取原图…" }) }, "看原图"),
+    galleryDetailTrayButtons(detail),
     // A picture Tencent deleted can still be saved as when its original was kept.
     item.gone && !item.kept
       ? null
       : el("button", {
-        class: "btn small primary",
+        class: "btn small",
         type: "button",
         title: SAVE_AS_TITLE,
         onclick: async () => {
@@ -255,6 +292,10 @@ const galleryDetailImage = (detail) => {
     // (already cached by the wall) fills the frame until it arrives.
     style: `background-image:url("${pictureUrl(item.md5, "thumb")}")`,
     alt: item.sticker ? "表情" : "图片",
+    // Dragged out to the desktop or a folder, it is the original that lands there.
+    draggable: "true",
+    onpointerdown: () => prepareTrayDrag(item),
+    ondragstart: (event) => startTrayDrag(event, item, [item.md5]),
     onload: () => {
       if (app.gallery.detail?.notice === "正在向腾讯取原图…") {
         galleryDetailPatch(item.md5, { notice: "" });
@@ -291,6 +332,7 @@ const galleryDetailOverlay = (detail) => {
         el("p", { class: "kb-meta" }, galleryDetailMeta(detail)),
         galleryDetailActions(detail),
         detail.notice ? el("p", { class: "kb-note muted" }, detail.notice) : null,
+        galleryDetailSaved(detail),
         gallerySpread(detail),
         galleryPrompt(detail),
         galleryOthers(detail),
@@ -316,6 +358,24 @@ document.addEventListener("keydown", (event) => {
     || (focused?.tagName === "INPUT" && !["checkbox", "radio", "range"].includes(focused.type));
   if (typing) {
     return;
+  }
+  // 存图托盘: S or 1 = the first tray, 2-9 the next ones; for the open
+  // picture, or for the multi-selection.
+  const tray = event.ctrlKey || event.metaKey || event.altKey || event.repeat || document.querySelector(".cc-dialog-layer") !== null
+    ? null
+    : trayForKey(event.key);
+  if (tray !== null && pictureUi.viewer === null) {
+    const detail = app.gallery.detail;
+    if (detail !== null && !(detail.item.gone && !detail.item.kept)) {
+      event.preventDefault();
+      saveGalleryDetailToTray(detail, tray);
+      return;
+    }
+    if (detail === null && app.gallery.selecting && app.gallery.selected.size > 0) {
+      event.preventDefault();
+      saveToTrayAndTell([...app.gallery.selected], tray.id);
+      return;
+    }
   }
   if (app.gallery.detail === null) {
     if (event.key === "Escape" && app.gallery.selecting && pictureUi.viewer === null && !event.defaultPrevented) {

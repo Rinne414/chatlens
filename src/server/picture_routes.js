@@ -7,6 +7,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { pipeline } = require("node:stream");
 const jobs = require("./picture_jobs");
 const picturePass = require("./picture_pass");
 const service = require("./picture_service");
@@ -59,6 +60,33 @@ const servePicture = async (response, url) => {
   }
   response.writeHead(404, { "content-type": "text/plain; charset=utf-8", "x-picture-state": result.error });
   response.end(STATE_TEXT[result.error] ?? "Not found");
+};
+
+// /picture-save: the original as a download, for a picture dragged out of the
+// page onto the desktop or into a folder. Unlike /picture it never sends a
+// smaller stand-in: a file saved under the original's name is the original.
+const servePictureDownload = async (response, url) => {
+  const md5 = String(url.searchParams.get("md5") ?? "").toLowerCase();
+  const source = await exportOps.originalForDownload(md5);
+  if (source.error !== undefined) {
+    response.writeHead(404, { "content-type": "text/plain; charset=utf-8", "x-picture-state": source.error });
+    response.end(STATE_TEXT[source.error] ?? "Not found");
+    return;
+  }
+  const done = () => {
+    if (source.temporary) {
+      fs.rmSync(source.filePath, { force: true });
+    }
+  };
+  response.writeHead(200, {
+    "content-type": IMAGE_TYPES[path.extname(source.name).toLowerCase()] ?? "application/octet-stream",
+    "content-disposition": `attachment; filename="${md5}${path.extname(source.name)}"; filename*=UTF-8''${encodeURIComponent(source.name)}`,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
+  // pipeline closes the file when the browser gives up half-way too, so the
+  // temp copy can always be removed.
+  pipeline(fs.createReadStream(source.filePath), response, done);
 };
 
 const workflowResponse = (response, md5, sendError) => {
@@ -114,6 +142,15 @@ const handlePictureApi = async (request, response, url, { sendJson, sendError, r
     case "POST /api/pictures/save-dir":
       sendJson(response, 200, exportOps.setSaveDir(await readBody(request)));
       return true;
+    case "GET /api/pictures/trays":
+      sendJson(response, 200, exportOps.getTrays());
+      return true;
+    case "POST /api/pictures/trays":
+      sendJson(response, 200, exportOps.changeTrays(await readBody(request)));
+      return true;
+    case "GET /api/pictures/save-name":
+      sendJson(response, 200, exportOps.saveName(String(url.searchParams.get("md5") ?? "").toLowerCase()));
+      return true;
     case "POST /api/pictures/export/open":
       sendJson(response, 200, exportOps.openExportFolder(await readBody(request)));
       return true;
@@ -128,4 +165,4 @@ const handlePictureApi = async (request, response, url, { sendJson, sendError, r
   }
 };
 
-module.exports = { servePicture, handlePictureApi, STATE_TEXT };
+module.exports = { servePicture, servePictureDownload, handlePictureApi, STATE_TEXT };

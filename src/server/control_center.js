@@ -1075,7 +1075,7 @@ const routeRequest = (request, response, { remote = false } = {}) => {
     return;
   }
 
-  if ((url.pathname.startsWith("/runs/") || url.pathname === "/knowledge-file" || url.pathname === "/picture") && isCrossSite(request)) {
+  if ((url.pathname.startsWith("/runs/") || url.pathname === "/knowledge-file" || url.pathname === "/picture" || url.pathname === "/picture-save") && isCrossSite(request)) {
     sendError(response, 403, "Forbidden");
     return;
   }
@@ -1099,6 +1099,21 @@ const routeRequest = (request, response, { remote = false } = {}) => {
   if (url.pathname === "/picture") {
     pictureRoutes.servePicture(response, url).catch((error) => {
       console.error(`picture failed: ${error.message}`);
+      if (!response.writableEnded) {
+        sendError(response, 500, "Internal error");
+      }
+    });
+    return;
+  }
+
+  if (url.pathname === "/picture-save") {
+    // Saving to disk happens at the computer (see remote_policy.js).
+    if (remote) {
+      sendError(response, 403, "Forbidden");
+      return;
+    }
+    pictureRoutes.servePictureDownload(response, url).catch((error) => {
+      console.error(`picture download failed: ${error.message}`);
       if (!response.writableEnded) {
         sendError(response, 500, "Internal error");
       }

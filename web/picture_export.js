@@ -15,7 +15,7 @@ const PICTURE_EXPORT_REASONS = {
   "file-only": "是以文件发的图，本机没有原文件也没有 QQ 的预览",
 };
 
-const pictureExport = { owner: null, running: false, stop: false, done: 0, total: 0, exported: 0, prompts: 0, previews: 0, failed: {}, folder: null, path: null, error: null };
+const pictureExport = { owner: null, running: false, stop: false, done: 0, total: 0, exported: 0, prompts: 0, previews: 0, already: 0, failed: {}, folder: null, path: null, error: null };
 
 const pictureExportFailedText = () => Object.entries(pictureExport.failed)
   .map(([reason, count]) => `${count} 张${PICTURE_EXPORT_REASONS[reason] ?? reason}`)
@@ -36,6 +36,7 @@ const pictureExportText = () => {
     // Pictures sent as files whose original is nowhere on this computer.
     job.previews > 0 ? `${originals > 0 ? "；" : ""}${job.previews} 张以文件发的图本机没有原文件，存的是 QQ 的预览（最长边约 1280）` : "",
     job.prompts > 0 ? `（${job.prompts} 张附咒语 .txt）` : "",
+    job.already > 0 ? `（${job.already} 张文件夹里已经有了，没有再存一份）` : "",
     failed === "" ? "" : `；${failed}`,
     job.stop && job.done < job.total ? `；已停下，还有 ${job.total - job.done} 张没另存` : "",
   ].join("");
@@ -78,7 +79,7 @@ const runPictureExport = async (md5s, owner) => {
     return;
   }
   const chosen = [...new Set(md5s)];
-  Object.assign(pictureExport, { owner, running: true, stop: false, done: 0, total: chosen.length, exported: 0, prompts: 0, previews: 0, failed: {}, folder: null, path: null, error: null });
+  Object.assign(pictureExport, { owner, running: true, stop: false, done: 0, total: chosen.length, exported: 0, prompts: 0, previews: 0, already: 0, failed: {}, folder: null, path: null, error: null });
   renderPictureExportStatus();
   try {
     for (let start = 0; start < chosen.length && !pictureExport.stop; start += PICTURE_EXPORT_BATCH) {
@@ -91,6 +92,7 @@ const runPictureExport = async (md5s, owner) => {
           pictureExport.exported += 1;
           pictureExport.prompts += item.prompt ? 1 : 0;
           pictureExport.previews += item.previewOnly ? 1 : 0;
+          pictureExport.already += item.already ? 1 : 0;
         } else {
           pictureExport.failed[item.status] = (pictureExport.failed[item.status] ?? 0) + 1;
         }

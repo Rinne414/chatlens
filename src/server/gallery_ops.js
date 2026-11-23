@@ -60,6 +60,7 @@ const filterFrom = (params) => ({
   asked: params.get("asked") === "1",
   file: params.get("file") === "1",
   kept: params.get("kept") === "1",
+  unsaved: params.get("unsaved") === "1",
   why: params.get("why") ?? "",
   removed: params.get("removed") === "1",
 });
@@ -92,9 +93,14 @@ const storeStamp = () => {
   const pictures = withReadOnlyStore((db) => {
     const columns = db.prepare("SELECT name FROM pragma_table_info('picture_files')").all().map((column) => column.name);
     const removed = columns.includes("removed") ? "COALESCE(SUM(removed), 0)" : "0";
+    // Saving a picture out changes the 「还没存过」 count.
+    const saves = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'picture_saves'").get() === undefined
+      ? "0"
+      : "(SELECT COUNT(*) FROM picture_saves)";
     return db.prepare(`
       SELECT (SELECT COUNT(*) FROM pictures) AS postings, (SELECT COALESCE(MAX(rowid), 0) FROM pictures) AS newest,
-             (SELECT COUNT(*) || ':' || COALESCE(SUM(kept), 0) || ':' || ${removed} || ':' || COALESCE(SUM(probe = 'ai'), 0) FROM picture_files) AS files
+             (SELECT COUNT(*) || ':' || COALESCE(SUM(kept), 0) || ':' || ${removed} || ':' || COALESCE(SUM(probe = 'ai'), 0) FROM picture_files) AS files,
+             ${saves} AS saves
     `).get();
   });
   return JSON.stringify([pictures, fileStamp(knowledgePath()), fileStamp(`${knowledgePath()}-wal`)]);

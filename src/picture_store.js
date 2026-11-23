@@ -64,6 +64,15 @@ const SCHEMA = [
     kept_by TEXT NOT NULL DEFAULT '',
     removed INTEGER NOT NULL DEFAULT 0
   )`,
+  // Every copy the user saved out to a folder of their own (存图托盘, 另存到
+  // 文件夹): the wall marks those pictures and can show only the others.
+  `CREATE TABLE IF NOT EXISTS picture_saves (
+    md5 TEXT NOT NULL,
+    dir TEXT NOT NULL,
+    file TEXT NOT NULL,
+    saved_at INTEGER NOT NULL,
+    PRIMARY KEY (md5, dir, file)
+  ) WITHOUT ROWID`,
 ];
 
 const ensurePictureSchema = (db) => {
@@ -100,6 +109,13 @@ const ensurePictureSchema = (db) => {
 };
 
 const pictureRoot = (storeDir) => path.join(storeDir, "pictures");
+
+const recordSave = (db, { md5, dir, file, savedAt }) =>
+  db.prepare("INSERT OR REPLACE INTO picture_saves (md5, dir, file, saved_at) VALUES (?, ?, ?, ?)").run(md5, dir, file, savedAt);
+
+// Where one picture was saved to, newest first.
+const savesOf = (db, md5) =>
+  db.prepare("SELECT dir, file, saved_at AS savedAt FROM picture_saves WHERE md5 = ? ORDER BY saved_at DESC").all(md5);
 
 // kind is thumb | preview | cache; the file name is <md5>.<ext>.
 const picturePath = (storeDir, kind, md5, ext) => {
@@ -459,6 +475,8 @@ module.exports = {
   pendingQqPreviews,
   isFileOnly,
   ensurePictureSchema,
+  recordSave,
+  savesOf,
   pictureRoot,
   picturePath,
   ingestPictures,

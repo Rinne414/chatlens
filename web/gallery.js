@@ -27,7 +27,9 @@ const GALLERY_SWITCHES = [
   ["asked", "有人求咒语", "群里有人问过这张图的咒语"],
   ["file", "以文件发的图", "当作文件发的图片，多是没压缩的原图；显示的是 QQ 的预览"],
   ["kept", "原图已留存", "原图已经存在本程序里的图，腾讯删掉之后也能看"],
+  ["unsaved", "还没存过", "没有用本程序存到你的文件夹过的图"],
 ];
+const GALLERY_FACET_RELOAD_MS = 1500;
 const GALLERY_SEARCH_DELAY_MS = 450;
 const GIF_PICTURE_FORMAT = 2000;
 const GALLERY_ORIGIN = { view: "media", label: "画廊" };
@@ -58,6 +60,7 @@ app.gallery = {
   prompt: false,
   asked: false,
   file: false,
+  unsaved: false,
   results: null,
   facets: null,
   facetsKey: "",
@@ -219,6 +222,7 @@ const openMediaView = (forceRefresh) => {
   showView("media");
   galleryNav.dismissed = false;
   loadGallerySaveTarget();
+  loadPictureTrays();
   if (forceRefresh === true || app.gallery.results === null) {
     loadGallery();
     return;
@@ -291,6 +295,7 @@ const galleryBadges = (item) => {
       : null,
     // Inside 「留存的原图」 every tile is kept: the mark would say nothing.
     item.kept && !app.gallery.kept ? { text: "已留存", tone: "kept", title: "原图已经存在本程序里，腾讯删掉之后也能看" } : null,
+    item.savedAt > 0 ? { text: "已存", tone: "saved", title: `${unixToHkt(item.savedAt).slice(0, 16)} 存到过你的文件夹` } : null,
   ].filter((badge) => badge !== null);
 };
 
@@ -310,6 +315,92 @@ const refreshGallerySelection = () => {
   if (node !== null) {
     setChildren(node, gallerySelectionNodes());
   }
+  renderTrayDock();
+};
+
+/* ---------- 存图托盘 (picture_trays.js) ---------- */
+
+const gallerySaved = { facetTimer: null, repaintPending: false };
+
+// Redrawing the wall replaces the tile under the pointer, and a drag whose
+// tile is gone never reports its end: the redraw waits for the drop.
+const repaintGalleryAfterSave = () => {
+  if (pictureTrays.dragging) {
+    gallerySaved.repaintPending = true;
+    return;
+  }
+  gallerySaved.repaintPending = false;
+  if (app.view === "media") {
+    wallSetEntries(GALLERY_WALL_KEY, galleryEntries());
+    wallRepaint(GALLERY_WALL_KEY);
+  }
+};
+
+pictureTrays.onDragEnd = () => {
+  if (gallerySaved.repaintPending) {
+    repaintGalleryAfterSave();
+  }
+};
+
+// Saved pictures get their 「已存」 mark in place; the sidebar counts follow
+// once the saving pauses (each count walks the whole range).
+const markGallerySaved = (md5s, savedAt) => {
+  const saved = new Set(md5s);
+  const results = app.gallery.results;
+  if (saved.size === 0 || results === null) {
+    return;
+  }
+  replaceGallery({
+    results: { ...results, items: results.items.map((item) => (saved.has(item.md5) ? { ...item, savedAt } : item)) },
+    facetsKey: "",
+  });
+  if (app.gallery.detail !== null && saved.has(app.gallery.detail.md5)) {
+    replaceGallery({ detail: { ...app.gallery.detail, item: { ...app.gallery.detail.item, savedAt } } });
+  }
+  repaintGalleryAfterSave();
+  clearTimeout(gallerySaved.facetTimer);
+  gallerySaved.facetTimer = setTimeout(() => {
+    if (app.view === "media") {
+      loadGalleryFacets();
+    }
+  }, GALLERY_FACET_RELOAD_MS);
+};
+
+pictureTrays.onSaved = markGallerySaved;
+// The first tray's folder is also where the multi-select 「另存到文件夹」 writes,
+// and its name is on every tile's 存 button.
+pictureTrays.onChanged = () => {
+  if (app.view !== "media") {
+    return;
+  }
+  loadGallerySaveTarget().then(() => {
+    const bar = document.getElementById("gallery-selection");
+    if (bar !== null) {
+      setChildren(bar, gallerySelectionNodes());
+    }
+  });
+  wallRepaint(GALLERY_WALL_KEY);
+};
+
+// The dragged tile alone, or the whole selection when it is part of it.
+const galleryDragMd5s = (item) => (app.gallery.selected.has(item.md5) ? [...app.gallery.selected] : [item.md5]);
+
+const gallerySaveButton = (item) => {
+  const tray = firstTray();
+  // Nothing to save once Tencent deleted a picture that was never kept.
+  if (tray === null || (item.gone && !item.kept)) {
+    return null;
+  }
+  return el("button", {
+    class: "wall-save",
+    type: "button",
+    title: `把原图存到「${tray.name}」（${tray.path}）`,
+    "aria-label": `存到${tray.name}`,
+    onclick: (event) => {
+      event.stopPropagation();
+      saveToTrayAndTell([item.md5], tray.id);
+    },
+  }, "存");
 };
 
 // Selecting starts from any tile (its corner box, or Ctrl+click), so nobody
@@ -356,6 +447,7 @@ const toggleGallerySelected = (md5, tile, event = null) => {
   if (bar !== null) {
     setChildren(bar, gallerySelectionNodes());
   }
+  renderTrayDock();
 };
 
 const selectGalleryItems = (items) => {
@@ -406,6 +498,8 @@ const saveGalleryDir = async (dir) => {
     notifyError(error);
   }
   refreshGallerySelection();
+  // The first 存图托盘 saves to this same folder.
+  loadPictureTrays();
 };
 
 // "另存到：…" with a way to pick a fixed folder (or go back to dated folders).
@@ -447,7 +541,16 @@ const gallerySelectBox = (item) => el("label", {
   onchange: (event) => toggleGallerySelected(item.md5, event.target.closest(".wall-tile"), event),
 }));
 
-const galleryTile = (item, index) => wallTile({
+const galleryTile = (item, index) => {
+  const tile = galleryTileNode(item, index);
+  // Dragged onto a 存图托盘, or (one picture) out to the desktop or a folder.
+  tile.draggable = true;
+  tile.addEventListener("pointerdown", () => prepareTrayDrag(item));
+  tile.addEventListener("dragstart", (event) => startTrayDrag(event, item, galleryDragMd5s(item)));
+  return tile;
+};
+
+const galleryTileNode = (item, index) => wallTile({
   src: pictureUrl(item.md5, "thumb"),
   alt: item.sticker ? "表情" : "图片",
   onOpen: (event) => (app.gallery.selecting || event.ctrlKey || event.metaKey
@@ -455,7 +558,7 @@ const galleryTile = (item, index) => wallTile({
     : openGalleryDetail(index)),
   badges: galleryBadges(item),
   // Shown on hover; always while selecting (gallery.css).
-  corner: el("div", { class: "wall-corner desktop-action" }, gallerySelectBox(item)),
+  corner: el("div", { class: "wall-corner desktop-action" }, gallerySaveButton(item), gallerySelectBox(item)),
   caption: galleryCaption(item),
   extraClass: [item.sticker ? "sticker" : "", app.gallery.selected.has(item.md5) ? "selected" : ""].join(" "),
   onError: (image) => {
@@ -775,6 +878,7 @@ const renderMediaView = () => {
     el("div", { class: "kb-layout" },
       el("details", { class: "kb-facets", open: window.innerWidth > KB_MOBILE_WIDTH },
         el("summary", {}, "筛选"),
+        trayDock({ selected: () => [...app.gallery.selected] }),
         el("div", { id: "gallery-facets-body", class: "kb-facets-body" }, galleryFacetSections())),
       el("div", { class: tab.loading && !tab.loadingMore ? "kb-results is-loading" : "kb-results" },
         el("div", { class: "kb-results-head" },

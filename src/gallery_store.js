@@ -82,11 +82,17 @@ const keptCondition = (db) => {
   return "+p.md5 IN (SELECT md5 FROM temp.gallery_kept)";
 };
 
+// picture_saves arrived with 存图托盘; a store opened read-only before its
+// first upgrade has no such table yet.
+const hasSaves = (db) => db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'picture_saves'").get() !== undefined;
+
 // Opt-in switches; the two that need the prompt library match nothing
 // without it.
 const extraConditions = (db) => {
   const kb = hasKnowledge(db);
   return {
+    // Never saved out to a folder with this program.
+    unsaved: hasSaves(db) ? "+p.md5 NOT IN (SELECT md5 FROM picture_saves)" : "1",
     prompt: kb ? "EXISTS (SELECT 1 FROM kb.images ki WHERE ki.hash = p.md5 AND ki.prompt <> '')" : "0",
     asked: kb ? "EXISTS (SELECT 1 FROM kb.prompt_requests kr WHERE kr.image_hash = p.md5)" : "0",
     file: "p.file_name <> ''",
@@ -163,7 +169,7 @@ const clampLimit = (limit) => {
 // search text, shape / size a bucket name, prompt / asked / file / kept switches.
 const buildFilter = (db, {
   fromUnix, toUnix, groupId = "", sender = "", kind = "images", ai = false,
-  q = "", shape = "", size = "", prompt = false, asked = false, file = false, kept = false, why = "", removed = false,
+  q = "", shape = "", size = "", prompt = false, asked = false, file = false, kept = false, unsaved = false, why = "", removed = false,
 }) => {
   if (!Number.isFinite(fromUnix) || !Number.isFinite(toUnix) || fromUnix >= toUnix) {
     throw new Error("时间范围无效。");
@@ -199,7 +205,7 @@ const buildFilter = (db, {
     conditions.push(SIZES[size]);
   }
   const extras = extraConditions(db);
-  for (const [name, on] of [["prompt", prompt], ["asked", asked], ["file", file], ["kept", kept]]) {
+  for (const [name, on] of [["prompt", prompt], ["asked", asked], ["file", file], ["kept", kept], ["unsaved", unsaved]]) {
     if (on) {
       conditions.push(extras[name]);
     }
@@ -265,6 +271,17 @@ const filesOf = (db, md5s) => new Map(db.prepare(`
          ${hasKeptBy(db) ? "kept_by AS keptBy, removed" : "'' AS keptBy, 0 AS removed"}
   FROM picture_files WHERE md5 IN (SELECT value FROM json_each(@md5s))
 `).all({ md5s: JSON.stringify(md5s) }).map((row) => [row.md5, row]));
+
+// When each picture was last saved out to a folder (absent = never).
+const savedOf = (db, md5s) => {
+  if (!hasSaves(db)) {
+    return new Map();
+  }
+  return new Map(db.prepare(`
+    SELECT md5, MAX(saved_at) AS savedAt FROM picture_saves
+    WHERE md5 IN (SELECT value FROM json_each(@md5s)) GROUP BY md5
+  `).all({ md5s: JSON.stringify(md5s) }).map((row) => [row.md5, row.savedAt]));
+};
 
 const knowledgeOf = (db, md5s) => {
   if (!hasKnowledge(db)) {
@@ -339,7 +356,7 @@ const describe = (row, occurrences, file, knowledge, options) => {
   };
 };
 
-const DEFAULT_OPTIONS = { groupId: "", sender: "", kind: "images", ai: false, q: "", shape: "", size: "", prompt: false, asked: false, file: false, kept: false, why: "", removed: false };
+const DEFAULT_OPTIONS = { groupId: "", sender: "", kind: "images", ai: false, q: "", shape: "", size: "", prompt: false, asked: false, file: false, kept: false, unsaved: false, why: "", removed: false };
 
 const listPictures = (db, options) => {
   const sort = SORTS.has(options.sort) ? options.sort : "recent";
@@ -356,9 +373,13 @@ const listPictures = (db, options) => {
   }
   const files = filesOf(db, md5s);
   const knowledge = knowledgeOf(db, md5s);
+  const saved = savedOf(db, md5s);
   return {
     total,
-    items: rows.map((row) => describe(row, byMd5.get(row.md5), files.get(row.md5), knowledge.get(row.md5), normalized)),
+    items: rows.map((row) => ({
+      ...describe(row, byMd5.get(row.md5), files.get(row.md5), knowledge.get(row.md5), normalized),
+      savedAt: saved.get(row.md5) ?? 0,
+    })),
   };
 };
 
@@ -380,6 +401,7 @@ const pictureFlags = (db) => {
     ai: kb ? `(${probed} OR p.md5 IN (SELECT hash FROM kb.images WHERE generator NOT IN ('stripped', 'unknown')))` : probed,
     hasPrompt: kb ? "p.md5 IN (SELECT hash FROM kb.images WHERE prompt <> '')" : "0",
     asked: kb ? "p.md5 IN (SELECT image_hash FROM kb.prompt_requests)" : "0",
+    saved: hasSaves(db) ? "p.md5 IN (SELECT md5 FROM picture_saves)" : "0",
   };
 };
 
@@ -419,6 +441,7 @@ const buildFacetTables = (db, normalized) => {
     CREATE TEMP TABLE facet_pic AS
     SELECT p.md5, p.width, p.height, p.file_name,
            ${flags.sticker} AS sticker, ${flags.ai} AS ai, ${flags.hasPrompt} AS hasPrompt, ${flags.asked} AS asked,
+           ${flags.saved} AS saved,
            ${spread} AS spread,
            COALESCE((SELECT k.why FROM temp.gallery_kept k WHERE k.md5 = p.md5), '') AS why
     FROM temp.facet_grouped p;
@@ -437,6 +460,7 @@ const pictureConditions = (normalized, omit = []) => {
     on("size") && normalized.size !== "" ? `(${SIZES[normalized.size]})` : null,
     on("prompt") && normalized.prompt ? "p.hasPrompt = 1" : null,
     on("asked") && normalized.asked ? "p.asked = 1" : null,
+    on("unsaved") && normalized.unsaved ? "p.saved = 0" : null,
     on("why") && normalized.why !== "" ? `p.why IN (${WHY_BUCKETS[normalized.why]})` : null,
   ].filter((condition) => condition !== null);
 };
@@ -498,6 +522,7 @@ const galleryFacets = (db, options) => {
       asked: count(["asked"], "p.asked = 1"),
       file: run(`SELECT COUNT(*) AS n FROM temp.facet_pic p WHERE ${facetWhere(normalized, ["file"], "x.file_name <> ''")}`)[0].n,
       kept: count([], "p.why <> ''"),
+      unsaved: count(["unsaved"], "p.saved = 0"),
     },
   };
 };
@@ -553,6 +578,10 @@ const pictureDetail = (db, md5) => {
     ai: file?.probe === "ai" || aiKnown,
     generator: aiKnown ? knowledge.generator : "",
     inLibrary: inLibrary(knowledge, aiKnown),
+    // Copies saved out to the user's own folders, newest first.
+    saves: hasSaves(db)
+      ? db.prepare("SELECT dir, file, saved_at AS savedAt FROM picture_saves WHERE md5 = ? ORDER BY saved_at DESC").all(md5)
+      : [],
     occurrences,
   };
 };

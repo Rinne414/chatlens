@@ -86,3 +86,39 @@ html:not(.phone) .gallery-page .kb-results-head { position: sticky; top: 0; z-in
 
 .gallery-kept-head:empty { display: none; }
 #gallery-facets-body.is-stale .facet-count, #gallery-facets-body.is-stale .kb-facet-count { opacity: .35; }
+
+/* 存图托盘 (picture_trays.js): on top of the filter column, so it never covers a picture */
+.tray-dock { display: grid; gap: 8px; margin: 0 0 16px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.tray-dock:empty { display: none; }
+.tray-dock-head { display: grid; gap: 2px; }
+.tray-dock-head strong { font-size: 13px; }
+.tray-dock-head .kb-meta { font-size: 12px; }
+.tray { display: grid; gap: 4px; padding: 8px 10px; border: 1px dashed var(--line-strong); border-radius: 8px; transition: border-color var(--dur), background var(--dur); }
+.tray-dock.dragging .tray:not(.editing) { border-color: var(--accent); }
+.tray.over { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+.tray-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tray-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.tray-head .kb-linkish { font-size: 12px; }
+.tray-key { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel); color: var(--muted); font: 600 11px/1 inherit; }
+.btn .tray-key { margin-left: 6px; }
+.tray-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); }
+.tray-status { font-size: 12px; font-weight: 600; color: var(--accent); overflow-wrap: anywhere; }
+.tray-take { justify-self: start; }
+.tray-add { justify-self: start; font-size: 12.5px; }
+.tray-edit { display: grid; gap: 6px; }
+.tray-edit label { display: grid; gap: 2px; font-size: 12px; color: var(--muted); }
+.tray-edit input { width: 100%; font: inherit; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.tray-edit-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.tray-drag-count { position: fixed; top: -100px; left: -100px; padding: 6px 12px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 700; }
+/* No dragging without a mouse; the tray buttons in the big view still work there. */
+@media (hover: none) { .tray-dock { display: none; } }
+html.phone .tray-dock { display: none; }
+
+/* a tile's own 存 button beside its select box */
+.gallery-page .wall-corner { display: flex; gap: 6px; }
+.wall-save { width: 30px; height: 30px; border: 0; border-radius: 8px; background: rgba(12, 15, 20, .55); color: #fff; font: 700 13px/1 inherit; cursor: pointer; opacity: 0; transition: opacity var(--dur), background var(--dur); }
+.wall-tile:hover .wall-save, .wall-save:focus-visible { opacity: 1; }
+.wall-save:hover { background: var(--accent); }
+.gallery-page.selecting .wall-save { display: none; }
+.wall-badge.saved { background: rgba(55, 65, 81, .9); }
+.gallery-detail-saved { overflow-wrap: anywhere; }

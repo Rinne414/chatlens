@@ -173,8 +173,8 @@ test("search matches the text sent with a picture, who posted it, a file name, a
       assert.deepEqual(found({ file: true }), [md5("e")]);
       assert.equal(gallery.listPictures(reader, { ...range, file: true }).items[0].fileName, "Moss_00008_.png");
       // A switch adds to the others: with 有咒语 on, file counts files that have a prompt.
-      assert.deepEqual(gallery.galleryFacets(reader, { ...range, prompt: true }).extras, { prompt: 1, asked: 1, file: 0, kept: 0 });
-      assert.deepEqual(gallery.galleryFacets(reader, range).extras, { prompt: 1, asked: 1, file: 1, kept: 1 });
+      assert.deepEqual(gallery.galleryFacets(reader, { ...range, prompt: true }).extras, { prompt: 1, asked: 1, file: 0, kept: 0, unsaved: 1 });
+      assert.deepEqual(gallery.galleryFacets(reader, range).extras, { prompt: 1, asked: 1, file: 1, kept: 1, unsaved: 3 });
     } finally {
       reader.close();
     }
@@ -226,5 +226,31 @@ test("an original the prompt library copied in counts as kept too", () => {
     assert.equal(page.items[1].kept, true);
     assert.equal(facets.extras.kept, 2);
     assert.equal(detail.kept, true);
+  });
+});
+
+test("a picture saved out to a folder is marked, and 还没存过 leaves it out", () => {
+  withStore((db) => {
+    const pictureStore = require("../src/picture_store");
+    assert.equal(gallery.listPictures(db, range).items.every((item) => item.savedAt === 0), true);
+    pictureStore.recordSave(db, { md5: A, dir: "D:\\好图", file: "a.png", savedAt: NOW - 10 });
+    pictureStore.recordSave(db, { md5: A, dir: "D:\\角色", file: "a.png", savedAt: NOW - 5 });
+    const page = gallery.listPictures(db, range);
+    assert.deepEqual(page.items.map((item) => [item.md5, item.savedAt]), [[B, 0], [A, NOW - 5]]);
+    assert.deepEqual(gallery.listPictures(db, { ...range, unsaved: true }).items.map((item) => item.md5), [B]);
+    // The count ignores its own switch, like every other one.
+    assert.equal(gallery.galleryFacets(db, { ...range, unsaved: true }).extras.unsaved, 1);
+    assert.equal(gallery.galleryFacets(db, range).extras.unsaved, 1);
+    assert.deepEqual(gallery.pictureDetail(db, A).saves.map((save) => save.dir), ["D:\\角色", "D:\\好图"]);
+    assert.deepEqual(gallery.pictureDetail(db, B).saves, []);
+  });
+});
+
+test("a store from before saves were recorded still lists and counts", () => {
+  withStore((db) => {
+    db.exec("DROP TABLE picture_saves");
+    assert.equal(gallery.listPictures(db, { ...range, unsaved: true }).total, 2);
+    assert.equal(gallery.galleryFacets(db, range).extras.unsaved, 2);
+    assert.deepEqual(gallery.pictureDetail(db, A).saves, []);
   });
 });

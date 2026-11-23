@@ -175,6 +175,13 @@ const originalFile = async (md5, localOriginal = () => null) => {
   return fetched.error === undefined ? { filePath: fetched.filePath, temporary: true } : { error: fetched.error };
 };
 
+// The original when it is already on this computer (nothing is fetched).
+const localOriginalFile = (md5, localOriginal = () => null) => {
+  const row = store.fileRow(db(), md5);
+  const local = service.keptPath(row, md5) ?? service.variantPath(row, "cache") ?? localOriginal(md5);
+  return local !== null && fs.existsSync(local) ? local : null;
+};
+
 // The original straight into a temp file (not the cache): it is about to be
 // copied into media-objects anyway.
 const fetchAndStoreTemp = async (md5) => {
@@ -301,4 +308,4 @@ const thumbOne = async (picture) => {
   return "failed";
 };
 
-module.exports = { resolvePicture, keepOriginals, keepOne, originalFile, probeOne, previewOne, thumbOne, fetchAndStore };
+module.exports = { resolvePicture, keepOriginals, keepOne, originalFile, localOriginalFile, probeOne, previewOne, thumbOne, fetchAndStore };
