@@ -943,6 +943,18 @@ const handleApi = async (request, response, url, { remote = false } = {}) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/review/search" && ["qa", "resource"].includes(url.searchParams.get("library"))) {
+      sendJson(response, 200, await readWorker.call("reviewLibrary", {
+        q: url.searchParams.get("q"),
+        fromUnix: url.searchParams.get("fromUnix"),
+        toUnix: url.searchParams.get("toUnix"),
+        library: url.searchParams.get("library"),
+        summaryOffset: url.searchParams.get("summaryOffset") ?? 0,
+        answered: url.searchParams.get("answered"),
+      }));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/review/search") {
       sendJson(response, 200, reviewOps.search({
         q: url.searchParams.get("q"),

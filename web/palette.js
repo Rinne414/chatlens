@@ -31,6 +31,8 @@ const paletteEntries = (sources, rawQuery) => {
     ...sources.pages.map(([view, title]) => ({ kind: "page", label: title, hint: "页面", keywords: `${view} ${PALETTE_PAGE_WORDS[view] ?? ""}`, action: { type: "page", view } })),
     { kind: "command", label: "退出 ChatLens", hint: "命令", keywords: "关闭 关掉 停止 后台 quit exit", action: { type: "quit" } },
     { kind: "command", label: "切换夜间 / 日间模式 / 跟随系统", hint: "命令", keywords: "主题 暗色 深色 theme dark system", action: { type: "theme" } },
+    { kind: "command", label: "问答库", hint: "回顾", keywords: "问答 问题 回答 qa faq 提问", action: { type: "library", library: "qa" } },
+    { kind: "command", label: "资源库", hint: "回顾", keywords: "资源 链接 新东西 模型 工具 link resource", action: { type: "library", library: "resource" } },
     { kind: "command", label: "我的页面", hint: "命令", keywords: "我 自己 个人页 me profile", action: { type: "me" } },
     { kind: "command", label: "键盘快捷键", hint: "命令 · ?", keywords: "快捷键 按键 键盘 keys shortcuts help", action: { type: "keys" } },
     ...sources.groups.map((group) => ({ kind: "group", label: group.name, hint: "Enter 打开聊天 · Shift+Enter 群页", keywords: `群 ${group.groupId}`, action: { type: "chat", groupId: group.groupId, groupName: group.name } })),
@@ -87,6 +89,9 @@ const runPaletteAction = (action) => {
       break;
     case "me":
       openMyPage();
+      break;
+    case "library":
+      openReviewView({ library: action.library });
       break;
     case "quit":
       quitConsole();

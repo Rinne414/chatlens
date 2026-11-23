@@ -21,6 +21,7 @@ const HANDLERS = {
   groupPerson: ["./group_ops", "getGroupPersonReadOnly"],
   personAcross: ["./group_ops", "getPersonAcrossReadOnly"],
   personExtras: ["./group_ops", "getPersonExtrasReadOnly"],
+  reviewLibrary: ["./review_library_ops", "searchLibraryReadOnly"],
   gallery: ["./gallery_ops", "runHeavyGalleryQuery"],
 };
 

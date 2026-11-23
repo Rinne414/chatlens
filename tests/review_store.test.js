@@ -193,3 +193,50 @@ test("search keeps to a date range, and a further page brings only the next mess
   assert.equal(more.summaries, undefined);
   assert.equal(more.messages.byDay, undefined);
 });
+
+test("the two libraries list one kind of note without a search word, and search inside it with one", () => {
+  const db = seed();
+  // one more stretch with an unanswered question, a thing with a link and two shared links (one not a web address)
+  const at = review.dayBounds("2026-09-22").start + 15 * 3600;
+  const chunkId = briefingStore.insertChunk(db, { groupId: "2002", startSentAt: at, endSentAt: at + 600, firstRowId: "700", lastRowId: "704", messageCount: 5, createdAt: NOW });
+  briefingStore.saveChunkResult(db, chunkId, { partial: {
+    summary: "下午闲聊",
+    topics: [{ title: "显卡", summary: "聊显卡", importance: "low", details: [] }],
+    newThings: [{ kind: "tool", name: "某个工具", detail: "开源的", link: "https://example.com/tool", speaker: "老王", hkt: "2026-09-22 15:02:00" }],
+    qa: [{ question: "有人用过 5090 吗？", answer: null, asker: "小雨", answerer: null, resolved: false, hkt: "2026-09-22 15:05:00" }],
+    timeline: [],
+    links: [{ title: "教程", url: "https://example.com/guide", why: "讲怎么装" }, { title: "坏的", url: "javascript:alert(1)", why: "不是网址" }, { title: "工具的网址", url: "https://example.com/tool", why: "和上面的工具是同一个" }],
+  } });
+
+  const qa = review.search(db, { query: "", library: "qa" });
+  assert.equal(qa.library, "qa");
+  assert.deepEqual(qa.summaries.items.map((hit) => [hit.kind, hit.title, hit.answered, hit.asker]), [
+    ["qa", "有人用过 5090 吗？", false, "小雨"],
+    ["qa", "5070ti 能跑吗？", true, null],
+  ]);
+  assert.equal(qa.messages.total, 0, "a library does not search the raw messages");
+  assert.deepEqual(review.search(db, { query: "5090", library: "qa" }).summaries.items.map((hit) => hit.title), ["有人用过 5090 吗？"]);
+
+  const resources = review.search(db, { query: "", library: "resource" });
+  assert.deepEqual(resources.summaries.items.map((hit) => [hit.kind, hit.title, hit.url]).sort(), [
+    ["link", "教程", "https://example.com/guide"],
+    ["newThing", "Qwen Image", null],
+    ["newThing", "前一天的东西", null],
+    ["newThing", "某个工具", "https://example.com/tool"],
+  ].sort());
+  assert.equal(resources.summaries.items.find((hit) => hit.title === "某个工具").by, "老王");
+  // a date range holds for a library too
+  const afternoon = review.search(db, { query: "", library: "resource", fromUnix: review.dayBounds("2026-09-22").start + 14 * 3600 });
+  assert.deepEqual(afternoon.summaries.items.map((hit) => hit.title).sort(), ["教程", "某个工具"].sort());
+  // only the unanswered questions; and a page at a time from an offset
+  assert.deepEqual(review.search(db, { query: "", library: "qa", answered: "no" }).summaries.items.map((hit) => hit.title), ["有人用过 5090 吗？"]);
+  assert.deepEqual(review.search(db, { query: "", library: "qa", answered: "yes" }).summaries.items.map((hit) => hit.title), ["5070ti 能跑吗？"]);
+  const second = review.search(db, { query: "", library: "qa", summaryOffset: 1 });
+  assert.deepEqual([second.summaries.total, second.summaries.items.map((hit) => hit.title)], [2, ["5070ti 能跑吗？"]]);
+  // without a library an empty search is still nothing, and an unknown library is the ordinary search
+  assert.equal(review.search(db, { query: "" }).summaries.total, 0);
+  assert.equal(review.search(db, { query: "", library: "nope" }).summaries.total, 0);
+  // the ordinary search now also finds a shared link
+  assert.ok(review.search(db, { query: "教程" }).summaries.items.some((hit) => hit.kind === "link"));
+  db.close();
+});

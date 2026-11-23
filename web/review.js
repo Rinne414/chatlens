@@ -12,7 +12,14 @@ const REVIEW_POLL_MS = 8000;
 const REVIEW_POLL_LIMIT = 90;
 const REVIEW_CALENDAR_DAYS = 365;
 const REVIEW_WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
-const REVIEW_HIT_LABELS = { topic: "话题", newThing: "新东西", qa: "问答", timeline: "时间线", summary: "摘要" };
+const REVIEW_HIT_LABELS = { topic: "话题", newThing: "新东西", link: "链接", qa: "问答", timeline: "时间线", summary: "摘要" };
+// The two libraries: one kind of thing from the AI's notes, listed without a
+// search word, searchable with one. (search state: reviewState.library)
+const REVIEW_LIBRARIES = {
+  qa: { title: "问答库", hint: "群里有人问过、AI 整理记下来的问题", placeholder: "在问答里搜：留空就列出全部" },
+  resource: { title: "资源库", hint: "群里提到的新东西和分享的链接", placeholder: "在资源里搜：留空就列出全部" },
+};
+const REVIEW_QA_FILTERS = [["all", "全部"], ["answered", "有回答的"], ["open", "没人回答的"]];
 
 const reviewState = {
   calendar: null,
@@ -27,6 +34,9 @@ const reviewState = {
   query: "",
   // "all" | "7" | "30" | "custom" (searchFrom..searchTo, both days included).
   searchRange: "all",
+  // null: the ordinary search. "qa" | "resource": that library.
+  library: null,
+  qaFilter: "all",
   searchFrom: null,
   searchTo: null,
   searchTicket: 0,
@@ -133,11 +143,13 @@ const openReviewView = async (preset = {}) => {
     renderReviewView();
     return;
   }
-  if (typeof preset.query === "string" && preset.query.trim().length > 0) {
+  const library = REVIEW_LIBRARIES[preset.library] === undefined ? null : preset.library;
+  if (library !== null || (typeof preset.query === "string" && preset.query.trim().length > 0)) {
     // A search opened from another page brings its own range (all time unless
-    // it says otherwise), never the one last picked here.
-    Object.assign(reviewState, { searchRange: "all" }, preset.range ?? {});
-    await runReviewSearch(preset.query);
+    // it says otherwise), never the one last picked here. A library opens on
+    // the last 30 days: all of it at once is a long list to put together.
+    Object.assign(reviewState, { searchRange: library === null ? "all" : "30", library, qaFilter: "all" }, preset.range ?? {});
+    await runReviewSearch(preset.query ?? "");
     await loadReviewDay(preset.day ?? reviewState.day ?? reviewDefaultDay());
     return;
   }
@@ -151,7 +163,7 @@ const openReviewView = async (preset = {}) => {
 // What the main column shows, as a history step.
 const reviewStepNow = () => {
   if (reviewState.resultsOpen && reviewState.results !== null) {
-    return { search: reviewState.query };
+    return { search: reviewState.query, ...(reviewState.library === null ? {} : { library: reviewState.library }) };
   }
   return reviewState.report === null ? { day: reviewState.day } : { report: reviewState.report };
 };
@@ -187,21 +199,22 @@ const reviewBackToDay = () => goBackTo((prev) => prev.view === "review" && prev.
   renderReviewView();
 });
 
-const reviewBackToResults = () => goBackTo((prev) => prev.view === "review" && prev.step?.search === reviewState.query, () => {
+const reviewBackToResults = () => goBackTo((prev) => prev.view === "review" && prev.step?.search === reviewState.query && (prev.step?.library ?? null) === reviewState.library, () => {
   reviewState.resultsOpen = true;
   markReviewStep();
   renderReviewView();
 });
 
 VIEW_STEP_RESTORERS.review = (step) => {
-  if (typeof step?.search === "string" && step.search !== "") {
-    if (reviewState.results !== null && reviewState.query === step.search) {
+  const library = step?.library ?? null;
+  if (typeof step?.search === "string" && (step.search !== "" || library !== null)) {
+    if (reviewState.results !== null && reviewState.query === step.search && reviewState.library === library) {
       reviewState.resultsOpen = true;
       showView("review");
       renderReviewView();
       return;
     }
-    openReviewView({ query: step.search });
+    openReviewView({ query: step.search, library });
     return;
   }
   reviewState.resultsOpen = false;
@@ -240,7 +253,12 @@ const reviewSearchRangeUnix = () => {
 };
 
 const reviewSearchParams = (extra = {}) => {
-  const params = new URLSearchParams({ q: reviewState.query, ...extra });
+  const params = new URLSearchParams({
+    q: reviewState.query,
+    ...(reviewState.library === null ? {} : { library: reviewState.library }),
+    ...(reviewState.library === "qa" && reviewState.qaFilter !== "all" ? { answered: reviewState.qaFilter === "answered" ? "yes" : "no" } : {}),
+    ...extra,
+  });
   const { fromUnix, toUnix } = reviewSearchRangeUnix();
   if (fromUnix !== null) {
     params.set("fromUnix", String(fromUnix));
@@ -293,7 +311,8 @@ const runReviewSearch = async (query) => {
   reviewState.searchTicket += 1;
   const ticket = reviewState.searchTicket;
   reviewState.query = String(query ?? "").trim();
-  if (reviewState.query.length === 0) {
+  // A library lists everything when nothing is typed; the ordinary search needs a word.
+  if (reviewState.query.length === 0 && reviewState.library === null) {
     reviewState.results = null;
     reviewState.resultsOpen = false;
     reviewState.searching = false;
@@ -331,7 +350,7 @@ const reviewSearchBar = () => {
   const input = el("input", {
     type: "search",
     class: "review-search-input",
-    placeholder: "搜话题、模型名、关键词：哪天聊过？",
+    placeholder: REVIEW_LIBRARIES[reviewState.library]?.placeholder ?? "搜话题、模型名、关键词：哪天聊过？",
     value: reviewState.query,
     "aria-label": "搜索往日话题",
   });
@@ -346,13 +365,51 @@ const reviewSearchBar = () => {
   },
   input,
   el("button", { class: "btn primary", type: "submit", disabled: reviewState.searching }, reviewState.searching ? "搜索中…" : "搜索"),
+  reviewLibraryButtons(input),
   results !== null && !reviewState.resultsOpen
     ? el("button", {
         class: "btn ghost",
         type: "button",
         onclick: reviewBackToResults,
-      }, `← 回到「${reviewState.query}」的结果`)
+      }, `← 回到${reviewResultsName()}的结果`)
     : null);
+};
+
+// 「问答库」「资源库」 beside the search: the one that is open is pressed, and
+// pressing it again goes back to the ordinary search.
+const reviewLibraryButtons = (input) => Object.entries(REVIEW_LIBRARIES).map(([key, library]) => el("button", {
+  class: reviewState.library === key ? "btn active" : "btn",
+  type: "button",
+  title: library.hint,
+  "aria-pressed": String(reviewState.library === key),
+  onclick: () => {
+    const opening = reviewState.library !== key;
+    const wasOrdinary = reviewState.library === null;
+    Object.assign(reviewState, { library: opening ? key : null, qaFilter: "all" });
+    // A library opens on the last 30 days (all of it is a long list); leaving
+    // it gives the ordinary search its own range back.
+    if (opening && wasOrdinary) {
+      reviewState.rangeBeforeLibrary = reviewState.searchRange;
+      if (reviewState.searchRange === "all") {
+        reviewState.searchRange = "30";
+      }
+    } else if (!opening && reviewState.rangeBeforeLibrary) {
+      reviewState.searchRange = reviewState.rangeBeforeLibrary;
+      reviewState.rangeBeforeLibrary = null;
+    }
+    // What is on screen belongs to the other list.
+    reviewState.results = null;
+    runReviewSearch(input.value);
+  },
+}, library.title));
+
+// "「flux」" / "问答库" / "问答库里的「flux」"
+const reviewResultsName = () => {
+  const library = REVIEW_LIBRARIES[reviewState.library]?.title ?? null;
+  if (library === null) {
+    return `「${reviewState.query}」`;
+  }
+  return reviewState.query === "" ? library : `${library}里的「${reviewState.query}」`;
 };
 
 // Wraps each occurrence of a search term in <mark> (DOM nodes, never HTML).
@@ -403,15 +460,26 @@ const reviewDayChips = (byDay, kind) => {
 
 const reviewHitMeta = (hit) => `${hit.groupName} · ${reviewShortDay(hit.day)} ${reviewClock(hit.sentAt)}`;
 
-const reviewSummaryHit = (hit, terms) =>
-  el("li", { class: "review-hit" },
+// Who asked and who answered (a question), or who brought it up (a thing).
+const reviewHitPeople = (hit) => {
+  if (hit.kind === "qa") {
+    return [hit.asker ? `${hit.asker} 问` : null, hit.answered ? (hit.answerer ? `${hit.answerer} 答` : null) : "没人回答"].filter(Boolean).join(" · ");
+  }
+  return hit.by ? `${hit.by} 提到` : "";
+};
+
+const reviewSummaryHit = (hit, terms) => {
+  const people = reviewHitPeople(hit);
+  return el("li", { class: "review-hit" },
     el("button", { class: "brief-row-button", onclick: () => reviewOpenChat(hit.groupId, hit.groupName, hit.sentAt) },
       el("div", { class: "review-hit-head" },
         el("span", { class: `review-kind ${hit.kind}` }, REVIEW_HIT_LABELS[hit.kind] ?? "摘要"),
         hit.title ? el("strong", {}, reviewMark(hit.title, terms)) : null),
       hit.text ? el("p", {}, reviewMark(hit.text, terms)) : null,
-      el("span", { class: "brief-meta" }, reviewHitMeta(hit))),
+      el("span", { class: "brief-meta" }, people ? `${people} · ` : "", reviewHitMeta(hit))),
+    hit.url ? el("a", { class: "review-hit-url", href: hit.url, target: "_blank", rel: "noopener noreferrer", title: "在浏览器里打开这个链接" }, hit.url) : null,
     el("button", { class: "linklike review-hit-day", onclick: () => reviewPickDay(hit.day) }, "看这天的整理 →"));
+};
 
 const reviewMessageHit = (hit, terms) =>
   el("li", { class: "review-hit message" },
@@ -437,28 +505,77 @@ const loadMoreReviewMessages = async () => {
   renderReviewView();
 };
 
+// The next page of a library from the server, appended and shown.
+const loadMoreLibraryHits = async () => {
+  const results = reviewState.results;
+  const ticket = reviewState.searchTicket;
+  try {
+    const page = await api(`/api/review/search?${reviewSearchParams({ summaryOffset: results.summaries.items.length })}`);
+    if (ticket !== reviewState.searchTicket) {
+      return;
+    }
+    // New notes may have come in since the first page and pushed the list down:
+    // what is already listed is not listed twice, and the count is the newest one.
+    const key = (hit) => `${hit.chunkId}|${hit.kind}|${hit.title}`;
+    const listed = new Set(results.summaries.items.map(key));
+    const fresh = page.summaries.items.filter((hit) => !listed.has(key(hit)));
+    const items = [...results.summaries.items, ...fresh];
+    reviewState.results = { ...results, summaries: { ...page.summaries, total: fresh.length === 0 ? items.length : Math.max(page.summaries.total, items.length), items } };
+    reviewState.summaryShown = (reviewState.summaryShown ?? REVIEW_HIT_STEP) + REVIEW_HIT_STEP;
+  } catch (error) {
+    reviewState.error = error.message;
+  }
+  renderReviewView();
+};
+
 const moreHitsButton = (label, onclick) => el("button", { class: "btn small review-more", type: "button", onclick }, label);
 
 const reviewResults = () => {
   const { terms, summaries, messages } = reviewState.results;
   const summaryShown = reviewState.summaryShown ?? REVIEW_HIT_STEP;
   const empty = summaries.total === 0 && messages.total === 0;
+  const library = REVIEW_LIBRARIES[reviewState.library] ?? null;
+  const listed = summaries.items;
+  // A library comes a page at a time: the rest is still on the server.
+  const waiting = summaries.total - listed.length;
+  const emptyLine = () => {
+    if (library !== null) {
+      return reviewState.searchRange === "all" ? "AI 整理里还没有这一类内容。" : "这段时间里没有。换成「全部时间」试试。";
+    }
+    return reviewState.searchRange === "all"
+      ? "AI 整理和原文里都没有找到。换个说法，或者只输入一个关键词试试。"
+      : "这段时间里没有找到。换成「全部时间」，或者换个说法试试。";
+  };
   return el("section", { class: "review-results" },
     el("header", { class: "review-results-head" },
-      el("h2", {}, `「${reviewState.query}」`),
+      el("h2", {}, reviewResultsName()),
       reviewSearchRangeControl(),
+      reviewState.library === "qa"
+        ? el("div", { class: "wall-modes", role: "group", "aria-label": "只看" }, REVIEW_QA_FILTERS.map(([key, label]) => el("button", {
+          class: `wall-mode ${reviewState.qaFilter === key ? "active" : ""}`,
+          type: "button",
+          "aria-pressed": String(reviewState.qaFilter === key),
+          onclick: () => {
+            reviewState.qaFilter = key;
+            runReviewSearch(reviewState.query);
+          },
+        }, label)))
+        : null,
       el("p", { class: "brief-meta" }, empty
-        ? (reviewState.searchRange === "all"
-          ? "AI 整理和原文里都没有找到。换个说法，或者只输入一个关键词试试。"
-          : "这段时间里没有找到。换成「全部时间」，或者换个说法试试。")
-        : `AI 整理里 ${briefNumber(summaries.total)} 处 · 原文里 ${briefNumber(messages.total)} 条（按日期从新到旧）`)),
+        ? emptyLine()
+        : library !== null
+          ? `${library.hint} · ${briefNumber(summaries.total)} 条（按日期从新到旧）`
+          : `AI 整理里 ${briefNumber(summaries.total)} 处 · 原文里 ${briefNumber(messages.total)} 条（按日期从新到旧）`)),
     summaries.total > 0
       ? el("section", { class: "brief-section" },
-          el("h3", { class: "brief-section-title" }, "AI 整理里", el("span", { class: "brief-sub" }, "点一条看当时的聊天，点日期看那天的整理")),
+          library !== null ? null : el("h3", { class: "brief-section-title" }, "AI 整理里", el("span", { class: "brief-sub" }, "点一条看当时的聊天，点日期看那天的整理")),
           reviewDayChips(summaries.byDay, "summaries"),
-          el("ul", { class: "review-hit-list" }, summaries.items.slice(0, summaryShown).map((hit) => reviewSummaryHit(hit, terms))),
-          summaries.items.length > summaryShown
-            ? moreHitsButton(`再显示 ${Math.min(REVIEW_HIT_STEP, summaries.items.length - summaryShown)} 处（共 ${briefNumber(summaries.items.length)} 处）`, () => {
+          el("ul", { class: "review-hit-list" }, listed.slice(0, summaryShown).map((hit) => reviewSummaryHit(hit, terms))),
+          listed.length <= summaryShown && waiting > 0
+            ? moreHitsButton(`再显示更多（还有 ${briefNumber(waiting)} 条）`, loadMoreLibraryHits)
+            : null,
+          listed.length > summaryShown
+            ? moreHitsButton(`再显示 ${Math.min(REVIEW_HIT_STEP, listed.length - summaryShown)} 处（共 ${briefNumber(summaries.total)} 处）`, () => {
               reviewState.summaryShown = summaryShown + REVIEW_HIT_STEP;
               renderReviewView();
             })

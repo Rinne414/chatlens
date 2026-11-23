@@ -62,7 +62,7 @@ const backfill = ({ day }) => {
 
 const numberOrNull = (value) => (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value));
 
-const search = ({ q, messageOffset = 0, fromUnix = null, toUnix = null, more = false }) => {
+const search = ({ q, messageOffset = 0, fromUnix = null, toUnix = null, more = false, library = null }) => {
   const query = String(q ?? "").slice(0, MAX_QUERY_LENGTH);
   return review.search(state.getStore(), {
     query,
@@ -70,6 +70,7 @@ const search = ({ q, messageOffset = 0, fromUnix = null, toUnix = null, more = f
     fromUnix: numberOrNull(fromUnix),
     toUnix: numberOrNull(toUnix),
     messagesOnly: more === true,
+    library,
   });
 };
 
