@@ -295,7 +295,7 @@ const galleryBadges = (item) => {
       : null,
     // Inside 「留存的原图」 every tile is kept: the mark would say nothing.
     item.kept && !app.gallery.kept ? { text: "已留存", tone: "kept", title: "原图已经存在本程序里，腾讯删掉之后也能看" } : null,
-    item.savedAt > 0 ? { text: "已存", tone: "saved", title: `${unixToHkt(item.savedAt).slice(0, 16)} 存到过你的文件夹` } : null,
+    item.savedAt > 0 ? { text: "已存", tone: "saved", title: `${unixToHkt(item.savedAt).slice(0, 16)} 存到 ${item.savedDir || "你的文件夹"}` } : null,
   ].filter((badge) => badge !== null);
 };
 
@@ -344,14 +344,14 @@ pictureTrays.onDragEnd = () => {
 
 // Saved pictures get their 「已存」 mark in place; the sidebar counts follow
 // once the saving pauses (each count walks the whole range).
-const markGallerySaved = (md5s, savedAt) => {
+const markGallerySaved = (md5s, savedAt, savedDir) => {
   const saved = new Set(md5s);
   const results = app.gallery.results;
   if (saved.size === 0 || results === null) {
     return;
   }
   replaceGallery({
-    results: { ...results, items: results.items.map((item) => (saved.has(item.md5) ? { ...item, savedAt } : item)) },
+    results: { ...results, items: results.items.map((item) => (saved.has(item.md5) ? { ...item, savedAt, savedDir } : item)) },
     facetsKey: "",
   });
   if (app.gallery.detail !== null && saved.has(app.gallery.detail.md5)) {

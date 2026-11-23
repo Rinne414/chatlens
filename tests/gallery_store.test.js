@@ -236,7 +236,7 @@ test("a picture saved out to a folder is marked, and 还没存过 leaves it out"
     pictureStore.recordSave(db, { md5: A, dir: "D:\\好图", file: "a.png", savedAt: NOW - 10 });
     pictureStore.recordSave(db, { md5: A, dir: "D:\\角色", file: "a.png", savedAt: NOW - 5 });
     const page = gallery.listPictures(db, range);
-    assert.deepEqual(page.items.map((item) => [item.md5, item.savedAt]), [[B, 0], [A, NOW - 5]]);
+    assert.deepEqual(page.items.map((item) => [item.md5, item.savedAt, item.savedDir]), [[B, 0, ""], [A, NOW - 5, "D:\\角色"]]);
     assert.deepEqual(gallery.listPictures(db, { ...range, unsaved: true }).items.map((item) => item.md5), [B]);
     // The count ignores its own switch, like every other one.
     assert.equal(gallery.galleryFacets(db, { ...range, unsaved: true }).extras.unsaved, 1);

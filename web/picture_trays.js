@@ -20,7 +20,7 @@ const pictureTrays = {
   // null | "new" | tray id: the tray whose name and folder are being edited.
   editing: null,
   dragging: false,
-  // Told which pictures were just saved: (md5s, savedAtUnix).
+  // Told which pictures were just saved: (md5s, savedAtUnix, folder).
   onSaved: () => {},
   // Told after a tray was added, changed or removed.
   onChanged: () => {},
@@ -95,7 +95,7 @@ const saveBatchesToTray = async (md5s, tray, job) => {
       job.done += batch.length;
       counted += batch.length;
       if (saved.length > 0) {
-        pictureTrays.onSaved(saved.map((item) => item.md5), Math.floor(Date.now() / 1000));
+        pictureTrays.onSaved(saved.map((item) => item.md5), Math.floor(Date.now() / 1000), tray.path);
       }
       renderTrayDock();
     }
@@ -327,7 +327,7 @@ const trayDockNodes = () => {
   return [
     el("div", { class: "tray-dock-head" },
       el("strong", {}, "存图托盘"),
-      el("span", { class: "kb-meta" }, "把图片拖进来，原图就存进文件夹")),
+      el("span", { class: "kb-meta" }, "把图片拖进来，原图就存进文件夹。看大图时按托盘的数字也行")),
     trays.map((tray, index) => trayNode(tray, index, { selected })),
     pictureTrays.editing === "new"
       ? el("div", { class: "tray editing" }, trayEditForm(null))

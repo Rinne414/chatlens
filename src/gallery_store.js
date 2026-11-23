@@ -272,15 +272,15 @@ const filesOf = (db, md5s) => new Map(db.prepare(`
   FROM picture_files WHERE md5 IN (SELECT value FROM json_each(@md5s))
 `).all({ md5s: JSON.stringify(md5s) }).map((row) => [row.md5, row]));
 
-// When each picture was last saved out to a folder (absent = never).
+// When and where each picture was last saved out to a folder (absent = never).
 const savedOf = (db, md5s) => {
   if (!hasSaves(db)) {
     return new Map();
   }
   return new Map(db.prepare(`
-    SELECT md5, MAX(saved_at) AS savedAt FROM picture_saves
+    SELECT md5, MAX(saved_at) AS savedAt, dir AS savedDir FROM picture_saves
     WHERE md5 IN (SELECT value FROM json_each(@md5s)) GROUP BY md5
-  `).all({ md5s: JSON.stringify(md5s) }).map((row) => [row.md5, row.savedAt]));
+  `).all({ md5s: JSON.stringify(md5s) }).map((row) => [row.md5, row]));
 };
 
 const knowledgeOf = (db, md5s) => {
@@ -378,7 +378,8 @@ const listPictures = (db, options) => {
     total,
     items: rows.map((row) => ({
       ...describe(row, byMd5.get(row.md5), files.get(row.md5), knowledge.get(row.md5), normalized),
-      savedAt: saved.get(row.md5) ?? 0,
+      savedAt: saved.get(row.md5)?.savedAt ?? 0,
+      savedDir: saved.get(row.md5)?.savedDir ?? "",
     })),
   };
 };
