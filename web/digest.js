@@ -237,6 +237,82 @@ const digestActions = (kind, period, entry) => {
     digestState.notice ? el("span", { class: "brief-meta", style: `color:var(${digestState.notice.isError ? "--risk" : "--ok"})` }, digestState.notice.text) : null);
 };
 
+/* ---------- 朗读: the overview read aloud by the browser's own voice ---------- */
+
+// What is read, one part per pause: the headline, the summary, then only the
+// titles of the highlights (a few minutes; the details are for reading).
+const digestSpeechParts = (digest) => {
+  const summary = digest.summary;
+  const titles = (summary.highlights ?? []).map((item) => item.title).filter((title) => typeof title === "string" && title.trim() !== "");
+  return [
+    summary.headline,
+    summary.summary,
+    titles.length === 0 ? "" : `重点有 ${titles.length} 件：${titles.join("；")}。`,
+  ].filter((part) => typeof part === "string" && part.trim() !== "");
+};
+
+// A Mandarin voice of this computer: Simplified first, then Taiwan; a
+// Cantonese one only when there is nothing else Chinese.
+const digestVoice = () => {
+  const voices = window.speechSynthesis.getVoices().filter((voice) => /^zh/iu.test(voice.lang));
+  const rank = (voice) => (/zh[-_](CN|Hans)/iu.test(voice.lang) ? 0 : /zh[-_]TW/iu.test(voice.lang) ? 1 : /zh[-_]HK/iu.test(voice.lang) ? 3 : 2);
+  return voices.sort((left, right) => rank(left) - rank(right))[0] ?? null;
+};
+
+const digestSpeech = { key: null };
+
+const stopDigestSpeech = () => {
+  if (digestSpeech.key !== null) {
+    digestSpeech.key = null;
+    window.speechSynthesis?.cancel();
+  }
+};
+
+const toggleDigestSpeech = (key, digest) => {
+  const wasReading = digestSpeech.key === key;
+  stopDigestSpeech();
+  if (!wasReading) {
+    const voice = digestVoice();
+    const parts = digestSpeechParts(digest);
+    const done = () => {
+      if (digestSpeech.key === key) {
+        digestSpeech.key = null;
+        renderBriefWhenIdle();
+      }
+    };
+    digestSpeech.key = key;
+    parts.forEach((part, index) => {
+      const utterance = new SpeechSynthesisUtterance(part);
+      utterance.lang = voice?.lang ?? "zh-CN";
+      if (voice !== null) {
+        utterance.voice = voice;
+      }
+      // The button goes back to 「朗读」 after the last part, or when one fails.
+      utterance.onend = index === parts.length - 1 ? done : null;
+      utterance.onerror = done;
+      window.speechSynthesis.speak(utterance);
+    });
+  }
+  renderBriefWhenIdle();
+};
+
+// Only where the browser can speak; the voice is the computer's own, nothing is sent anywhere.
+const digestSpeechButton = (key, digest) => {
+  if (typeof window.speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined" || digestSpeechParts(digest).length === 0) {
+    return null;
+  }
+  const reading = digestSpeech.key === key;
+  return el("button", {
+    class: "kb-facet-more digest-speak",
+    type: "button",
+    "aria-pressed": String(reading),
+    title: reading ? "" : "用这台电脑自带的语音读出标题、概述和每件重点的名字",
+    onclick: () => toggleDigestSpeech(key, digest),
+  }, reading ? "停下朗读" : "朗读");
+};
+
+VIEW_LEAVE_HOOKS.push(stopDigestSpeech);
+
 // One digest (any kind) with its header, body and generate button.
 // folded: only the headline and a button that opens the rest (the home page,
 // once 值得知道的事 says the same across groups); toggle flips it.
@@ -262,7 +338,7 @@ const digestCard = (kind, period, { title, headerExtra = null, emptyText, fold =
       ? el("p", { class: "brief-empty-line" }, entry?.loading ? "正在读取…" : emptyText ?? "还没有生成。")
       : el("div", { class: "digest-body" },
         digest.summary.headline ? el("p", { class: "digest-headline" }, digest.summary.headline) : null,
-        fold === null ? null : digestFoldButton(digest, fold),
+        el("div", { class: "digest-fold-row" }, fold === null ? null : digestFoldButton(digest, fold), digestSpeechButton(key, digest)),
         fold?.folded ? null : [
           digest.summary.summary ? el("p", { class: "digest-summary" }, digest.summary.summary) : null,
           el("div", { class: "digest-grid" }, kind === "day" ? digestDayBody(digest, key) : digestPeriodBody(digest, key)),

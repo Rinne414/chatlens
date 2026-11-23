@@ -228,6 +228,13 @@ const renderBriefThingLayer = () => {
   el("div", { class: "kb-overlay-panel gp-topic-panel", role: "dialog", "aria-label": thing.title },
     el("div", { class: "kb-overlay-head" },
       el("h3", { class: "gp-topic-title" }, thing.title),
+      // Leaving for 问群聊 closes the layer; back opens this thing again.
+      el("button", {
+        class: "btn small",
+        type: "button",
+        title: "去「问群聊」接着问这件事：问题先替你起个头，你补完再问",
+        onclick: () => askAbout(thing.title),
+      }, "问群聊这件事"),
       el("button", { class: "btn small", type: "button", onclick: dismissBriefThing }, "关闭")),
     el("p", { class: "thing-lead" },
       el("span", { class: `thing-kind thing-${thing.kind}` }, THING_KINDS[thing.kind].label), " ", thing.takeaway, " ", thingStatus(thing)),

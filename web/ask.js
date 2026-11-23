@@ -122,6 +122,19 @@ const openAskView = async () => {
   askSchedulePoll();
 };
 
+// From another page: 问群聊 opens with a question started about that thing.
+// Nothing is sent until the user finishes the question and asks.
+const askDraftAbout = (subject) => `关于「${subject}」：`;
+
+const askAbout = (subject) => {
+  askState.draft = askDraftAbout(subject);
+  openAskView().then(() => {
+    const input = document.querySelector(".ask-input");
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  });
+};
+
 /* ---------- rendering ---------- */
 
 const askForm = () => {

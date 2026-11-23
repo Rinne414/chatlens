@@ -536,3 +536,7 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .brief-commitment-undo { margin: 8px 0 0; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px; }
 .brief-commitment-done { margin-top: 8px; display: grid; gap: 8px; font-size: 13px; justify-items: start; }
 .brief-commitment-done .brief-mention-list { width: 100%; }
+
+/* 朗读 beside 展开全文 (digest.js) */
+.digest-fold-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.digest-fold-row:empty { display: none; }
