@@ -34,7 +34,6 @@ const paletteEntries = (sources, rawQuery) => {
     { kind: "command", label: "问答库", hint: "回顾", keywords: "问答 问题 回答 qa faq 提问", action: { type: "library", library: "qa" } },
     { kind: "command", label: "资源库", hint: "回顾", keywords: "资源 链接 新东西 模型 工具 link resource", action: { type: "library", library: "resource" } },
     { kind: "command", label: "我的页面", hint: "命令", keywords: "我 自己 个人页 me profile", action: { type: "me" } },
-    { kind: "command", label: "切换简体 / 繁體中文", hint: "命令", keywords: "语言 語言 繁体 繁體 简体 簡體 language traditional", action: { type: "lang" } },
     { kind: "command", label: "键盘快捷键", hint: "命令 · ?", keywords: "快捷键 按键 键盘 keys shortcuts help", action: { type: "keys" } },
     ...sources.groups.map((group) => ({ kind: "group", label: group.name, hint: "Enter 打开聊天 · Shift+Enter 群页", keywords: `群 ${group.groupId}`, action: { type: "chat", groupId: group.groupId, groupName: group.name } })),
     ...sources.words.map((item) => ({ kind: "word", label: `关注的词：${item.word}`, hint: `这几天 ${item.total} 条`, keywords: item.word, action: { type: "word", word: item.word } })),
@@ -87,9 +86,6 @@ const runPaletteAction = (action) => {
       break;
     case "keys":
       toggleKeyHelp();
-      break;
-    case "lang":
-      setLangChoice(langChoice() === "zh-Hant" ? "zh-Hans" : "zh-Hant");
       break;
     case "me":
       openMyPage();
