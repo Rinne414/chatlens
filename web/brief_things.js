@@ -235,6 +235,8 @@ const renderBriefThingLayer = () => {
         title: "去「问群聊」接着问这件事：问题先替你起个头，你补完再问",
         onclick: () => askAbout(thing.title),
       }, "问群聊这件事"),
+      el("button", { class: "btn small ghost", type: "button", title: "我不关心这件事：从简报里拿掉，以后同一类的事也少列", onclick: () => sendThingFeedback(thing, "unimportant") }, "不重要"),
+      el("button", { class: "btn small ghost", type: "button", title: "这段总结说得不对：从简报里拿掉，并记下来", onclick: () => sendThingFeedback(thing, "wrong") }, "讲错了"),
       el("button", { class: "btn small", type: "button", onclick: dismissBriefThing }, "关闭")),
     el("p", { class: "thing-lead" },
       el("span", { class: `thing-kind thing-${thing.kind}` }, THING_KINDS[thing.kind].label), " ", thing.takeaway, " ", thingStatus(thing)),
@@ -307,6 +309,10 @@ const briefThingsBody = (data) => {
         ? el("p", { class: "kb-meta" }, "到电脑上的 ChatLens 点「现在整理」。")
         : el("button", { class: "btn small primary", type: "button", onclick: remakeBriefThings }, "现在整理"));
   }
+  if (data.things.length === 0) {
+    // Everything that was listed has been taken out by the reader.
+    return el("div", { class: "thing-section" }, el("p", { class: "brief-empty-line" }, "这段时间的事都被你拿掉了。"), thingFeedbackLine());
+  }
   const parts = splitBriefThings(data.things);
   const other = otherBubble(parts.tail, parts.chat, parts.head);
   return el("div", { class: "thing-section" },
@@ -317,7 +323,8 @@ const briefThingsBody = (data) => {
       caption: "各群这段时间值得知道的事，越大越重要",
       weightNote: "越大越重要：几个群在聊、聊了多少、重要程度和你关注的词都算",
     }),
-    briefThingList(parts));
+    briefThingList(parts),
+    thingFeedbackLine());
 };
 
 const briefThingsSection = () => {

@@ -561,3 +561,9 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 /* 键盘快捷键 (key_help.js): the page's keys, then the ones that work everywhere */
 .key-help-title { margin: 10px 0 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .brief-keys-help { max-height: calc(100vh - 40px); overflow-y: auto; }
+
+/* 简报: 不重要 / 讲错了 (thing_feedback.js) */
+.thing-feedback { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.thing-feedback-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.thing-feedback-list li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.thing-feedback-list .tag { flex: none; }

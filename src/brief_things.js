@@ -8,6 +8,7 @@
 // later merges of a group's brief can add or rewrite topics without the
 // stored things pointing at the wrong ones.
 
+const { hiddenTitles } = require("./summary_feedback");
 const briefingStore = require("./briefing_store");
 const { normalizeThings, validateThings } = require("./topic_things");
 
@@ -82,7 +83,8 @@ const followedGroups = (config) => (config.watchlist ?? [])
 
 /* ---------- the LLM call ---------- */
 
-const buildBriefThingsPrompt = ({ topics }) => [
+// disliked: titles of things this reader marked 「不重要」 lately (summary_feedback.js).
+const buildBriefThingsPrompt = ({ topics, disliked = [] }) => [
   `下面是读者关注的群在这段时间里各自的热门话题，共 ${topics.length} 个（g = 群名，n = 估计消息数）。`,
   "读者一天要看几十个群，读完常常记不住看了什么。请把它们整理成「值得知道的事」，输出 JSON（简体中文）：",
   '{"things": [{"title": "8-16 字，说清是什么事", "takeaway": "60 字以内的一句话结论：发生了什么 / 结论是什么 / 还缺什么，带上具体名称和数字", "kind": "new|qa|resource|group", "status": "resolved|open|", "topics": [0, 7, 12]}]}',
@@ -92,6 +94,9 @@ const buildBriefThingsPrompt = ({ topics }) => [
   "- 闲聊、玩梗、没有信息的话题不要列出来：没列出的编号会自动归为闲聊。有信息的话题一个都不要漏。",
   "- status 只对 qa 填：问题得到回答写 resolved，没人答或没结论写 open；其他 kind 留空字符串。",
   "- takeaway 写结论，不要复述过程，不要罗列群名。",
+  ...(disliked.length === 0 ? [] : [
+    `- 这位读者以前把下面这些事标成了「不重要」。和它们是同一类的事（同样的话题、同样性质的闲事）不要列出来，除非这次有明显的新进展：${JSON.stringify(disliked)}`,
+  ]),
   "",
   JSON.stringify(topics.map((topic, index) => ({ i: index, g: topic.groupName, t: topic.title, s: clip(topic.summary, MAX_SUMMARY_CHARS), n: topic.messages }))),
 ].join("\n");
@@ -210,7 +215,11 @@ const readBriefThings = (db, { watchlist, windowStart, watchWords = [], nowUnix 
     return { ...result, stale: isStale(result, nowUnix) };
   }
   const followed = new Set(watchlist.map((entry) => String(entry.groupId)));
-  const { things, lost, unsorted, kept } = keysToThings(JSON.parse(row.json), topics, { followed });
+  const all = keysToThings(JSON.parse(row.json), topics, { followed });
+  // What the reader took out (不重要 / 讲错了) stays out until it is put back.
+  const hidden = hiddenTitles(db);
+  const { lost, unsorted, kept } = all;
+  const things = all.things.filter((thing) => !hidden.has(thing.title));
   const result = {
     windowStart,
     topicCount: topics.length,
@@ -219,7 +228,8 @@ const readBriefThings = (db, { watchlist, windowStart, watchWords = [], nowUnix 
     lost,
     model: row.model,
     createdAt: row.createdAt,
-    things: things.length > 0 ? weighBriefThings(things, [...topics, ...kept], watchWords) : null,
+    things: things.length > 0 ? weighBriefThings(things, [...topics, ...kept], watchWords) : all.things.length > 0 ? [] : null,
+    hiddenByReader: all.things.length - things.length,
   };
   return { ...result, stale: isStale(result, nowUnix) };
 };

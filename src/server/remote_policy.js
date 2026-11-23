@@ -69,6 +69,10 @@ const REMOTE_API_ROUTES = new Set([
   // actions that belong to reading
   "POST /api/readmark",
   "POST /api/briefing/seen",
+  // saying a thing in the briefing is unimportant or wrong belongs to reading it
+  "GET /api/feedback",
+  "POST /api/feedback",
+  "POST /api/feedback/delete",
   "POST /api/briefing/visit",
   "POST /api/briefing/window",
   "POST /api/briefing/retry-failed",

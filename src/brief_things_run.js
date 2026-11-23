@@ -11,6 +11,7 @@ const { createStoreRecorder } = require("./llm_usage");
 const { callLlm, createClient, currentModel, setUsageRecorder } = require("./llm_summarizer");
 const { resolveLlmRoute, markGrokUnavailable } = require("./llm_route");
 const { loadConfig } = require("./server/toolkit_state");
+const { tasteTitles } = require("./summary_feedback");
 const { buildBriefThingsPrompt, followedGroups, normalizeThings, saveBriefThings, thingsToKeys, validateThings, windowStartOf, windowTopics, MERGE_LOCK, MERGE_LOCK_STALE_MS } = require("./brief_things");
 const { takeLock } = require("./vault_files");
 
@@ -42,7 +43,7 @@ const main = async () => {
     const route = await resolveLlmRoute(config);
     const client = createClient(route.primary, { fallback: route.fallback, onFallback: (error) => markGrokUnavailable(error) });
     setUsageRecorder(createStoreRecorder(toolRoot));
-    const prompt = buildBriefThingsPrompt({ topics });
+    const prompt = buildBriefThingsPrompt({ topics, disliked: tasteTitles(db, nowUnix) });
     const raw = await callLlm(
       client,
       () => ({ system: SYSTEM_PROMPT, user: prompt, maxTokens: MAX_TOKENS, temperature: 0.2 }),
