@@ -569,6 +569,8 @@ const stopRun = () => {
 const serverUrlOf = () => serverUrl;
 
 const getStatus = () => ({
+  // A demo copy (scripts/make_demo.js): made-up chats that never update.
+  demo: state.loadConfig().demo === true,
   settings: settings(),
   readinessProblem: readiness(),
   running: status.running,

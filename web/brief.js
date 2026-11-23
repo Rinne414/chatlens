@@ -423,8 +423,14 @@ const briefRefreshPieces = (data) => {
   return { tone: "ok", pieces: [background.lastFinishedAt ? `${briefAgo(background.lastFinishedAt)}刷新过${tail}` : `等待第一次后台刷新${tail}`] };
 };
 
+// A demo copy says what it is, in place of everything about setup and refreshing.
+const BRIEF_DEMO_LINE = "示范数据：这里的群、人和聊天都是编的，不会更新。";
+
 const briefStatusLine = (data) => {
   const background = data.status?.background ?? {};
+  if (background.demo === true) {
+    return el("p", { class: "brief-status ok" }, BRIEF_DEMO_LINE);
+  }
   const refresh = briefRefreshPieces(data);
   const pieces = [...refresh.pieces];
   let tone = refresh.tone;

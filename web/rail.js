@@ -82,6 +82,9 @@ const renderRailGroups = () => {
 
 const railBackgroundLine = (data) => {
   const background = data.background;
+  if (background.demo === true) {
+    return { tone: "ok", text: "示范数据", title: "这里的群、人和聊天都是编的，不会更新" };
+  }
   if (data.pause?.paused) {
     return { tone: "paused", text: "AI 总结已暂停" };
   }
