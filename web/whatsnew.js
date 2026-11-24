@@ -28,6 +28,7 @@ const WHATS_NEW = [
   { title: "问答库和资源库", detail: "回顾页搜索框旁边：群里问过的问题（可以只看没人回答的）、提到的新东西和链接，不用输入就能翻。搜不到时可以让 AI 换几种说法再搜。", view: "review", selector: ".review-search" },
   { title: "告诉简报什么不重要", detail: "点开「值得知道的事」里的一件，可以标「不重要」或「讲错了」，它会从简报拿掉；也可以写一句话，让 AI 帮你盯一件事。", view: "brief", selector: ".thing-section" },
   { title: "刷新能看进度、能停下", detail: "后台刷新时简报写着正在做哪一步、已经多久，旁边可以「停下这一轮」。任何页面按 ? 看这一页能用的键。主题多了「跟随系统」。", view: null, selector: "" },
+  { title: "设置和存储一眼看完", detail: "每一项的说明和完整路径收进了「说明」，点开才显示；最上面的状态变成一行。设置里的「界面」可以把图标从表情符号换成线条图标。", view: "settings", selector: "[data-testid='look-card']" },
   { title: "咒语库：换写法、交给 ComfyUI", detail: "咒语可以复制成 NAI 或 WebUI 的强调写法；ComfyUI 做的图可以把工作流直接交给这台电脑上的 ComfyUI 排队。", view: "knowledge", selector: "#view-knowledge" },
 ];
 
