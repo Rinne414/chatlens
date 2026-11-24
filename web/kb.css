@@ -6,7 +6,7 @@
 .kb-page > .kb-tabs, .kb-header > .kb-stats, .kb-header > .kb-coverage { margin-bottom: 0; }
 
 .kb-stat.clickable { font: inherit; color: inherit; text-align: left; cursor: pointer; transition: border-color var(--dur), background var(--dur); }
-.kb-stat.clickable:hover { border-color: var(--accent); background: var(--accent-soft); }
+.kb-stat.clickable:hover strong, .kb-stat.clickable:focus-visible strong { color: var(--accent); text-decoration: underline; }
 
 .kb-searchbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .kb-searchbar .kb-search { height: 40px; font-size: 14px; }
@@ -19,7 +19,7 @@
   gap: 2px;
   padding: 2px 4px 2px 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 12px;

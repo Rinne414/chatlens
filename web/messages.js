@@ -621,7 +621,7 @@ const quickSummaryResultNodes = (result) => [
         el("h4", { style: "margin:8px 0 4px;font-size:13px" }, "待办 / 提问"),
         el("ul", { class: "item-list" }, result.actions.map((action) =>
           el("li", { class: action.status === "resolved" ? "resolved" : "" },
-            `${action.status === "resolved" ? "✅" : "⏳"} ${action.text}`,
+            `${action.status === "resolved" ? "✓" : "○"} ${action.text}`,
             action.resolution ? el("span", { class: "ev" }, `处理：${action.resolution}`) : null))))
     : null,
   el("p", { class: "card-sub", style: "margin:10px 0 0" },
@@ -775,7 +775,7 @@ const remoteStickerNode = (picture) =>
         img.src = pictureUrl(picture.md5, "thumb");
         return;
       }
-      img.replaceWith(el("span", { class: "bubble-sticker missing" }, "😃 表情"));
+      img.replaceWith(el("span", { class: "bubble-sticker missing" }, "[表情]"));
     },
   });
 
@@ -1073,7 +1073,7 @@ const renderChat = () => {
             localStorage.setItem("cc-msgstyle", msg.style);
             renderMessagesView();
           },
-        }, msg.style === "compact" ? "🗨️ 气泡模式" : "☰ 紧凑模式"),
+        }, msg.style === "compact" ? "气泡模式" : "☰ 紧凑模式"),
         el("button", {
           class: msg.mediaOnly ? "btn small active" : "btn small",
           type: "button",
@@ -1128,7 +1128,7 @@ const renderChat = () => {
         el("span", {}, app.msg.selB === null
           ? `已选起点，${pressWord}另一条消息选终点`
           : selectionCount(range) === null ? "已选一段（部分不在当前载入的消息里）" : `已选 ${selectionCount(range)} 条`),
-        el("button", { class: "btn small primary", onclick: summarizeSelection, disabled: app.msg.selB === null && app.msg.selA === null }, "🧠 总结所选"),
+        el("button", { class: "btn small primary", onclick: summarizeSelection, disabled: app.msg.selB === null && app.msg.selA === null }, "总结所选"),
         el("button", { class: "btn small", onclick: clearSelection }, "取消"));
 
   const toBottom = el("button", { class: "to-bottom", title: "回到最新", onclick: goToLatest }, "⤓");

@@ -322,8 +322,6 @@ const app = {
 };
 
 const VIEW_TITLES = { brief: "简报", review: "回顾", bookmarks: "收藏", ask: "问群聊", trends: "热点", group: "群", backup: "备份", run: "自定义总结", messages: "消息", history: "历史报告", media: "画廊", qqcollect: "QQ 收藏图", knowledge: "咒语库", watchlist: "关注群", reader: "阅读报告", storage: "存储", settings: "设置" };
-const NAV_ICONS = { brief: "📰", review: "📅", bookmarks: "🔖", ask: "🔎", trends: "🔥", group: "👥", backup: "📦", run: "▶", messages: "💬", history: "📚", media: "🖼️", qqcollect: "📥", knowledge: "🔮", watchlist: "⭐", storage: "💾", settings: "⚙️" };
-const KIND_ICONS = { image: "📷", video: "🎬", sticker: "😃", face: "😃", emoji: "😃", audio: "🎵", file: "📎" };
 const KIND_LABELS = { image: "图片", video: "视频", sticker: "表情", face: "表情", emoji: "表情", audio: "语音", file: "文件" };
 
 const ZOOM_CHOICES = new Set(["auto", "1", "1.15", "1.3", "1.5", "1.75", "2"]);
@@ -361,12 +359,13 @@ const applySettings = () => {
   document.documentElement.dataset.theme = settings.theme;
   for (const button of document.querySelectorAll("#nav button")) {
     const name = button.dataset.view;
-    button.textContent = `${NAV_ICONS[name] ?? ""} ${VIEW_TITLES[name] ?? name}`;
+    button.replaceChildren(lineIcon(name), el("span", {}, VIEW_TITLES[name] ?? name));
   }
   const themeButton = $("#theme-toggle");
   if (themeButton !== null) {
     // The button names what a click changes to; the tooltip says what it is now.
-    themeButton.textContent = { light: "🌙 夜间模式", dark: "🖥️ 跟随系统", system: "☀️ 日间模式" }[settings.themeChoice];
+    const next = { light: ["moon", "夜间模式"], dark: ["monitor", "跟随系统"], system: ["sun", "日间模式"] }[settings.themeChoice];
+    themeButton.replaceChildren(lineIcon(next[0]), el("span", {}, next[1]));
     themeButton.title = { light: "现在是日间模式", dark: "现在是夜间模式", system: `现在跟随系统（${settings.theme === "dark" ? "夜间" : "日间"}）` }[settings.themeChoice];
   }
 };
@@ -468,9 +467,8 @@ const avatarEl = (label, seed, size, avatarUrl) => {
 
 const mediaLabelText = (kinds, text) => {
   const kind = String(kinds ?? "").split(",")[0];
-  const icon = KIND_ICONS[kind] ?? "📎";
   const label = KIND_LABELS[kind] ?? "媒体";
-  return text && text.trim().length > 0 ? `${icon} [${label}] ${text.trim()}` : `${icon} [${label}]`;
+  return text && text.trim().length > 0 ? `[${label}] ${text.trim()}` : `[${label}]`;
 };
 
 const formatBytes = (bytes) => {

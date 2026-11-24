@@ -160,7 +160,7 @@ html[data-theme="dark"] .gp-rel, html[data-theme="dark"] .pp-page {
   padding: 5px 14px 5px 6px;
   border: 1px solid var(--line);
   border-left: 5px solid var(--rel-other);
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--panel);
   color: var(--ink);
   font: inherit;

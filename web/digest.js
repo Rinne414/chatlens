@@ -399,15 +399,18 @@ const digestReportList = (kind, onPick, selected) => {
   }
   const stored = new Map((digestState.lists[kind] ?? []).map((item) => [item.period, item]));
   return el("section", { class: "digest-reports" },
-    el("h4", {}, kind === "week" ? "周报" : "月报"),
-    el("ul", {}, digestRecentPeriods(kind).map((period) => {
-      const item = stored.get(period);
-      return el("li", {},
-        el("button", {
-          class: `digest-report-row ${selected === digestKey(kind, period) ? "on" : ""}`,
-          onclick: () => onPick(kind, period),
-        },
-        el("span", {}, digestPeriodLabel(kind, period)),
-        el("span", { class: "brief-meta" }, item ? item.headline || "已生成" : "未生成 · 点开可生成")));
-    })));
+    el("h4", {}, DIGEST_KIND_LABELS[kind], el("span", { class: "digest-reports-hint" }, "点开一份就生成")),
+    el("ul", {}, digestRecentPeriods(kind).map((period) => digestReportRow(kind, period, stored.get(period), selected, onPick))));
 };
+
+// A report that exists says so (and its headline); one that does not has a
+// dashed frame and says nothing: the section header already tells how to make it.
+const digestReportRow = (kind, period, item, selected, onPick) => el("li", {},
+  el("button", {
+    class: `digest-report-row ${item ? "made" : ""} ${selected === digestKey(kind, period) ? "on" : ""}`,
+    title: item ? null : "还没生成，点开后可生成",
+    onclick: () => onPick(kind, period),
+  },
+  el("span", { class: "digest-report-range" }, digestPeriodLabel(kind, period)),
+  item ? el("span", { class: "digest-report-made" }, "已生成") : null,
+  item?.headline ? el("span", { class: "digest-report-headline" }, item.headline) : null));

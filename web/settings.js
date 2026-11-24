@@ -7,6 +7,32 @@ const settingsState = { status: null, models: [], background: null, backgroundEr
 // the whole view), so its busy flag and last notice are kept module-level.
 const autoKeyState = { busy: false, notice: null };
 
+/* ---------- second level: what is looked up, not acted on ---------- */
+
+// A native disclosure, so a keyboard and a finger open it as well as a mouse.
+// The first screen keeps the name, the state and the action; the explanation
+// (and the long values) wait in here.
+const foldNote = (label, ...children) =>
+  el("details", { class: "fold-note" },
+    el("summary", {}, label),
+    el("div", { class: "fold-note-body" }, children));
+
+const explainNote = (...children) => foldNote("说明", ...children);
+
+// A group of switches: the switches show only their names; each one's sentence
+// is listed once under the group's 说明.
+const switchHints = (options) => {
+  const hinted = options.filter((option) => option.hint);
+  return hinted.length === 0
+    ? null
+    : el("ul", { class: "fold-hints" }, hinted.map((option) =>
+      el("li", {}, el("strong", {}, option.label), "：", option.hint)));
+};
+
+const switchGrid = (options) =>
+  el("div", { class: "bg-grid" }, options.map((option) =>
+    backgroundToggle(option.label, null, option.on, option.onChange)));
+
 const openSettingsView = async () => {
   showView("settings");
   settingsState.llmDraft = null;
@@ -110,9 +136,10 @@ const renderSettingsView = () => {
     aiReadiness(status),
     { label: "后台刷新", ok: background?.settings?.enabled === true && !background?.lastError, detail: backgroundDetail() },
   ];
-  const readinessCard = el("div", { class: "system-readiness", "data-testid": "system-readiness" },
-    readiness.map((item) => el("div", { class: `readiness-item ${item.ok ? "ok" : "attention"}` },
-      el("span", {}, item.label),
+  // One line of label: state pairs; a state that needs attention is in the warning colour.
+  const readinessCard = el("p", { class: "settings-status", "data-testid": "system-readiness" },
+    readiness.map((item) => el("span", { class: `settings-status-item ${item.ok ? "ok" : "attention"}` },
+      `${item.label}：`,
       el("strong", {}, item.detail))));
 
   /* --- QQ database paths --- */
@@ -151,7 +178,7 @@ const renderSettingsView = () => {
     : null;
   const pathsCard = el("div", { class: "card" },
     el("h2", { id: "settings-paths" }, "QQ 数据库路径"),
-    el("p", { class: "card-sub" }, "电脑版 QQ 存聊天记录的文件夹（nt_db）。本程序只复制里面的文件来读，从不修改原文件。"),
+    explainNote(el("p", { class: "card-sub" }, "电脑版 QQ 存聊天记录的文件夹（nt_db）。本程序只复制里面的文件来读，从不修改原文件。")),
     el("div", { style: "display:grid;gap:8px;margin-bottom:10px" }, dbInput, dataInput),
     accountRow,
     el("div", { class: "row" },
@@ -183,7 +210,7 @@ const renderSettingsView = () => {
           }
           renderSettingsView();
         },
-      }, "🔍 自动探测并保存"),
+      }, "自动探测并保存"),
       el("button", {
         class: "btn small primary",
         onclick: async () => {
@@ -244,10 +271,10 @@ const renderSettingsView = () => {
     settingsFeedback(autoKeyMsg, autoKeyState.notice.text, autoKeyState.notice.isError);
   }
   const ntqqKeyHint = el("div", { style: "margin:0 0 8px" },
-    el("p", { class: "card-sub", style: "margin:0 0 8px" },
-      "QQ 的聊天记录是加密的。先打开并登录电脑版 QQ，再点「自动获取密钥」：程序从运行中的 QQ 内存里读出密钥，试开一次确认后保存。"),
-    el("p", { class: "card-sub", style: "margin:0 0 8px" },
-      "只读，不联网。"),
+    explainNote(
+      el("p", { class: "card-sub" },
+        "QQ 的聊天记录是加密的。先打开并登录电脑版 QQ，再点「自动获取密钥」：程序从运行中的 QQ 内存里读出密钥，试开一次确认后保存。"),
+      el("p", { class: "card-sub" }, "只读，不联网。")),
     el("div", { class: "row" },
       el("button", {
         class: "btn small primary",
@@ -273,7 +300,7 @@ const renderSettingsView = () => {
           autoKeyState.busy = false;
           renderSettingsView();
         },
-      }, autoKeyState.busy ? "扫描中…" : "🔑 自动获取密钥"),
+      }, autoKeyState.busy ? "扫描中…" : "自动获取密钥"),
       autoKeyMsg),
     el("details", { class: "settings-fold" },
       el("summary", {}, "自动获取失败时：手动方式"),
@@ -284,11 +311,11 @@ const renderSettingsView = () => {
 
   const keysCard = el("div", { class: "card", id: "settings-keys" },
     el("h2", {}, "密钥"),
-    el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}。`),
+    explainNote(el("p", { class: "card-sub" }, `两把密钥都${secretStorageText()}。`)),
     keyRow("QQ 数据库密钥", "ntqqKey", status.ntqqKeySaved, ntqqKeyHint),
     keyRow("AI 服务的 API Key（AI 总结用，可选）", "llmKey", status.llmKeySaved,
-      el("p", { class: "card-sub", style: "margin:0 0 8px" },
-        "AI 服务商给你的密钥，按用量付费。支持 OpenAI 兼容接口的服务都行，如 DeepSeek、OpenAI，或本机的 Ollama。不填就不做 AI 总结。")));
+      explainNote(el("p", { class: "card-sub" },
+        "AI 服务商给你的密钥，按用量付费。支持 OpenAI 兼容接口的服务都行，如 DeepSeek、OpenAI，或本机的 Ollama。不填就不做 AI 总结。"))));
 
   /* --- LLM config --- */
   // Inputs read from a draft so re-renders (model chips, schedule refresh)
@@ -337,7 +364,7 @@ const renderSettingsView = () => {
 
   const llmCard = el("div", { class: "card", id: "settings-llm" },
     el("h2", {}, "AI 总结用哪家服务"),
-    el("p", { class: "card-sub" }, "填服务地址和模型名（模型是这家服务里具体用哪一个 AI）。不确定就点「常用服务」自动填。"),
+    explainNote(el("p", { class: "card-sub" }, "填服务地址和模型名（模型是这家服务里具体用哪一个 AI）。不确定就点「常用服务」自动填。")),
     renderProviderPresets(pickPreset),
     el("div", { class: "row" },
       urlInput,
@@ -416,10 +443,10 @@ const renderSettingsView = () => {
 const renderMoreLinks = () =>
   el("div", { class: "settings-more" },
     el("span", { class: "card-sub" }, "更多："),
-    el("button", { class: "chip", onclick: () => openView("watchlist") }, "⭐ 关注群"),
+    el("button", { class: "chip", onclick: () => openView("watchlist") }, "关注群"),
     el("button", { class: "chip", onclick: () => openView("run") }, "▶ 自定义时间范围总结"),
-    el("button", { class: "chip", onclick: () => openView("history") }, "📚 历史报告"),
-    el("button", { class: "chip", onclick: () => openView("storage") }, "💾 存储"));
+    el("button", { class: "chip", onclick: () => openView("history") }, "历史报告"),
+    el("button", { class: "chip", onclick: () => openView("storage") }, "存储"));
 
 /* --- background refresh, notifications, desktop integration --- */
 
@@ -491,6 +518,20 @@ const backgroundStatusLine = (background) => {
     background.lastError ? el("div", { class: "notice risk" }, `上次刷新出错：${background.lastError}`) : null);
 };
 
+const backgroundSwitches = (current, desktop) => [
+  { label: "自动刷新", hint: "关闭后只有手动总结", on: current.enabled, onChange: (value) => saveBackgroundSetting({ enabled: value }) },
+  { label: "自动 AI 总结", hint: "关闭后只收消息、不调用 AI", on: current.autoSummarize, onChange: (value) => saveBackgroundSetting({ autoSummarize: value }) },
+  { label: "有人 @ 我或回复我时通知", hint: null, on: current.notifyMentions, onChange: (value) => saveBackgroundSetting({ notifyMentions: value }) },
+  { label: "每天早上推送一次简报", hint: "9 点后第一次刷新时", on: current.notifyDaily, onChange: (value) => saveBackgroundSetting({ notifyDaily: value }) },
+  { label: "关注的词出现时通知", hint: "在首页「关注的词」里设要关注的词", on: current.notifyWatchWords === true, onChange: (value) => saveBackgroundSetting({ notifyWatchWords: value }) },
+  {
+    label: isWindowsHost() ? "开机后在后台运行" : "登录后在后台运行",
+    hint: "不弹窗口，打开简报时秒开",
+    on: desktop.autostart === true,
+    onChange: (value) => desktopAction("/api/desktop/autostart", { enabled: value }, value ? "已开启：下次登录会自动在后台运行。" : "已关闭开机后台运行。"),
+  },
+];
+
 const renderBackgroundCard = () => {
   const background = settingsState.background;
   const msg = el("span", { style: "font-size:13px" });
@@ -505,20 +546,15 @@ const renderBackgroundCard = () => {
   }
   const current = background.settings;
   const desktop = background.desktop ?? {};
-  const loginLabel = isWindowsHost() ? "开机后在后台运行" : "登录后在后台运行";
+  const switches = backgroundSwitches(current, desktop);
   return el("div", { class: "card" },
     el("h2", { id: "settings-background" }, "后台与通知"),
-    el("p", { class: "card-sub" },
-      shortText("ChatLens 开着时（窗口关掉也行）每隔一段时间收新消息，攒够一段就交给 AI 总结，打开简报时已经准备好。花了多少在上面的「AI 用量与费用」里看，也能暂停或设每日预算。", 1)),
+    explainNote(
+      el("p", { class: "card-sub" }, linked("ChatLens 开着时（窗口关掉也行）每隔一段时间收新消息，攒够一段就交给 AI 总结，打开简报时已经准备好。花了多少在上面的「AI 用量与费用」里看，也能暂停或设每日预算。")),
+      switchHints(switches),
+      el("p", { class: "card-sub" }, "想要独立窗口：在 Chrome / Edge 地址栏右侧点「安装」图标。任务栏图标会显示 @ 你的数量。")),
     backgroundStatusLine(background),
-    el("div", { class: "bg-grid" },
-      backgroundToggle("自动刷新", "关闭后只有手动总结", current.enabled, (value) => saveBackgroundSetting({ enabled: value })),
-      backgroundToggle("自动 AI 总结", "关闭后只收消息、不调用 AI", current.autoSummarize, (value) => saveBackgroundSetting({ autoSummarize: value })),
-      backgroundToggle("有人 @ 我或回复我时通知", null, current.notifyMentions, (value) => saveBackgroundSetting({ notifyMentions: value })),
-      backgroundToggle("每天早上推送一次简报", "9 点后第一次刷新时", current.notifyDaily, (value) => saveBackgroundSetting({ notifyDaily: value })),
-      backgroundToggle("关注的词出现时通知", "在首页「关注的词」里设要关注的词", current.notifyWatchWords === true, (value) => saveBackgroundSetting({ notifyWatchWords: value })),
-      backgroundToggle(loginLabel, "不弹窗口，打开简报时秒开", desktop.autostart === true, (value) =>
-        desktopAction("/api/desktop/autostart", { enabled: value }, value ? "已开启：下次登录会自动在后台运行。" : "已关闭开机后台运行。"))),
+    switchGrid(switches),
     el("div", { class: "row", style: "margin-top:12px" },
       el("span", { style: "font-size:13px" }, "刷新间隔"),
       el("select", {
@@ -533,8 +569,7 @@ const renderBackgroundCard = () => {
           await desktopAction("/api/background/run-now", { force: true }, "已开始刷新，并会把攒着的新消息一起总结。");
         },
       }, "立即刷新"),
+      el("small", { class: "fold-inline" }, "开着 AI 总结时会产生费用"),
       msg),
-    renderStopRow(),
-    el("p", { class: "card-sub", style: "margin:12px 0 0" },
-      "想要独立窗口：在 Chrome / Edge 地址栏右侧点「安装」图标。任务栏图标会显示 @ 你的数量。"));
+    renderStopRow());
 };

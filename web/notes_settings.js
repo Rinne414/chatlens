@@ -234,6 +234,12 @@ const vaultChoices = (data, draft) => (data.vaults.length === 0
     }),
     el("span", {}, el("strong", {}, vault.name), el("small", {}, vault.exists ? vault.path : `${vault.path}（文件夹已经不在了）`))))));
 
+// The two switches of the form; the sentence under each lives in the form's 说明.
+const NOTES_SWITCHES = [
+  { key: "autoSync", label: "每次后台刷新后自动同步", hint: "只改有变化的笔记" },
+  { key: "consensus", label: "用 AI 分主题、合并别名、写「群里的共识」", hint: "第一次分主题约 20 次调用，之后新东西每次几次；3 个以上的群在讲的主题各写一次共识，每周最多更新一次。和简报用同一个 AI、同一个每日上限和预算" },
+];
+
 const notesForm = (data, { configured }) => {
   const draft = draftOf(data);
   const field = (label, control) => el("label", { class: "notes-field" }, el("span", {}, label), control);
@@ -243,8 +249,8 @@ const notesForm = (data, { configured }) => {
     field("笔记文字", el("select", { onchange: (event) => setNotesDraft({ language: event.target.value }) },
       el("option", { value: "zh-Hans", selected: draft.language === "zh-Hans" }, "简体（和群里一样）"),
       el("option", { value: "zh-Hant", selected: draft.language === "zh-Hant" }, "繁体（AI 写的句子转繁体，名字照原样）"))),
-    backgroundToggle("每次后台刷新后自动同步", "只改有变化的笔记", draft.autoSync, (checked) => setNotesDraft({ autoSync: checked })),
-    backgroundToggle("用 AI 分主题、合并别名、写「群里的共识」", "第一次分主题约 20 次调用，之后新东西每次几次；3 个以上的群在讲的主题各写一次共识，每周最多更新一次。和简报用同一个 AI、同一个每日上限和预算", draft.consensus, (checked) => setNotesDraft({ consensus: checked })),
+    explainNote(switchHints(NOTES_SWITCHES)),
+    switchGrid(NOTES_SWITCHES.map((option) => ({ ...option, on: draft[option.key], onChange: (checked) => setNotesDraft({ [option.key]: checked }) }))),
     el("div", { class: "row", style: "margin-top:10px" },
       configured
         ? el("button", { class: "btn small primary", type: "button", disabled: notesState.busy, onclick: () => saveNotesDraft({ ...draftOf(notesState.data), enabled: true }) }, "保存")
@@ -293,8 +299,8 @@ const renderNotesCard = () => {
   const notice = notesState.notice;
   return el("div", { class: "card", id: "notes-card", "data-testid": "notes-card" },
     el("h2", {}, "Obsidian 笔记库"),
-    el("p", { class: "card-sub" },
-      shortText("把群里整理出来的东西按主题写成 Obsidian 笔记：一个主题一则（例如一个模型和它的版本、LoRA、教程），几个群都在讲的附上「群里的共识」；另有每天的日报和每个群一则。只写进库里的一个文件夹；「我的笔记」下面你写的字会一直保留。", 1)),
+    explainNote(el("p", { class: "card-sub" },
+      linked("把群里整理出来的东西按主题写成 Obsidian 笔记：一个主题一则（例如一个模型和它的版本、LoRA、教程），几个群都在讲的附上「群里的共识」；另有每天的日报和每个群一则。只写进库里的一个文件夹；「我的笔记」下面你写的字会一直保留。"))),
     notice !== null ? el("div", { class: `notice ${notice.tone}` }, notice.text) : null,
     notesState.error !== null ? el("div", { class: "notice risk" }, `读取失败：${notesState.error}`) : null,
     ...(data === null ? [el("p", { class: "card-sub" }, "正在读取…")] : notesBody(data)));

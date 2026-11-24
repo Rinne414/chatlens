@@ -130,11 +130,19 @@ const setUpdateAutoCheck = async (enabled) => {
   renderUpdateViews();
 };
 
-const updateAutoCheckSwitch = () => backgroundToggle(
-  "自动检查更新",
-  "打开时和之后每 6 小时向 GitHub 查一次最新版本，只读版本信息；有新版本只提醒，要你点「一键更新」才会装。关掉后只有你点「检查更新」才查。",
-  updateAutoCheckOn(),
-  setUpdateAutoCheck);
+const UPDATE_AUTO_CHECK_HINT = "打开时和之后每 6 小时向 GitHub 查一次最新版本，只读版本信息；有新版本只提醒，要你点「一键更新」才会装。关掉后只有你点「检查更新」才查。";
+
+const updateAutoCheckSwitch = () => backgroundToggle("自动检查更新", null, updateAutoCheckOn(), setUpdateAutoCheck);
+
+// What the switch does, how the one-click update works, when it last looked.
+const updateExplanation = () => explainNote(
+  el("p", { class: "card-sub" }, UPDATE_AUTO_CHECK_HINT),
+  el("p", { class: "card-sub" },
+    "一键更新会下载安装包、核对签名后自动重启 ChatLens，你的配置、密钥和数据不受影响。",
+    updateState.checkedAt > 0 && !updateState.info?.skipped ? `上次检查：${railAgo(Math.floor(updateState.checkedAt / 1000))}。` : "",
+    " 项目主页：",
+    el("a", { href: "https://github.com/Rinne414/chatlens", target: "_blank", rel: "noopener" }, "GitHub"),
+    "。"));
 
 const renderRailVersion = () => {
   const node = $("#rail-version");
@@ -203,10 +211,5 @@ const renderUpdateCard = () => {
       : null,
     notesBlock,
     updateAutoCheckSwitch(),
-    el("p", { class: "card-sub update-footnote" },
-      "一键更新会下载安装包、核对签名后自动重启 ChatLens，你的配置、密钥和数据不受影响。",
-      updateState.checkedAt > 0 && !updateState.info?.skipped ? `上次检查：${railAgo(Math.floor(updateState.checkedAt / 1000))}。` : "",
-      " 项目主页：",
-      el("a", { href: "https://github.com/Rinne414/chatlens", target: "_blank", rel: "noopener" }, "GitHub"),
-      "。"));
+    updateExplanation());
 };

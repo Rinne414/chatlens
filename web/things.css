@@ -20,7 +20,7 @@
 .thing-legend-item { display: inline-flex; align-items: center; gap: 5px; }
 .thing-legend-item i { width: 12px; height: 12px; border-radius: 50%; background: var(--thing-fill); border: 2px solid var(--thing-line); }
 .thing-list { display: grid; gap: 6px; }
-.thing-row { display: grid; gap: 3px; width: 100%; padding: 10px 12px 10px 14px; border: 1px solid var(--line); border-left: 4px solid var(--thing-line); border-radius: 10px; background: var(--panel); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.thing-row { display: grid; gap: 3px; width: 100%; padding: 10px 12px 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .thing-row:hover, .thing-row.hover { background: var(--bg); }
 .thing-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
 .thing-row-head strong { font-size: 15px; }

@@ -419,13 +419,16 @@ const renderPictureSettingsCard = () => {
   const kept = new Set((settings.keepAllGroups ?? []).map(String));
   return el("div", { class: "card" },
     el("h2", {}, "群图片"),
-    el("p", { class: "card-sub" },
-      shortText("电脑 QQ 只在你点开图片时才保存原图。开启后，程序在腾讯保留的 31 天里自动存下缩略图；AI 图另存咒语、参数、工作流和一张预览（最宽 1280px，每张约 1–3 MB）。到空间上限时从最旧的缩略图和预览清起，留存的原图不清。", 2)),
-    el("p", { class: "card-sub" }, linked("留存的原图在画廊「留存的原图」里看和取消留存；各项实际占多少磁盘在「存储」页；一次留存所有快过期的 AI 原图在备份页。")),
-    el("p", { class: "card-sub" },
-      linked(`缩略图 ${usage.thumbs ?? 0} 张（${formatByteSize(usage.thumbBytes)}） · 预览 ${usage.previews ?? 0} 张（${formatByteSize(usage.previewBytes)}） · 临时原图 ${usage.cached ?? 0} 张 · 留存的原图 ${usage.kept ?? 0} 张（${formatByteSize(usage.keptBytes)}，不含咒语库复制的） · 上限 ${settings.budgetGB ?? 10} GB`)),
-    el("p", { class: "card-sub" },
-      `${rkeySummary(status.rkey)} ${passSummary(status.pass)} 还缺缩略图 ${status.pending?.thumbs ?? 0} 张，还没检查是不是 AI 图 ${status.pending?.probes ?? 0} 张，AI 图还缺预览 ${status.pending?.previews ?? 0} 张。今天已下载 ${formatByteSize(status.trafficToday)}。`),
+    explainNote(
+      el("p", { class: "card-sub" },
+        linked("电脑 QQ 只在你点开图片时才保存原图。开启后，程序在腾讯保留的 31 天里自动存下缩略图；AI 图另存咒语、参数、工作流和一张预览（最宽 1280px，每张约 1–3 MB）。到空间上限时从最旧的缩略图和预览清起，留存的原图不清。")),
+      el("p", { class: "card-sub" }, el("strong", {}, "自动抓取群图片"), "：每次刷新之后跑一小段"),
+      el("p", { class: "card-sub" }, linked("留存的原图在画廊「留存的原图」里看和取消留存；各项实际占多少磁盘在「存储」页；一次留存所有快过期的 AI 原图在备份页。"))),
+    foldNote("用量和进度",
+      el("p", { class: "card-sub" },
+        linked(`缩略图 ${usage.thumbs ?? 0} 张（${formatByteSize(usage.thumbBytes)}） · 预览 ${usage.previews ?? 0} 张（${formatByteSize(usage.previewBytes)}） · 临时原图 ${usage.cached ?? 0} 张 · 留存的原图 ${usage.kept ?? 0} 张（${formatByteSize(usage.keptBytes)}，不含咒语库复制的） · 上限 ${settings.budgetGB ?? 10} GB`)),
+      el("p", { class: "card-sub" },
+        `${rkeySummary(status.rkey)} ${passSummary(status.pass)} 还缺缩略图 ${status.pending?.thumbs ?? 0} 张，还没检查是不是 AI 图 ${status.pending?.probes ?? 0} 张，AI 图还缺预览 ${status.pending?.previews ?? 0} 张。今天已下载 ${formatByteSize(status.trafficToday)}。`)),
     status.pass?.note === "no-rkey"
       ? el("div", { class: "notice warn" }, "这次没拿到图片钥匙。缩略图里走旧地址的还能下，其余要等 QQ 开着再试。")
       : null,
@@ -437,7 +440,7 @@ const renderPictureSettingsCard = () => {
           disabled: pictureUi.busy,
           onchange: (event) => savePictureSettings({ enabled: event.target.checked }),
         }),
-        el("span", {}, el("strong", {}, "自动抓取群图片"), el("small", {}, "每次刷新之后跑一小段")))),
+        el("span", {}, el("strong", {}, "自动抓取群图片")))),
     el("div", { class: "row", style: "margin-top:12px" },
       el("span", { style: "font-size:13px" }, "图片空间上限"),
       el("select", {

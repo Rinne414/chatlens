@@ -13,7 +13,7 @@
 .gp-head-stats strong { font-size: 16px; font-variant-numeric: tabular-nums; }
 .gp-head-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 
-.gp-brief { display: grid; gap: 6px; padding: 16px 20px; border-left: 4px solid var(--accent); border-radius: var(--radius); background: var(--panel); }
+.gp-brief { display: grid; gap: 6px; padding: 16px 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-card); }
 .gp-brief p { margin: 0; font-size: 14px; line-height: 1.75; max-width: 72em; }
 .gp-brief .gp-brief-lead { font-size: 15.5px; font-weight: 600; }
 .gp-brief-more { justify-self: start; }

@@ -239,67 +239,90 @@ el("button", { class: "btn small danger", type: "button", onclick: () => storage
   item.id === "temporary-files" ? "确定清理" : "确定删除"),
 el("button", { class: "btn small", type: "button", onclick: () => storageSetConfirming(null) }, "不删")));
 
+// The second level of a row: what it is, what deleting it does, why it cannot
+// be deleted, and where it lives (the whole path, selectable).
+const storageRowNote = (item) => foldNote(
+  "说明和位置",
+  el("p", {}, linked(item.description)),
+  el("p", {}, linked(item.cleanupImpact)),
+  item.cleanupBlockedReason !== null && item.cleanupCategory !== null
+    ? el("p", {}, item.cleanupBlockedReason)
+    : null,
+  el("div", { class: "storage-where" },
+    el("span", {}, "位置"),
+    item.paths.length === 0
+      ? el("code", {}, "尚未设置")
+      : item.paths.map((itemPath) => el("code", {}, itemPath))));
+
 const storageRow = (item) => el("div", {
   class: "storage-row",
   "data-testid": `storage-row-${item.id}`,
 },
-el("div", { class: "storage-item" },
-  el("strong", {}, item.label),
-  el("span", {}, linked(item.description)),
-  el("small", {}, linked(item.cleanupImpact))),
-el("div", { class: "storage-paths" },
-  item.paths.length === 0
-    ? el("code", {}, "尚未设置")
-    : item.paths.map((itemPath) => el("code", { title: itemPath }, itemPath))),
+el("div", { class: "storage-item" }, el("strong", {}, item.label)),
 storageMeasurementCell(item),
 el("div", { class: "storage-policy" },
-  el("span", { class: `storage-policy-badge ${storagePolicyClass(item.policy)}` }, item.policyLabel),
-  item.cleanupBlockedReason !== null && item.cleanupCategory !== null
-    ? el("small", {}, item.cleanupBlockedReason)
-    : null),
+  el("span", { class: `storage-policy-badge ${storagePolicyClass(item.policy)}` }, item.policyLabel)),
 storageActions(item),
+storageRowNote(item),
 storageConfirmStrip(item));
 
 // QQ's total: the whole account folder once it is measured, else its parts.
+// partial: the number is not the whole folder, so the line says so.
 const storageQqTotal = () => (storageState.measurements.has("qq-account")
-  ? { bytes: storageMeasuredBytes(["qq-account"]), note: "整个 QQ 账号文件夹" }
-  : { bytes: storageMeasuredBytes(["qq-databases", "qq-media-cache"]), note: storageState.measurements.has("qq-media-cache") ? "聊天数据库 + 媒体缓存（点「全部计算」看整个文件夹）" : "只算了聊天数据库，点「全部计算」看全部" });
+  ? { bytes: storageMeasuredBytes(["qq-account"]), note: "整个 QQ 账号文件夹", partial: false }
+  : {
+      bytes: storageMeasuredBytes(["qq-databases", "qq-media-cache"]),
+      note: storageState.measurements.has("qq-media-cache") ? "聊天数据库 + 媒体缓存（点「全部计算」看整个文件夹）" : "只算了聊天数据库，点「全部计算」看全部",
+      partial: true,
+    });
 
-const storageToolCell = (overview) => {
+// One figure of the summary line: label, the number, and what qualifies it. A
+// caveat that changes how the number reads is written after it, muted; a plain
+// description waits in the tooltip.
+const storageFigure = (label, value, { rest = null, caveat = null, title = null, risk = false, testid = null, action = null } = {}) =>
+  el("span", { class: risk ? "storage-figure risk" : "storage-figure", title, "data-testid": testid },
+    `${label} `,
+    el("strong", {}, value),
+    rest === null ? null : ` ${rest}`,
+    caveat === null ? null : el("small", {}, `（${caveat}）`),
+    action);
+
+const storageToolFigure = (overview) => {
   const totals = storageToolTotals(overview.items, storageState.measurements, storageState.measuring);
   const headline = storageToolHeadline(totals);
-  return el("div", { class: "storage-summary-cell", "data-testid": "storage-tool-total" },
-    el("span", {}, headline.label),
-    el("strong", {}, formatBytes(totals.bytes)),
-    el("small", {}, headline.note),
-    totals.missing.length === 0 || totals.busy
-      ? null
-      : el("button", {
-          class: "btn small storage-summary-action",
-          "data-testid": "storage-measure-missing",
-          onclick: () => storageMeasureIds(totals.missing.map((item) => item.id), storageState.requestId),
-        }, `计算这 ${totals.missing.length} 项`));
+  const complete = totals.missing.length === 0;
+  const action = complete || totals.busy
+    ? null
+    : el("button", {
+        class: "btn small storage-summary-action",
+        "data-testid": "storage-measure-missing",
+        onclick: () => storageMeasureIds(totals.missing.map((item) => item.id), storageState.requestId),
+      }, `计算这 ${totals.missing.length} 项`);
+  return storageFigure(headline.label, formatBytes(totals.bytes), {
+    caveat: complete ? null : headline.note,
+    title: complete ? headline.note : null,
+    testid: "storage-tool-total",
+    action,
+  });
 };
 
+const storageVolumeFigure = (volume) => (volume.error === null
+  ? storageFigure(`${volume.root} 可用`, formatBytes(volume.freeBytes), {
+      rest: `/ ${formatBytes(volume.totalBytes)}`,
+      title: `总容量 ${formatBytes(volume.totalBytes)}`,
+    })
+  : storageFigure(`${volume.root || "磁盘"} 状态`, "无法读取", { caveat: volume.error, risk: true }));
+
+// One line: this program's size, QQ's, and the free space of each drive.
 const storageSummary = (overview) => {
   const qq = storageQqTotal();
-  const volumeNodes = overview.volumes.map((volume) =>
-    volume.error === null
-      ? el("div", { class: "storage-summary-cell" },
-          el("span", {}, `${volume.root} 可用空间`),
-          el("strong", {}, formatBytes(volume.freeBytes)),
-          el("small", {}, `总容量 ${formatBytes(volume.totalBytes)}`))
-      : el("div", { class: "storage-summary-cell risk" },
-          el("span", {}, `${volume.root || "磁盘"} 状态`),
-          el("strong", {}, "无法读取"),
-          el("small", { title: volume.error }, volume.error)));
-  return el("div", { class: "storage-summary", "data-testid": "storage-summary" },
-    storageToolCell(overview),
-    el("div", { class: "storage-summary-cell" },
-      el("span", {}, "QQ 占用"),
-      el("strong", {}, formatBytes(qq.bytes)),
-      el("small", {}, qq.note)),
-    volumeNodes);
+  return el("div", { class: "storage-line", "data-testid": "storage-summary" },
+    storageToolFigure(overview),
+    storageFigure("QQ 占用", formatBytes(qq.bytes), {
+      caveat: qq.partial ? qq.note : null,
+      title: qq.partial ? null : qq.note,
+    }),
+    overview.volumes.map(storageVolumeFigure));
 };
 
 const storageSectionNode = (overview, section) => el("section", { class: "storage-section", "aria-labelledby": `storage-section-${section.id}` },
@@ -310,7 +333,6 @@ const storageSectionNode = (overview, section) => el("section", { class: "storag
   el("div", { class: "storage-table" },
     el("div", { class: "storage-table-head", "aria-hidden": "true" },
       el("span", {}, "数据"),
-      el("span", {}, "位置"),
       el("span", {}, "占用"),
       el("span", {}, "能不能删"),
       el("span", {}, "操作")),

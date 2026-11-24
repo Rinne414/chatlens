@@ -188,7 +188,7 @@ const remoteDeviceList = (devices) => {
   }
   return el("div", { class: "remote-devices" },
     devices.map((device) => el("div", { class: "remote-device" },
-      el("span", { class: "remote-device-name" }, `📱 ${device.name}`),
+      el("span", { class: "remote-device-name" }, device.name),
       el("span", { class: "remote-device-meta" }, `配对于 ${remoteTime(device.createdAt)} · 最近使用 ${railAgo(Math.floor(device.lastSeenAt / 1000)) || "—"}`),
       el("button", { class: "btn small danger", type: "button", disabled: remoteState.busy, onclick: () => revokeDevice(device) }, "取消配对"))),
     devices.length > 1
@@ -221,7 +221,7 @@ const remoteBody = (status) => {
     remoteState.pairing !== null
       ? remotePairingPanel(remoteState.pairing)
       : el("div", { class: "row", style: "margin-top:12px" },
-        el("button", { class: "btn small primary", type: "button", disabled: remoteState.busy, onclick: startPairing }, "📱 配对新手机"),
+        el("button", { class: "btn small primary", type: "button", disabled: remoteState.busy, onclick: startPairing }, "配对新手机"),
         el("button", { class: "btn small danger", type: "button", disabled: remoteState.busy, onclick: disableRemote }, "关闭手机连线")),
     el("h3", { class: "remote-subhead" }, "已配对的手机"),
     remoteDeviceList(status.devices ?? []),
@@ -233,8 +233,8 @@ const renderRemoteCard = () => {
   const notice = remoteState.notice;
   return el("div", { class: "card", id: "remote-card", "data-testid": "remote-card" },
     el("h2", {}, "手机连线"),
-    el("p", { class: "card-sub" },
-      shortText("出门或躺着时用手机看简报、聊天和回顾。整理仍在这台电脑上做，所以电脑要开着（不能睡眠），ChatLens 要在运行。连接走 Tailscale（免费软件，把你的电脑和手机连成私人网络）：只有用你的 Tailscale 账号登录、并在这里配对过的手机进得来。设置、密钥、备份和存储只能在电脑上改。", 2)),
+    explainNote(el("p", { class: "card-sub" },
+      linked("出门或躺着时用手机看简报、聊天和回顾。整理仍在这台电脑上做，所以电脑要开着（不能睡眠），ChatLens 要在运行。连接走 Tailscale（免费软件，把你的电脑和手机连成私人网络）：只有用你的 Tailscale 账号登录、并在这里配对过的手机进得来。设置、密钥、备份和存储只能在电脑上改。"))),
     notice !== null ? el("div", { class: `notice ${notice.tone}` }, notice.text) : null,
     remoteState.error !== null ? el("div", { class: "notice risk" }, `读取失败：${remoteState.error}`) : null,
     status === null ? el("p", { class: "card-sub" }, "正在检测 Tailscale…") : remoteBody(status));

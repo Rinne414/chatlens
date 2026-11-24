@@ -155,8 +155,8 @@ const renderGrokCard = () => {
   }
   return el("div", { class: "card", "data-testid": "grok-card" },
     el("h2", {}, "Grok 订阅（SuperGrok / X Premium+）"),
-    el("p", { class: "card-sub" },
-      "有 Grok 订阅的话，AI 总结可以用订阅额度，不另外花 API 费用。用量从订阅的每周额度里扣，和你自己用 Grok 聊天、Grok Build 共用。需要网络能访问 x.ai。"),
+    explainNote(el("p", { class: "card-sub" },
+      "有 Grok 订阅的话，AI 总结可以用订阅额度，不另外花 API 费用。用量从订阅的每周额度里扣，和你自己用 Grok 聊天、Grok Build 共用。需要网络能访问 x.ai。")),
     body,
     el("div", { style: "margin-top:6px" }, noticeLine));
 };

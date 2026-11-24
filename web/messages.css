@@ -5,7 +5,7 @@
 .inbox-note { margin: 0; }
 .inbox-top .inbox-name { flex: 0 1 auto; }
 .inbox-top .inbox-time { margin-left: auto; }
-.inbox-flag { flex: none; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 700; line-height: 18px; }
+.inbox-flag { flex: none; padding: 0 7px; border-radius: 5px; font-size: 11px; font-weight: 700; line-height: 18px; }
 .inbox-flag.at { background: var(--risk-soft); color: var(--risk); }
 .inbox-flag.ai { background: var(--accent-soft); color: var(--accent); }
 .inbox-topics { display: flex; gap: 5px; align-items: center; min-width: 0; overflow: hidden; margin-top: 2px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
@@ -20,7 +20,7 @@
   top: -9px;
   right: 10px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: 5px;
   background: var(--risk);
   color: #fff;
   font-size: 10.5px;

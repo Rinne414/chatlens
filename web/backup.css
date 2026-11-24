@@ -118,7 +118,7 @@ button.backup-status:hover { border-color: var(--accent); }
 .backup-keep-confirm > span { flex: 1 1 360px; }
 .backup-rescue-tile .wall-badge { position: absolute; left: 5px; bottom: 5px; }
 
-.backup-step { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 8px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; }
+.backup-step { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 8px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 800; }
 .backup-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; margin-bottom: 4px; }
 .backup-preset { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .backup-preset strong { font-size: 13px; }

@@ -15,7 +15,7 @@
 .qqc-counts strong { font-size: 18px; font-variant-numeric: tabular-nums; }
 .qqc-saved-text strong { color: var(--ok); }
 .qqc-unsaved-text strong { color: var(--warn); }
-.qqc-sync { margin-top: 12px; padding: 10px 14px; border-left: 4px solid var(--warn); border-radius: 8px; background: var(--warn-soft); }
+.qqc-sync { margin-top: 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); border-radius: 8px; background: var(--warn-soft); }
 .qqc-sync p { margin: 0; line-height: 1.7; }
 .qqc-sync p + p { margin-top: 4px; }
 
@@ -96,7 +96,7 @@
 .qqc-tile.saved .qqc-check { display: none; }
 .qqc-tile.selected .qqc-check { border-color: var(--accent); background: var(--accent); }
 .qqc-tile.selected .qqc-check::after { content: "✓"; position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 800; }
-.qqc-badge { position: absolute; left: 6px; bottom: 6px; padding: 2px 7px; border-radius: 999px; background: var(--ok); color: #fff; font-size: 11px; font-weight: 700; }
+.qqc-badge { position: absolute; left: 6px; bottom: 6px; padding: 2px 7px; border-radius: 6px; background: var(--ok); color: #fff; font-size: 11px; font-weight: 700; }
 .qqc-zoom { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: rgb(0 0 0 / .45); color: #fff; font-size: 14px; cursor: zoom-in; opacity: 0; transition: opacity var(--dur); }
 .qqc-tile:hover .qqc-zoom, .qqc-zoom:focus-visible { opacity: 1; }
 .qqc-empty { padding: 24px; text-align: center; }

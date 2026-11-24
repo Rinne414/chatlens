@@ -544,7 +544,7 @@ const briefMasthead = (data) => {
             disabled: briefState.busy || data.status?.background?.running,
             title: data.status?.background?.running ? "后台正在整理，这一轮结束后会接着总结" : "不等凑够一段，现在就把新消息交给 AI 总结",
             onclick: briefRunNow,
-          }, "⚡ 现在就总结")
+          }, "现在就总结")
         : null,
       total > 0 ? el("button", { class: "btn", disabled: briefState.busy, onclick: briefMarkSeen }, "✓ 看完了") : null,
       el("button", { class: "btn ghost desktop-action", onclick: () => openView("run") }, "自定义时间范围…"),
@@ -1047,6 +1047,20 @@ const briefFooter = (data) => {
     el("button", { class: "linklike", onclick: toggleKeyHelp, title: "j / k 移动 · o 打开 · s 收藏 · Ctrl+K 搜索" }, "键盘快捷键（?）"));
 };
 
+// Nothing to show yet: the first load is pending, or it failed. The pending
+// line is waiting() (dialogs.js), which says how long it has been once the wait
+// is noticeable. A redraw while it is still pending keeps the same line, so the
+// count is not restarted by whatever else re-renders the page.
+const renderBriefPending = (root) => {
+  if (briefState.error === null && root.querySelector(".brief-loading") !== null) {
+    return;
+  }
+  setChildren(root, el("div", { class: "brief-page" },
+    briefState.error
+      ? el("div", { class: "notice risk" }, `读取简报失败：${briefState.error}`)
+      : el("p", { class: "brief-loading" }, waiting("正在读取简报…"))));
+};
+
 const renderBriefView = () => {
   const root = $("#view-brief");
   if (root === null) {
@@ -1054,10 +1068,7 @@ const renderBriefView = () => {
   }
   const data = briefState.data;
   if (data === null) {
-    setChildren(root, el("div", { class: "brief-page" },
-      briefState.error
-        ? el("div", { class: "notice risk" }, `读取简报失败：${briefState.error}`)
-        : el("p", { class: "brief-empty-line" }, "正在读取简报…")));
+    renderBriefPending(root);
     return;
   }
   briefState.renderPending = false;
@@ -1094,3 +1105,10 @@ const renderBriefView = () => {
   }
   briefKeysRestore();
 };
+
+// boot() (app.js) is already waiting on the server when this script runs, and
+// only opens the page once /api/state and the job poll are back. Until then the
+// area under the title is blank, so say what is going on right away.
+if (app.view === "brief" && briefState.data === null) {
+  renderBriefView();
+}

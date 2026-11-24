@@ -298,7 +298,7 @@ const renderAiUsageCard = () => {
   const perThousand = usage.perThousandMessages;
   return el("div", { class: "card" },
     el("h2", {}, "AI 用量与费用"),
-    el("p", { class: "card-sub" }, shortText("按 AI 服务每次报回的 token 数统计，费用按下方价格表估算，以服务商账单为准。token 是 AI 计费的单位：「发给 AI」是送去总结的消息，「AI 写回」是它写的总结。群里攒够一段新消息才总结一次，各群总览按「简报合并」的间隔重写，所以费用主要看群有多热闹。", 1)),
+    explainNote(el("p", { class: "card-sub" }, linked("按 AI 服务每次报回的 token 数统计，费用按下方价格表估算，以服务商账单为准。token 是 AI 计费的单位：「发给 AI」是送去总结的消息，「AI 写回」是它写的总结。群里攒够一段新消息才总结一次，各群总览按「简报合并」的间隔重写，所以费用主要看群有多热闹。"))),
     aiPauseRow(usage),
     aiDetailRow(usage),
     el("div", { class: "ai-tiles" },

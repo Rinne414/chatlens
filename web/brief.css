@@ -2,9 +2,8 @@
    things worth your attention, each section with its own semantic colour. ---- */
 
 :root {
-  --paper: #fbfaf6;
+  --paper: #fcfbf8;
   --paper-rule: #e3ded2;
-  --serif: "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
   --for-you: var(--accent);
   --for-you-soft: var(--accent-soft);
   --thing: #0f7c5a;
@@ -125,13 +124,14 @@ html[data-theme="dark"] {
   font-size: 12px;
   font-weight: 700;
   background: var(--for-you);
-  color: #fff;
+  color: var(--on-accent);
   border-radius: 999px;
   padding: 1px 8px;
 }
 .brief-sub { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 12px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
 .brief-meta { color: var(--muted); font-size: 12px; }
 .brief-empty-line { color: var(--muted); font-size: 13px; margin: -12px 0 26px; }
+.brief-loading { color: var(--muted); font-size: 14px; margin: 4px 0 0; }
 
 .brief-row-button {
   display: block;
@@ -150,7 +150,6 @@ html[data-theme="dark"] {
 .brief-mention {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-left: 4px solid var(--for-you);
   border-radius: 10px;
   transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
 }
@@ -253,7 +252,7 @@ html[data-theme="dark"] {
   color: #fff;
   font-size: 11px;
   font-weight: 700;
-  border-radius: 999px;
+  border-radius: 6px;
   padding: 2px 8px;
 }
 
@@ -336,8 +335,8 @@ html[data-theme="dark"] {
 .card select { height: 32px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--ink); padding: 0 8px; font: inherit; }
 
 /* settings: AI usage & cost */
-:root { --chart-bar: #1565c0; }
-html[data-theme="dark"] { --chart-bar: #3b82f6; }
+:root { --chart-bar: #47689a; }
+html[data-theme="dark"] { --chart-bar: #7fa0d0; }
 .ai-pause { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 14px; font-size: 13px; }
 .ai-pause.paused { padding: 10px 12px; border-radius: 9px; background: var(--warn-soft); color: var(--warn); }
 .ai-pause.paused .card-sub { margin: 0; color: var(--warn); }
@@ -412,12 +411,6 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .digest-volume { display: flex; justify-content: space-between; gap: 12px; }
 .digest-meta { margin: 10px 0 0; }
 .digest-actions { margin-top: 10px; flex-wrap: wrap; }
-.digest-reports { margin-top: 18px; }
-.digest-reports h4 { margin: 0 0 6px; font-size: 13px; letter-spacing: .1em; }
-.digest-reports ul { list-style: none; margin: 0; padding: 0; }
-.digest-report-row { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 7px 10px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
-.digest-report-row:hover, .digest-report-row.on { border-color: var(--accent); background: var(--accent-soft); }
-.digest-report-row .brief-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .review-report > .btn { margin-bottom: 10px; }
 
 /* 问群聊 (web/ask.js) */
@@ -461,7 +454,7 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 
 /* 关注的词: followed words as chips, the chosen one's mentions below. */
 .brief-watch-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
-.brief-watch-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--panel); overflow: hidden; }
+.brief-watch-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); overflow: hidden; }
 .brief-watch-chip.active { border-color: var(--accent); background: var(--accent-soft); }
 .brief-watch-chip.quiet .brief-watch-pick { color: var(--muted); }
 .brief-watch-pick { border: 0; background: none; font: inherit; font-size: 13px; color: var(--ink); padding: 4px 4px 4px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
@@ -472,7 +465,7 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 .brief-watch-form { display: inline-flex; gap: 6px; flex: 0 1 300px; }
 .brief-watch-notify { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12.5px; color: var(--muted); cursor: pointer; white-space: nowrap; }
 .brief-watch-notify input { margin: 0; accent-color: var(--accent); }
-.brief-watch-input { flex: 1 1 180px; min-width: 0; font: inherit; font-size: 13px; padding: 5px 10px; border: 1px dashed var(--line-strong); border-radius: 999px; background: var(--panel); color: var(--ink); }
+.brief-watch-input { flex: 1 1 180px; min-width: 0; font: inherit; font-size: 13px; padding: 5px 10px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--ink); }
 .brief-watch-input:focus { outline: none; border-style: solid; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .brief-watch-error { color: var(--risk); font-size: 13px; margin: 0 0 8px; }
 .brief-watch-groups { color: var(--muted); font-size: 12px; margin: 0 0 8px; overflow-wrap: anywhere; }
@@ -522,7 +515,7 @@ html[data-theme="dark"] { --chart-bar: #3b82f6; }
 /* 答应过的事 (brief_commitments.js) */
 .brief-commitment-side + .brief-commitment-side { margin-top: 12px; }
 .brief-commitment-title { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-.brief-commitment { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--for-you); border-radius: 10px; }
+.brief-commitment { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
 .brief-commitment.owed { border-left-color: var(--line-strong); }
 .brief-commitment .brief-row-button { padding: 10px 12px 10px 4px; }
 .brief-commitment-tick { margin: 11px 8px 0 12px; width: 20px; height: 20px; border: 2px solid var(--line-strong); border-radius: 6px; background: var(--panel); color: #fff; font: 700 12px/1 inherit; cursor: pointer; display: grid; place-items: center; }

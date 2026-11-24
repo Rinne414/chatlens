@@ -53,6 +53,8 @@ const reviewState = {
   polls: 0,
   // A weekly / monthly report open in the main column: { kind, period }.
   report: null,
+  // The 「正在读取」 line shown while the page has nothing else (see reviewIdle).
+  waitLine: null,
 };
 
 /* ---------- dates (Beijing days as "YYYY-MM-DD") ---------- */
@@ -933,6 +935,36 @@ const reviewCalendar = () => {
       : null);
 };
 
+// The main column holds nothing yet (the day is still loading or did not
+// load, and no search or report is open): the report lists use that space.
+const reviewMainIsEmpty = () => reviewState.data === null && reviewState.report === null && !(reviewState.resultsOpen && reviewState.results !== null);
+
+const reviewIdle = () => {
+  // One line for the whole wait: a redraw puts the same node back, so its count is not restarted.
+  if (reviewState.error !== null) {
+    reviewState.waitLine = null;
+  } else if (reviewState.waitLine === null) {
+    reviewState.waitLine = el("p", { class: "brief-loading" }, waiting("正在读取这一天…"));
+  }
+  return el("div", { class: "review-idle" },
+    reviewState.waitLine,
+    el("div", { class: "review-idle-lists" },
+      digestReportList("week", reviewPickReport, null),
+      digestReportList("month", reviewPickReport, null)));
+};
+
+const reviewMainContent = (showResults, report) => {
+  if (showResults) {
+    return reviewResults();
+  }
+  if (report !== null) {
+    return el("div", { class: "review-report" },
+      el("button", { class: "btn small ghost", onclick: reviewBackToDay }, "‹ 回到这一天"),
+      digestCard(report.kind, report.period, { emptyText: "还没有生成。点下面的按钮，缺的每日总览会先补上，再写成报告。" }));
+  }
+  return reviewMainIsEmpty() ? reviewIdle() : reviewDayContent();
+};
+
 const renderReviewView = () => {
   const root = $("#view-review");
   if (root === null) {
@@ -940,20 +972,20 @@ const renderReviewView = () => {
   }
   const showResults = reviewState.resultsOpen && reviewState.results !== null;
   const report = reviewState.report;
+  const idle = !showResults && reviewMainIsEmpty();
+  const main = reviewMainContent(showResults, report);
+  if (!idle) {
+    reviewState.waitLine = null;
+  }
   const selected = report === null ? null : digestKey(report.kind, report.period);
-  const main = showResults
-    ? reviewResults()
-    : report !== null
-      ? el("div", { class: "review-report" },
-        el("button", { class: "btn small ghost", onclick: reviewBackToDay }, "‹ 回到这一天"),
-        digestCard(report.kind, report.period, { emptyText: "还没有生成。点下面的按钮，缺的每日总览会先补上，再写成报告。" }))
-      : reviewDayContent();
-  setChildren(root, el("div", { class: "review-page" },
+  // While the reports sit in the main column the side holds only the calendar.
+  const side = idle
+    ? [reviewCalendar()]
+    : [reviewCalendar(), digestReportList("week", reviewPickReport, selected), digestReportList("month", reviewPickReport, selected)];
+  const hasSide = side.some((part) => part !== null);
+  setChildren(root, el("div", { class: `review-page ${hasSide ? "" : "no-side"}` },
     reviewSearchBar(),
     reviewState.error ? el("div", { class: "notice risk review-error" }, reviewState.error) : null,
     el("div", { class: "review-main" }, main),
-    el("aside", { class: "review-side" },
-      reviewCalendar(),
-      digestReportList("week", reviewPickReport, selected),
-      digestReportList("month", reviewPickReport, selected))));
+    hasSide ? el("aside", { class: "review-side" }, side) : null));
 };

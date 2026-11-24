@@ -59,11 +59,13 @@ const renderShortcutCard = () => {
   const loadingText = settingsState.backgroundError ? `读取失败：${settingsState.backgroundError}` : "正在读取…";
   return el("div", { class: "card", id: "settings-shortcuts" },
     el("h2", {}, "快捷方式"),
-    el("p", { class: "card-sub" }, "点快捷方式就打开简报；ChatLens 没开时会先启动它。"),
+    explainNote(
+      el("p", { class: "card-sub" }, "点快捷方式就打开简报；ChatLens 没开时会先启动它。"),
+      desktop === null ? null : switchHints(shortcutOptions(desktop))),
     desktop === null
       ? el("p", { class: "card-sub" }, loadingText)
-      : el("div", { class: "bg-grid" }, shortcutOptions(desktop).map((option) =>
-        backgroundToggle(option.label, option.hint, option.on, (value) => setShortcutFromSettings(option.kind, value)))),
+      : switchGrid(shortcutOptions(desktop).map((option) =>
+        ({ ...option, onChange: (value) => setShortcutFromSettings(option.kind, value) }))),
     msg);
 };
 

@@ -22,7 +22,7 @@ const REMOTE_OFFLINE_HTML = [
   "<body style='font-family:system-ui,sans-serif;padding:28px 20px;line-height:1.7;color:#1c2127;background:#f4f5f2'>",
   "<h2 style='font-size:20px'>连不上电脑上的 ChatLens</h2>",
   "<p>请确认：电脑开着且没有睡眠，ChatLens 在电脑上运行，手机的 Tailscale 已打开。</p>",
-  "<p><a href='/' style='color:#1565c0;font-weight:600'>重试</a></p>",
+  "<p><a href='/' style='color:#24456f;font-weight:600'>重试</a></p>",
 ].join("");
 
 const isLocal = ["127.0.0.1", "localhost"].includes(self.location.hostname);
