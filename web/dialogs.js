@@ -9,6 +9,8 @@
 
 const NOTICE_MS = 6000;
 const ERROR_NOTICE_MS = 12000;
+// As long as motion.css takes to fade a notice out (--motion-leave).
+const NOTICE_LEAVE_MS = 120;
 
 const dialogState = { open: null };
 
@@ -71,13 +73,19 @@ const noticeHost = () => {
   return host;
 };
 
+// Fades out, then goes.
+const dismissNotice = (note) => {
+  note.classList.add("is-leaving");
+  setTimeout(() => note.remove(), NOTICE_LEAVE_MS);
+};
+
 // isError: stays longer and is styled as a problem. Always dismissible.
 const notify = (message, { isError = false } = {}) => {
   const note = el("div", { class: isError ? "cc-notice is-error" : "cc-notice", role: isError ? "alert" : "status" },
     el("span", { class: "cc-notice-text" }, String(message)),
-    el("button", { class: "cc-notice-close", type: "button", "aria-label": "关掉这条提示", onclick: () => note.remove() }, "×"));
+    el("button", { class: "cc-notice-close", type: "button", "aria-label": "关掉这条提示", onclick: () => dismissNotice(note) }, "×"));
   noticeHost().append(note);
-  setTimeout(() => note.remove(), isError ? ERROR_NOTICE_MS : NOTICE_MS);
+  setTimeout(() => dismissNotice(note), isError ? ERROR_NOTICE_MS : NOTICE_MS);
 };
 
 // For .catch(): something the user asked for did not work.

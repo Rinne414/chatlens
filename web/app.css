@@ -142,7 +142,7 @@ main { padding: 0 28px 40px; min-width: 0; }
   font: inherit;
   font-size: 13px;
   cursor: pointer;
-  transition: all var(--dur);
+  transition: border-color var(--dur), background var(--dur), color var(--dur);
 }
 .chip:hover { border-color: var(--accent); color: var(--accent); }
 .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
@@ -199,7 +199,7 @@ input[type="text"]:hover, input[type="number"]:hover, input[type="password"]:hov
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  transition: all var(--dur);
+  transition: border-color var(--dur), background var(--dur), color var(--dur);
 }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; height: 42px; padding: 0 26px; font-size: 15px; }
