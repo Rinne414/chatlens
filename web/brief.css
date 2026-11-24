@@ -448,7 +448,7 @@ html[data-theme="dark"] { --chart-bar: #7fa0d0; }
 .brief-image.picked { outline: 3px solid var(--accent); outline-offset: -3px; }
 .brief-image.picked img { opacity: .82; }
 .brief-image-check { position: absolute; top: 6px; left: 6px; display: grid; place-items: center; width: 22px; height: 22px; border: 2px solid #fff; border-radius: 6px; background: rgba(0, 0, 0, .35); color: #fff; font-size: 13px; font-weight: 700; }
-.brief-image-check.on { background: var(--accent); border-color: var(--accent); }
+.brief-image-check.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .brief-picture-selection { position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, .12); font-size: 13px; }
 .brief-picture-selection code { font-size: 12px; word-break: break-all; }
 
@@ -518,7 +518,7 @@ html[data-theme="dark"] { --chart-bar: #7fa0d0; }
 .brief-commitment { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
 .brief-commitment.owed { border-left-color: var(--line-strong); }
 .brief-commitment .brief-row-button { padding: 10px 12px 10px 4px; }
-.brief-commitment-tick { margin: 11px 8px 0 12px; width: 20px; height: 20px; border: 2px solid var(--line-strong); border-radius: 6px; background: var(--panel); color: #fff; font: 700 12px/1 inherit; cursor: pointer; display: grid; place-items: center; }
+.brief-commitment-tick { margin: 11px 8px 0 12px; width: 20px; height: 20px; border: 2px solid var(--line-strong); border-radius: 6px; background: var(--panel); color: var(--on-accent); font: 700 12px/1 inherit; cursor: pointer; display: grid; place-items: center; }
 .brief-commitment-tick:hover { border-color: var(--for-you); }
 .brief-commitment-tick[aria-pressed="true"] { background: var(--for-you); border-color: var(--for-you); }
 .brief-commitment-what { font-size: 14.5px; overflow-wrap: anywhere; }
@@ -538,7 +538,7 @@ html[data-theme="dark"] { --chart-bar: #7fa0d0; }
 .whats-new.folded { padding: 8px 14px; margin-bottom: 14px; }
 .whats-new.folded .whats-new-head { margin-bottom: 0; }
 .whats-new.folded .whats-new-head strong { font-size: 13.5px; }
-.whats-new-actions { display: flex; gap: 6px; }
+.whats-new-actions { display: flex; flex: none; gap: 6px; white-space: nowrap; }
 .brief-headline-jump { border: 0; background: none; padding: 0; font: inherit; color: inherit; letter-spacing: inherit; cursor: pointer; }
 .brief-headline-jump:hover, .brief-headline-jump:focus-visible { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; outline: none; }
 .brief-headline-gap { display: inline-block; width: 1.1em; }

@@ -12,10 +12,17 @@ const autoKeyState = { busy: false, notice: null };
 // A native disclosure, so a keyboard and a finger open it as well as a mouse.
 // The first screen keeps the name, the state and the action; the explanation
 // (and the long values) wait in here.
-const foldNote = (label, ...children) =>
-  el("details", { class: "fold-note" },
-    el("summary", {}, label),
-    el("div", { class: "fold-note-body" }, children));
+// Which notes the reader has open: the pages redraw whole (a measurement
+// finishing, a switch saving, a poll), and a note being read must stay open.
+const openFoldNotes = new Set();
+
+const foldNote = (label, ...children) => {
+  const body = el("div", { class: "fold-note-body" }, children);
+  const key = `${label}|${String(body.textContent ?? "").slice(0, 120)}`;
+  const note = el("details", { class: "fold-note", open: openFoldNotes.has(key) }, el("summary", {}, label), body);
+  note.addEventListener("toggle", () => (note.open ? openFoldNotes.add(key) : openFoldNotes.delete(key)));
+  return note;
+};
 
 const explainNote = (...children) => foldNote("说明", ...children);
 

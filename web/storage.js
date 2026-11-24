@@ -245,9 +245,6 @@ const storageRowNote = (item) => foldNote(
   "说明和位置",
   el("p", {}, linked(item.description)),
   el("p", {}, linked(item.cleanupImpact)),
-  item.cleanupBlockedReason !== null && item.cleanupCategory !== null
-    ? el("p", {}, item.cleanupBlockedReason)
-    : null,
   el("div", { class: "storage-where" },
     el("span", {}, "位置"),
     item.paths.length === 0
@@ -263,6 +260,9 @@ storageMeasurementCell(item),
 el("div", { class: "storage-policy" },
   el("span", { class: `storage-policy-badge ${storagePolicyClass(item.policy)}` }, item.policyLabel)),
 storageActions(item),
+item.cleanupBlockedReason !== null && item.cleanupCategory !== null
+  ? el("p", { class: "storage-blocked" }, item.cleanupBlockedReason)
+  : null,
 storageRowNote(item),
 storageConfirmStrip(item));
 

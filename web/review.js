@@ -861,8 +861,11 @@ const reviewGroup = (group) => {
 const reviewDayContent = () => {
   const data = reviewState.data;
   if (data === null) {
-    return el("p", { class: "brief-meta" }, reviewState.loading ? "正在读取…" : "");
+    // One line for the whole wait: a redraw puts the same node back, so its count is not restarted.
+    reviewState.waitLine ??= el("p", { class: "brief-loading" }, waiting("正在读取这一天…"));
+    return reviewState.waitLine;
   }
+  reviewState.waitLine = null;
   return el("div", { class: `review-day ${reviewState.loading ? "loading" : ""}` },
     reviewDayHead(data),
     digestCard("day", data.day, { title: "这天的各群总览", emptyText: "这一天还没有跨群总览。有 AI 摘要的日子都可以生成。" }),
@@ -935,19 +938,14 @@ const reviewCalendar = () => {
       : null);
 };
 
-// The main column holds nothing yet (the day is still loading or did not
-// load, and no search or report is open): the report lists use that space.
-const reviewMainIsEmpty = () => reviewState.data === null && reviewState.report === null && !(reviewState.resultsOpen && reviewState.results !== null);
+// The day did not load and no search or report is open: the main column has
+// nothing to show, so the report lists use that space. While the day is still
+// loading they stay in the side column, so nothing moves under the pointer.
+const reviewMainIsEmpty = () => reviewState.data === null && reviewState.error !== null && reviewState.report === null && !(reviewState.resultsOpen && reviewState.results !== null);
 
 const reviewIdle = () => {
-  // One line for the whole wait: a redraw puts the same node back, so its count is not restarted.
-  if (reviewState.error !== null) {
-    reviewState.waitLine = null;
-  } else if (reviewState.waitLine === null) {
-    reviewState.waitLine = el("p", { class: "brief-loading" }, waiting("正在读取这一天…"));
-  }
+  reviewState.waitLine = null;
   return el("div", { class: "review-idle" },
-    reviewState.waitLine,
     el("div", { class: "review-idle-lists" },
       digestReportList("week", reviewPickReport, null),
       digestReportList("month", reviewPickReport, null)));
@@ -974,9 +972,6 @@ const renderReviewView = () => {
   const report = reviewState.report;
   const idle = !showResults && reviewMainIsEmpty();
   const main = reviewMainContent(showResults, report);
-  if (!idle) {
-    reviewState.waitLine = null;
-  }
   const selected = report === null ? null : digestKey(report.kind, report.period);
   // While the reports sit in the main column the side holds only the calendar.
   const side = idle

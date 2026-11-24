@@ -26,6 +26,8 @@ const briefState = {
   watchError: null,
   watchExpanded: new Set(),
   renderPending: false,
+  // The reader asked for 「开始使用」 while the briefing still has something to show.
+  showSetup: false,
 };
 
 const BRIEF_POLL_ACTIVE_MS = 5000;
@@ -398,7 +400,10 @@ const briefRefreshPieces = (data) => {
     ] };
   }
   if (background.readinessProblem) {
-    return { tone: "warn", pieces: [`还没设置好（${background.readinessProblem}），消息不会更新；先完成「开始使用」`] };
+    return { tone: "warn", pieces: [
+      `还没设置好（${background.readinessProblem}），消息不会更新；先完成`,
+      el("button", { class: "linklike", type: "button", onclick: () => briefShowSetup(true) }, "「开始使用」"),
+    ] };
   }
   if (isOff) {
     return { tone: "warn", pieces: [
@@ -1061,6 +1066,17 @@ const renderBriefPending = (root) => {
       : el("p", { class: "brief-loading" }, waiting("正在读取简报…"))));
 };
 
+// 「开始使用」 opened from the briefing, and the way back to it.
+const briefShowSetup = (show) => {
+  briefState.showSetup = show;
+  renderBriefView();
+};
+
+const briefSetupOverBriefing = () => [
+  el("button", { class: "btn small ghost", type: "button", onclick: () => briefShowSetup(false) }, "‹ 回到简报"),
+  setupGuideCard(),
+];
+
 const renderBriefView = () => {
   const root = $("#view-brief");
   if (root === null) {
@@ -1080,7 +1096,7 @@ const renderBriefView = () => {
     // first message is stored; a quiet day or 看完了 keeps the briefing.
     needsSetupGuide(data)
       ? setupGuideCard()
-      : [
+      : briefState.showSetup ? briefSetupOverBriefing() : [
           // On wide screens the per-group list becomes a right-hand column
           // (brief.css); on narrow ones it simply follows the main column.
           el("div", { class: "brief-main" },

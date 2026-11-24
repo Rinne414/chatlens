@@ -89,3 +89,22 @@
   .storage-size, .storage-policy, .storage-actions { grid-column: 1; }
   .storage-figure + .storage-figure::before { margin: 0 6px; }
 }
+
+/* ---- 存储: columns sit close to the name; 操作 is headed above its buttons ---- */
+@media (min-width: 1201px) {
+  .storage-table-head, .storage-row { grid-template-columns: minmax(220px, 440px) 180px 200px minmax(330px, 1fr); }
+  .storage-table-head > span:last-child { text-align: right; }
+}
+.storage-blocked { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+
+/* A long path inside a closed note must not widen the page (phone width). */
+.fold-note, .fold-note-body, .storage-where, .storage-row > * { min-width: 0; max-width: 100%; }
+.storage-where code { word-break: break-all; }
+.settings-list select, .card select { max-width: 100%; }
+
+/* ---- 设置: a card's own 说明 sits in the card's corner, on the heading's line ---- */
+.card:has(> h2 + .fold-note) { position: relative; }
+.card > h2 + .fold-note { margin: -8px 0 12px; }
+.card > h2 + .fold-note:not([open]) { margin: 0; height: 0; }
+.card > h2 + .fold-note > summary { position: absolute; top: 20px; right: 20px; }
+.card > h2 + .fold-note[open] > .fold-note-body { margin-top: 0; }

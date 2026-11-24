@@ -36,6 +36,7 @@ const PLACES = [
   [/「设置 → 版本与更新」|设置 ?→ ?「版本与更新」/u, () => openSettingsPlace(settingsCardOf("#update-card"))],
   [/「设置 → 快捷方式」|设置 ?→ ?「快捷方式」/u, () => openSettingsPlace(settingsCardOf("#settings-shortcuts"))],
   [/「存储」页|存储页/u, () => openView("storage")],
+  [/「设置」页/u, () => openView("settings")],
   [/备份页/u, () => openView("backup")],
   [/「回顾」/u, () => openView("review")],
   [/咒语库里/u, () => openView("knowledge")],

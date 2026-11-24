@@ -80,25 +80,30 @@ test("a report that exists says so once; one that does not stays quiet and is ex
   assert.match(textOf(run("digestReportList('week', () => {}, null)")), /周报点开一份就生成/u);
 });
 
-test("the report lists move into the main column only while nothing else is there", () => {
+test("the report lists move into the main column only when the day did not load and nothing else is there", () => {
   const { run } = loadPage();
-  const empty = (setup) => run(`reviewState.data = null; reviewState.report = null; reviewState.results = null; reviewState.resultsOpen = false; ${setup}; reviewMainIsEmpty()`);
+  const empty = (setup) => run(`reviewState.data = null; reviewState.error = '读取失败'; reviewState.report = null; reviewState.results = null; reviewState.resultsOpen = false; ${setup}; reviewMainIsEmpty()`);
   assert.equal(empty(""), true);
+  assert.equal(empty("reviewState.error = null"), false);
   assert.equal(empty("reviewState.data = { day: '2026-11-23' }"), false);
   assert.equal(empty("reviewState.report = { kind: 'week', period: '2026-11-16' }"), false);
   assert.equal(empty("reviewState.results = { hits: [] }; reviewState.resultsOpen = true"), false);
 });
 
-test("回顾 with no day yet: both lists in the main column, no side column, one loading line", () => {
+test("回顾 while the day loads: one loading line that survives a redraw; when it failed, both lists take the main column", () => {
   const { run } = loadPage();
   run("reviewState.data = null; reviewState.report = null; reviewState.results = null; reviewState.resultsOpen = false; reviewState.calendar = null; reviewState.error = null; digestState.lists = { week: [], month: [] }; renderReviewView()");
   const page = run("$('#view-review')");
-  const idle = findByClass(page, "review-idle");
-  assert.notEqual(idle, null);
-  assert.equal(findByClass(page, "review-side"), null);
-  assert.match(textOf(findByClass(idle, "review-idle-lists")), /周报.*月报/su);
-  assert.match(textOf(idle), /正在读取这一天…/u);
-  const first = findByClass(idle, "brief-loading");
+  assert.equal(findByClass(page, "review-idle"), null);
+  assert.match(textOf(page), /正在读取这一天…/u);
+  const first = findByClass(page, "brief-loading");
   run("renderReviewView()");
   assert.equal(findByClass(run("$('#view-review')"), "brief-loading"), first);
+  run("reviewState.error = '读取失败'; renderReviewView()");
+  const failed = run("$('#view-review')");
+  const idle = findByClass(failed, "review-idle");
+  assert.notEqual(idle, null);
+  assert.equal(findByClass(failed, "review-side"), null);
+  assert.match(textOf(findByClass(idle, "review-idle-lists")), /周报.*月报/su);
+  assert.equal(findByClass(failed, "brief-loading"), null);
 });

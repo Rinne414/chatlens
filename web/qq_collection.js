@@ -253,7 +253,7 @@ const renderQqCollectionView = () => {
   }
   const data = qqc.data;
   if (data === null) {
-    setChildren(root, qqc.error ? el("div", { class: "notice risk" }, `读取失败：${qqc.error}`) : el("p", { class: "kb-meta" }, "正在读取 QQ 收藏…"));
+    setChildren(root, qqc.error ? el("div", { class: "notice risk" }, "读取失败：", linked(qqc.error)) : el("p", { class: "kb-meta" }, "正在读取 QQ 收藏…"));
     return;
   }
   setChildren(root, el("div", { class: `qqc-page ${qqc.loading ? "is-loading" : ""}` },
