@@ -56,5 +56,10 @@ test("a demo folder is self-contained, can be made again, and other folders are 
   assert.equal(fs.readFileSync(path.join(other, "notes.txt"), "utf8"), "keep me");
   assert.throws(() => makeDemo(path.join(__dirname, "..", "demo-inside"), { now: NOW }), /own folder/u);
   // the shared libraries are a link: removing the demo must not follow it
-  fs.rmdirSync(path.join(folder, "node_modules"));
+  const link = path.join(folder, "node_modules");
+  if (process.platform === "win32") {
+    fs.rmdirSync(link);
+  } else {
+    fs.unlinkSync(link);
+  }
 });
