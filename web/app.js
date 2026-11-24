@@ -344,6 +344,16 @@ const readThemeChoice = () => {
   const stored = localStorage.getItem("cc-theme");
   return THEME_CHOICES.includes(stored) ? stored : "light";
 };
+// Which icons the interface shows: "emoji", or "line" (the drawn ones in icons.js).
+const ICON_STYLES = ["emoji", "line"];
+const readIconStyle = () => {
+  try {
+    const stored = localStorage.getItem("cc-icons");
+    return ICON_STYLES.includes(stored) ? stored : "emoji";
+  } catch {
+    return "emoji";
+  }
+};
 const themeOf = (choice) => (choice === "system" ? (systemDark?.matches ? "dark" : "light") : choice);
 
 const settings = {
@@ -352,22 +362,45 @@ const settings = {
   theme: themeOf(readThemeChoice()),
   // "auto" follows the viewport width (see app.css); a number overrides it.
   zoom: readZoomChoice(),
+  iconStyle: readIconStyle(),
   // Always on, with no toggle. A field because it also gates real avatar
   // images, not just nav emoji.
   icons: true,
 };
 
+const usesLineIcons = () => settings.iconStyle === "line";
+
+// A label that starts with an emoji; the drawn icons are kept for the places
+// people steer by (the rail, the phone tabs), so there the label is its words.
+const emojiLabel = (emoji, text) => (usesLineIcons() ? text : `${emoji} ${text}`);
+
+// A state mark in front of a line: the emoji, or a plain sign.
+const emojiMark = (emoji, plain) => (usesLineIcons() ? plain : emoji);
+
+// The icon alone, in the chosen style.
+const iconOf = (name, emoji, size = null) => (usesLineIcons() ? lineIcon(name, size) : emoji);
+
+// An icon and its word, as the children of a button.
+const iconAndWord = (name, emoji, word) =>
+  (usesLineIcons() ? [lineIcon(name), el("span", {}, word)] : [`${emoji} ${word}`.trimStart()]);
+
 const applySettings = () => {
   document.documentElement.dataset.theme = settings.theme;
+  document.documentElement.dataset.icons = settings.iconStyle;
   for (const button of document.querySelectorAll("#nav button")) {
     const name = button.dataset.view;
-    button.textContent = `${NAV_ICONS[name] ?? ""} ${VIEW_TITLES[name] ?? name}`;
+    button.replaceChildren(...iconAndWord(name, NAV_ICONS[name] ?? "", VIEW_TITLES[name] ?? name));
   }
   const themeButton = $("#theme-toggle");
   if (themeButton !== null) {
     // The button names what a click changes to; the tooltip says what it is now.
-    themeButton.textContent = { light: "🌙 夜间模式", dark: "🖥️ 跟随系统", system: "☀️ 日间模式" }[settings.themeChoice];
+    const next = { light: ["moon", "🌙", "夜间模式"], dark: ["monitor", "🖥️", "跟随系统"], system: ["sun", "☀️", "日间模式"] }[settings.themeChoice];
+    themeButton.replaceChildren(...iconAndWord(...next));
     themeButton.title = { light: "现在是日间模式", dark: "现在是夜间模式", system: `现在跟随系统（${settings.theme === "dark" ? "夜间" : "日间"}）` }[settings.themeChoice];
+  }
+  $("#quit-console > span")?.replaceChildren(...iconAndWord("power", "⏻", "退出 ChatLens"));
+  if (typeof refreshPhoneIcons === "function") {
+    refreshPhoneIcons();
   }
 };
 
@@ -391,6 +424,18 @@ const changeZoom = (value) => {
     // Private windows may refuse storage; the choice still applies now.
   }
   applyZoom();
+};
+
+// 设置 → 界面 → 图标. The page in view is drawn again so its labels follow.
+const changeIconStyle = (value) => {
+  settings.iconStyle = ICON_STYLES.includes(value) ? value : "emoji";
+  try {
+    localStorage.setItem("cc-icons", settings.iconStyle);
+  } catch {
+    // Private windows may refuse storage; the choice still applies now.
+  }
+  applySettings();
+  renderCurrentView();
 };
 
 // 日间 -> 夜间 -> 跟随系统 -> 日间.
@@ -470,7 +515,8 @@ const mediaLabelText = (kinds, text) => {
   const kind = String(kinds ?? "").split(",")[0];
   const icon = KIND_ICONS[kind] ?? "📎";
   const label = KIND_LABELS[kind] ?? "媒体";
-  return text && text.trim().length > 0 ? `${icon} [${label}] ${text.trim()}` : `${icon} [${label}]`;
+  const words = text && text.trim().length > 0 ? `[${label}] ${text.trim()}` : `[${label}]`;
+  return emojiLabel(icon, words);
 };
 
 const formatBytes = (bytes) => {

@@ -115,7 +115,7 @@ const unpairThisPhone = async () => {
 const phoneSheetPages = () => PHONE_MORE_VIEWS
   .filter((view) => !(phoneRemote && REMOTE_DESKTOP_ONLY_VIEWS.has(view)))
   .map((view) => el("button", { class: "phone-sheet-page", type: "button", onclick: () => openFromSheet(view) },
-    el("span", { class: "phone-sheet-icon", "aria-hidden": "true" }, NAV_ICONS[view] ?? "•"),
+    el("span", { class: "phone-sheet-icon", "aria-hidden": "true" }, iconOf(view, NAV_ICONS[view] ?? "•", 20)),
     el("span", {}, VIEW_TITLES[view] ?? view)));
 
 const buildPhoneSheet = () =>
@@ -132,6 +132,16 @@ const buildPhoneSheet = () =>
           el("p", {}, "这台手机通过 Tailscale 连到你电脑上的 ChatLens。设置、密钥、备份和存储只能在电脑上改。"),
           el("button", { class: "btn small danger", type: "button", onclick: unpairThisPhone }, "退出这台手机的配对"))
         : null));
+
+const phoneTabIcon = (view) => (view === "more" ? iconOf("menu", "☰", 22) : iconOf(view, NAV_ICONS[view], 22));
+
+// The icon choice changed (设置 → 界面): the tabs and the sheet show the other set.
+const refreshPhoneIcons = () => {
+  for (const tab of document.querySelectorAll(".phone-tab")) {
+    tab.querySelector(".phone-tab-icon")?.replaceChildren(phoneTabIcon(tab.dataset.view));
+  }
+  document.querySelector(".phone-sheet-pages")?.replaceChildren(...phoneSheetPages());
+};
 
 const buildPhoneTabs = () =>
   el("nav", { class: "phone-tabs", "aria-label": "页面" },
@@ -155,7 +165,7 @@ const buildPhoneTabs = () =>
         openView(view);
       },
     },
-    el("span", { class: "phone-tab-icon", "aria-hidden": "true" }, view === "more" ? "☰" : NAV_ICONS[view]),
+    el("span", { class: "phone-tab-icon", "aria-hidden": "true" }, phoneTabIcon(view)),
     el("span", { class: "phone-tab-label" }, view === "more" ? "更多" : phoneTabLabel(view)))));
 
 // The rail's live parts (followed groups, background status, theme and text

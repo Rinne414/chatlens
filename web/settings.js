@@ -217,7 +217,7 @@ const renderSettingsView = () => {
           }
           renderSettingsView();
         },
-      }, "🔍 自动探测并保存"),
+      }, emojiLabel("🔍", "自动探测并保存")),
       el("button", {
         class: "btn small primary",
         onclick: async () => {
@@ -307,7 +307,7 @@ const renderSettingsView = () => {
           autoKeyState.busy = false;
           renderSettingsView();
         },
-      }, autoKeyState.busy ? "扫描中…" : "🔑 自动获取密钥"),
+      }, autoKeyState.busy ? "扫描中…" : emojiLabel("🔑", "自动获取密钥")),
       autoKeyMsg),
     el("details", { class: "settings-fold" },
       el("summary", {}, "自动获取失败时：手动方式"),
@@ -442,18 +442,35 @@ const renderSettingsView = () => {
       $("#view-settings").prepend(index);
     }
   });
-  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderShortcutCard(), renderMoreLinks(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, renderRemoteCard(), renderNotesCard(), aboutCard);
+  setChildren($("#view-settings"), readinessCard, renderUpdateCard(), renderShortcutCard(), renderMoreLinks(), renderLookCard(), pathsCard, keysCard, renderGrokCard(), llmCard, renderAiUsageCard(), renderPictureSettingsCard(), backgroundCard, renderRemoteCard(), renderNotesCard(), aboutCard);
 };
+
+/* --- how the interface looks --- */
+
+const ICON_STYLE_NAMES = [["emoji", "表情符号"], ["line", "线条图标"]];
+
+const renderLookCard = () =>
+  el("div", { class: "card", "data-testid": "look-card" },
+    el("h2", { id: "settings-look" }, "界面"),
+    el("div", { class: "look-row" },
+      el("span", { class: "look-label" }, "图标"),
+      el("div", { class: "chips", role: "group", "aria-label": "图标" },
+        ICON_STYLE_NAMES.map(([value, name]) => el("button", {
+          class: `chip ${settings.iconStyle === value ? "on" : ""}`,
+          type: "button",
+          "aria-pressed": String(settings.iconStyle === value),
+          onclick: () => changeIconStyle(value),
+        }, name)))));
 
 /* --- pages that moved off the rail --- */
 
 const renderMoreLinks = () =>
   el("div", { class: "settings-more" },
     el("span", { class: "card-sub" }, "更多："),
-    el("button", { class: "chip", onclick: () => openView("watchlist") }, "⭐ 关注群"),
+    el("button", { class: "chip", onclick: () => openView("watchlist") }, emojiLabel("⭐", "关注群")),
     el("button", { class: "chip", onclick: () => openView("run") }, "▶ 自定义时间范围总结"),
-    el("button", { class: "chip", onclick: () => openView("history") }, "📚 历史报告"),
-    el("button", { class: "chip", onclick: () => openView("storage") }, "💾 存储"));
+    el("button", { class: "chip", onclick: () => openView("history") }, emojiLabel("📚", "历史报告")),
+    el("button", { class: "chip", onclick: () => openView("storage") }, emojiLabel("💾", "存储")));
 
 /* --- background refresh, notifications, desktop integration --- */
 

@@ -266,7 +266,7 @@ const openReader = async (runId, origin) => {
         el("ul", { class: "item-list" }, actions.map((item) =>
           el("li", { class: item.status === "resolved" ? "resolved" : "" },
             el("span", { class: "gtag" }, `[${item.groupName}]`),
-            el("span", { class: "who" }, `${item.status === "resolved" ? "✅" : "⏳"} ${item.owner ?? "未指定"}`),
+            el("span", { class: "who" }, `${item.status === "resolved" ? emojiMark("✅", "✓") : emojiMark("⏳", "○")} ${item.owner ?? "未指定"}`),
             item.task,
             item.resolution ? el("span", { class: "ev" }, `结果: ${item.resolution}`) : null,
             el("span", { class: "ev" }, `证据: ${item.evidence}`)))))
