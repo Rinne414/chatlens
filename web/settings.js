@@ -217,7 +217,7 @@ const renderSettingsView = () => {
           }
           renderSettingsView();
         },
-      }, "自动探测并保存"),
+      }, "🔍 自动探测并保存"),
       el("button", {
         class: "btn small primary",
         onclick: async () => {
@@ -307,7 +307,7 @@ const renderSettingsView = () => {
           autoKeyState.busy = false;
           renderSettingsView();
         },
-      }, autoKeyState.busy ? "扫描中…" : "自动获取密钥"),
+      }, autoKeyState.busy ? "扫描中…" : "🔑 自动获取密钥"),
       autoKeyMsg),
     el("details", { class: "settings-fold" },
       el("summary", {}, "自动获取失败时：手动方式"),
@@ -450,10 +450,10 @@ const renderSettingsView = () => {
 const renderMoreLinks = () =>
   el("div", { class: "settings-more" },
     el("span", { class: "card-sub" }, "更多："),
-    el("button", { class: "chip", onclick: () => openView("watchlist") }, "关注群"),
+    el("button", { class: "chip", onclick: () => openView("watchlist") }, "⭐ 关注群"),
     el("button", { class: "chip", onclick: () => openView("run") }, "▶ 自定义时间范围总结"),
-    el("button", { class: "chip", onclick: () => openView("history") }, "历史报告"),
-    el("button", { class: "chip", onclick: () => openView("storage") }, "存储"));
+    el("button", { class: "chip", onclick: () => openView("history") }, "📚 历史报告"),
+    el("button", { class: "chip", onclick: () => openView("storage") }, "💾 存储"));
 
 /* --- background refresh, notifications, desktop integration --- */
 

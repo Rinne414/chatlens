@@ -12,7 +12,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const WEB = path.join(__dirname, "..", "web");
-const SCRIPTS_UP_TO_APP = ["timeline_tools.js", "gallery_tools.js", "view_history.js", "icons.js", "app.js"];
+const SCRIPTS_UP_TO_APP = ["timeline_tools.js", "gallery_tools.js", "view_history.js", "app.js"];
 
 // Every property, call and iteration works and yields another stand-in, so the
 // DOM work in boot() runs. `then` stays undefined so awaiting one never hangs.

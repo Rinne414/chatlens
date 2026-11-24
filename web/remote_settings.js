@@ -188,7 +188,7 @@ const remoteDeviceList = (devices) => {
   }
   return el("div", { class: "remote-devices" },
     devices.map((device) => el("div", { class: "remote-device" },
-      el("span", { class: "remote-device-name" }, device.name),
+      el("span", { class: "remote-device-name" }, `📱 ${device.name}`),
       el("span", { class: "remote-device-meta" }, `配对于 ${remoteTime(device.createdAt)} · 最近使用 ${railAgo(Math.floor(device.lastSeenAt / 1000)) || "—"}`),
       el("button", { class: "btn small danger", type: "button", disabled: remoteState.busy, onclick: () => revokeDevice(device) }, "取消配对"))),
     devices.length > 1
@@ -221,7 +221,7 @@ const remoteBody = (status) => {
     remoteState.pairing !== null
       ? remotePairingPanel(remoteState.pairing)
       : el("div", { class: "row", style: "margin-top:12px" },
-        el("button", { class: "btn small primary", type: "button", disabled: remoteState.busy, onclick: startPairing }, "配对新手机"),
+        el("button", { class: "btn small primary", type: "button", disabled: remoteState.busy, onclick: startPairing }, "📱 配对新手机"),
         el("button", { class: "btn small danger", type: "button", disabled: remoteState.busy, onclick: disableRemote }, "关闭手机连线")),
     el("h3", { class: "remote-subhead" }, "已配对的手机"),
     remoteDeviceList(status.devices ?? []),

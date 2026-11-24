@@ -549,7 +549,7 @@ const briefMasthead = (data) => {
             disabled: briefState.busy || data.status?.background?.running,
             title: data.status?.background?.running ? "后台正在整理，这一轮结束后会接着总结" : "不等凑够一段，现在就把新消息交给 AI 总结",
             onclick: briefRunNow,
-          }, "现在就总结")
+          }, "⚡ 现在就总结")
         : null,
       total > 0 ? el("button", { class: "btn", disabled: briefState.busy, onclick: briefMarkSeen }, "✓ 看完了") : null,
       el("button", { class: "btn ghost desktop-action", onclick: () => openView("run") }, "自定义时间范围…"),

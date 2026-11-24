@@ -1,13 +1,11 @@
 :root {
   color-scheme: light;
-  /* Paper, blue-black ink and the status colours of a printed briefing:
-     the chat's own pictures and avatars are the only saturated things. */
-  --bg: #eceae3;
-  --panel: #fdfcfa;
+  --bg: #f4f5f2;
+  --panel: #ffffff;
   --ink: #1b1e24;
   --muted: #626973;
-  --line: #dcd8cd;
-  --line-strong: #c2bdb0;
+  --line: #dde1e6;
+  --line-strong: #c8cdd4;
   --accent: #1d4e94;
   --accent-soft: #e1e9f5;
   --on-accent: #ffffff;
@@ -799,12 +797,12 @@ html[data-theme="dark"] {
 }
 html[data-theme="dark"] body,
 html[data-theme="dark"] {
-  --bg: #151617;
-  --panel: #1e1f21;
-  --ink: #e8e5df;
-  --muted: #9d9990;
-  --line: #2f3033;
-  --line-strong: #434448;
+  --bg: #14171c;
+  --panel: #1d2127;
+  --ink: #e5e9ef;
+  --muted: #8b94a1;
+  --line: #2b313a;
+  --line-strong: #3a414c;
   --accent: #8fb5f2;
   --accent-soft: #222e42;
   --on-accent: #0c1524;
@@ -1102,9 +1100,8 @@ html[data-theme="dark"] .sel-bar { box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
   .rail-version { margin: 0; padding: 0; border-top: 0; }
   .rail-version-row, .rail-version-status { display: none; }
 }
-.rail-quit { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1px 7px; text-align: left; }
-.rail-quit::before { content: ""; flex: none; width: 14px; height: 14px; background: currentColor; -webkit-mask: var(--icon-power) center / contain no-repeat; mask: var(--icon-power) center / contain no-repeat; }
-.rail-quit-hint { grid-column: 2; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.rail-quit { display: grid; gap: 2px; text-align: left; }
+.rail-quit-hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
 
 /* Asking and telling inside the page (dialogs.js). */
 .cc-dialog-layer { position: fixed; inset: 0; z-index: 400; display: grid; place-items: center; padding: 16px; background: rgba(15, 20, 28, .45); }
@@ -1149,13 +1146,7 @@ html.phone .cc-notices { bottom: 84px; }
 /* 咒语: 复制 beside 复制成另一种写法 (knowledge.js promptConvertButton) */
 .kb-prompt-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 
-/* ---- the interface's own icons (icons.js) ---- */
-.line-icon { flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: -.2em; }
-.line-icon:not([width]) { width: 1.2em; height: 1.2em; }
-#nav button .line-icon { width: 17px; height: 17px; }
-@media (max-width: 620px) { #nav button { justify-content: center; } }
-#theme-toggle { gap: 6px; }
-:root { --icon-power: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 3.5v8'/%3E%3Cpath d='M7 6.5a7.5 7.5 0 1 0 10 0'/%3E%3C/svg%3E"); }
+/* ---- the rail's foot: theme and text size on one line ---- */
 .settings-row .btn, .zoom-control { white-space: nowrap; }
 .settings-row .btn.small { padding: 0 10px; }
 .rail-foot .settings-row { flex-wrap: nowrap; gap: 6px; }

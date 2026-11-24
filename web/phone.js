@@ -115,7 +115,7 @@ const unpairThisPhone = async () => {
 const phoneSheetPages = () => PHONE_MORE_VIEWS
   .filter((view) => !(phoneRemote && REMOTE_DESKTOP_ONLY_VIEWS.has(view)))
   .map((view) => el("button", { class: "phone-sheet-page", type: "button", onclick: () => openFromSheet(view) },
-    el("span", { class: "phone-sheet-icon", "aria-hidden": "true" }, lineIcon(view, 20)),
+    el("span", { class: "phone-sheet-icon", "aria-hidden": "true" }, NAV_ICONS[view] ?? "•"),
     el("span", {}, VIEW_TITLES[view] ?? view)));
 
 const buildPhoneSheet = () =>
@@ -155,7 +155,7 @@ const buildPhoneTabs = () =>
         openView(view);
       },
     },
-    el("span", { class: "phone-tab-icon", "aria-hidden": "true" }, lineIcon(view === "more" ? "menu" : view, 22)),
+    el("span", { class: "phone-tab-icon", "aria-hidden": "true" }, view === "more" ? "☰" : NAV_ICONS[view]),
     el("span", { class: "phone-tab-label" }, view === "more" ? "更多" : phoneTabLabel(view)))));
 
 // The rail's live parts (followed groups, background status, theme and text

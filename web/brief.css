@@ -2,7 +2,7 @@
    things worth your attention, each section with its own semantic colour. ---- */
 
 :root {
-  --paper: #fcfbf8;
+  --paper: #fbfaf6;
   --paper-rule: #e3ded2;
   --for-you: var(--accent);
   --for-you-soft: var(--accent-soft);
