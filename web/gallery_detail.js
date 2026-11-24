@@ -344,7 +344,7 @@ const galleryDetailImage = (detail) => {
   if (item.gone && !item.kept) {
     return el("div", { class: "picture-viewer-missing gallery-gone" }, "腾讯服务器已经删除这张图（超过 31 天）。");
   }
-  return el("img", {
+  return zoomableGalleryDetailImage(el("img", {
     class: `kb-overlay-image ${item.sticker ? "sticker" : ""}`,
     src: pictureUrl(item.md5, detail.size),
     // The bigger copy may take a moment to come from Tencent; the thumbnail
@@ -354,6 +354,7 @@ const galleryDetailImage = (detail) => {
     // Dragged out to the desktop or a folder, it is the original that lands there.
     draggable: "true",
     onpointerdown: () => prepareTrayDrag(item),
+    // (only while it is shown whole: a close-up is dragged about instead, gallery_look_zoom.js)
     ondragstart: (event) => startTrayDrag(event, item, [item.md5]),
     onload: () => {
       if (app.gallery.detail?.notice === "正在向腾讯取原图…") {
@@ -361,7 +362,7 @@ const galleryDetailImage = (detail) => {
       }
     },
     onerror: () => galleryDetailPatch(item.md5, { notice: "这张图暂时打不开：QQ 没在运行时拿不到图片钥匙。" }),
-  });
+  }), item.md5);
 };
 
 const galleryDetailOverlay = (detail) => {

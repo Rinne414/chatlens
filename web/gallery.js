@@ -580,6 +580,8 @@ const galleryTile = (item, index) => {
   tile.dataset.md5 = item.md5;
   // The frame the arrow keys move, and the tint of a Shift range (gallery_cursor.js).
   markGalleryTile(tile, item, index);
+  // The browser's own tooltip would sit on the picture; who sent it is in the caption.
+  tile.querySelector(".wall-open")?.removeAttribute("title");
   // Dragged onto a 存图文件夹, or (one picture) out to the desktop or a folder.
   tile.draggable = true;
   tile.addEventListener("pointerdown", () => prepareTrayDrag(item));
